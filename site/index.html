@@ -80,7 +80,7 @@
     <template data-card="courier">
       <div data-state="ask">
         <p class="card-ask">Run this command?</p>
-        <p class="command">git push --force origin main</p>
+        <p class="command">git push --force-with-lease origin main</p>
         <p class="why">force push to a shared branch</p>
         <div class="buttons">
           <button type="button" class="pill primary" data-action="allow">Allow</button>
@@ -89,7 +89,7 @@
         </div>
       </div>
       <div data-state="allowed" hidden>
-        <p class="quiet-line"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>You allowed <code>git push --force origin main</code></p>
+        <p class="quiet-line"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>You allowed <code>git push --force-with-lease origin main</code></p>
         <p class="card-text">Pushed. The release branch is up to date.</p>
       </div>
       <div data-state="denied" hidden>
@@ -112,11 +112,11 @@
     <template data-card="ember">
       <div data-state="woke">
         <p class="card-text">Dozing: it hasn't had anything to do for a while. A tap wakes it for a minute.</p>
-        <p class="quiet-line">Morning digest · Every day at 7:00 AM</p>
+        <p class="quiet-line">Morning brief · Every day at 7:00 AM</p>
         <button type="button" class="pill secondary" data-action="run">Run now</button>
       </div>
       <div data-state="running" hidden>
-        <p class="quiet-line"><span class="spin" aria-hidden="true"></span>Routine "Morning digest" is running</p>
+        <p class="quiet-line"><span class="spin" aria-hidden="true"></span>Routine "Morning brief" is running</p>
       </div>
     </template>
 
@@ -154,11 +154,11 @@
           <div class="ask-stack">
             <div class="card ask">
               <p class="card-ask">Run this command?</p>
-              <p class="command">git push origin main</p>
+              <p class="command">git push --force-with-lease origin main</p>
               <div class="buttons"><span class="pill primary allow">Allow</span><span class="pill secondary">Deny</span></div>
             </div>
             <div class="folded">
-              <p class="quiet-line"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>You allowed <code>git push origin main</code></p>
+              <p class="quiet-line"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>You allowed <code>git push --force-with-lease origin main</code></p>
               <p class="reply">Pushed.</p>
             </div>
           </div>
