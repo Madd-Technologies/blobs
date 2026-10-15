@@ -15,7 +15,7 @@ import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { Screen } from '@/components/ui/Screen'
 import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
-import { motionFor } from '@/features/face/motion'
+import { isDozing, motionFor } from '@/features/face/motion'
 import { afterSheetCloses } from '@/lib/afterSheet'
 import { toolsetsLine } from '@/lib/hermes/toolsets'
 import { useToolsets } from '@/stores/toolsets'
@@ -119,7 +119,7 @@ export default function BotDetails() {
         </View>
         <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
           <View style={styles.hero}>
-            <TapFace name={profile} meta={view?.meta} size={88} motion={motionFor({ needsYou: view?.attention.state === 'needsYou', working: view?.attention.state === 'working' })} />
+            <TapFace name={profile} meta={view?.meta} size={88} motion={motionFor({ needsYou: view?.attention.state === 'needsYou', working: view?.attention.state === 'working', dozing: isDozing(view?.lastActive) })} />
             <T variant="title" style={[styles.centered, styles.name]} accessibilityRole="header">
               {name}
             </T>

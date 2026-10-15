@@ -99,20 +99,31 @@ interface Layers {
   eyeLine: number
 }
 
-function LiveFace({ layers, size, motion, poke }: { layers: Layers; size: number; motion: FaceMotion; poke: number }) {
+function LiveFace({ layers, size, motion, poke, reduced }: { layers: Layers; size: number; motion: FaceMotion; poke: number; reduced: boolean }) {
   const blink = useSharedValue(1)
   const squint = useSharedValue(1)
-  const eyeScale = useSharedValue(1)
+  const eyeScale = useSharedValue(motion === 'doze' ? MOTIONS.doze.eyes : 1)
   const glance = useSharedValue(0)
   const breath = useSharedValue(0)
   const hop = useSharedValue(0)
   const squish = useSharedValue(0)
   const spec = motion === 'still' ? null : MOTIONS[motion]
   const previous = useRef<FaceMotion>(motion)
+  // Read by the press effect, which should run on a new press only, not when the motion changes.
+  const motionRef = useRef<FaceMotion>(motion)
 
-  // The motion's loops: glance, breathing, hops, eye size.
   useEffect(() => {
-    eyeScale.set(withTiming(spec?.eyes ?? 1, { duration: 250 }))
+    motionRef.current = motion
+  }, [motion])
+
+  // The motion's loops: glance, breathing, hops, eye size. Under Reduce Motion only the eye size changes, at once.
+  useEffect(() => {
+    if (reduced) {
+      eyeScale.set(spec?.eyes ?? 1)
+      return
+    }
+
+    eyeScale.set(withTiming(spec?.eyes ?? 1, { duration: motion === 'doze' ? 600 : 250 }))
 
     if (spec?.glance) {
       const { period } = spec.glance
@@ -149,11 +160,11 @@ function LiveFace({ layers, size, motion, poke }: { layers: Layers; size: number
         value.set(withTiming(0, { duration: 200 }))
       }
     }
-  }, [spec, eyeScale, glance, breath, hop])
+  }, [spec, motion, reduced, eyeScale, glance, breath, hop])
 
   // Blinks at random gaps, from the JS side: they are rare, and a fixed rhythm looks mechanical.
   useEffect(() => {
-    if (!spec?.blink) {
+    if (!spec?.blink || reduced) {
       return
     }
 
@@ -168,26 +179,35 @@ function LiveFace({ layers, size, motion, poke }: { layers: Layers; size: number
     schedule()
 
     return () => clearTimeout(timer)
-  }, [spec, blink])
+  }, [spec, reduced, blink])
 
   // A turn just finished: a happy squint and a little bounce.
   useEffect(() => {
-    if (previous.current === 'work' && motion !== 'work' && motion !== 'needs') {
+    if (!reduced && previous.current === 'work' && motion !== 'work' && motion !== 'needs') {
       const { squint: amount, duration } = REACTIONS.done
       squint.set(withSequence(withTiming(amount, { duration: duration * 0.18 }), withDelay(duration * 0.5, withTiming(1, { duration: duration * 0.32 }))))
       hop.set(withSequence(withTiming(REACTIONS.done.bounce / 0.1, { duration: 140 }), withTiming(0, { duration: 220 })))
     }
 
     previous.current = motion
-  }, [motion, squint, hop])
+  }, [motion, reduced, squint, hop])
 
-  // A press: squish and blink.
+  // A press: squish and blink. A dozing face also opens its eyes, stays awake a while, then nods off again.
   useEffect(() => {
-    if (poke > 0) {
+    if (poke <= 0) {
+      return
+    }
+
+    if (!reduced) {
       squish.set(withSequence(withTiming(REACTIONS.poke.squish, { duration: REACTIONS.poke.duration * 0.3 }), withSpring(0, { damping: 12, stiffness: 320 })))
       blink.set(withSequence(withTiming(0.1, { duration: 70 }), withTiming(1, { duration: 130 })))
     }
-  }, [poke, squish, blink])
+
+    if (motionRef.current === 'doze') {
+      const shut = MOTIONS.doze.eyes
+      eyeScale.set(reduced ? withSequence(withTiming(1, { duration: 0 }), withDelay(REACTIONS.wake.duration, withTiming(shut, { duration: 0 }))) : withSequence(withTiming(1, { duration: 250 }), withDelay(REACTIONS.wake.duration, withTiming(shut, { duration: 900 }))))
+    }
+  }, [poke, reduced, squish, blink, eyeScale])
 
   const bobAmount = spec?.bob?.amount ?? 0
   const hopAmount = spec?.hop?.amount ?? 0.1
@@ -232,7 +252,8 @@ export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'id
   // An unrenderable blobatar falls back to the name's classic shape, like Desktop's older SDKs.
   const classic = isBlobShape(shape) ? botAppearance(name, { ...meta, shape: undefined }).shape : shape
   const face = useMemo(() => buildFace(classic, color, name, mood), [classic, color, name, mood])
-  const live = !reduced && (motion !== 'still' || poke > 0)
+  // A dozing face is drawn live even under Reduce Motion: its shut eyes are a state, not an animation.
+  const live = (!reduced && (motion !== 'still' || poke > 0)) || motion === 'doze'
   const parts = useMemo(() => (live && blob ? splitBlob(blob) : null), [live, blob])
 
   if (!live) {
@@ -264,7 +285,7 @@ export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'id
 
   return (
     <View aria-hidden style={{ width: size, height: size }}>
-      <LiveFace layers={layers} size={size} motion={motion} poke={poke} />
+      <LiveFace layers={layers} size={size} motion={motion} poke={poke} reduced={!!reduced} />
     </View>
   )
 })
