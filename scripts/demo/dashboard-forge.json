@@ -1,0 +1,10 @@
+{
+  "views": [
+    {"id": "build", "title": "Build", "kind": "stat",
+     "config": {"metrics": [
+       {"label": "Tests passing", "value": "214"},
+       {"label": "Build time", "value": "2.4 s", "change": "-0.6 s"},
+       {"label": "Browsers", "value": "3"}
+     ]}}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "storefront",
+  "version": "1.4.0",
+  "private": true,
+  "description": "A small online shop: catalog, cart and checkout.",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "test": "node scripts/test.mjs",
+    "test:browsers": "node scripts/test.mjs --browsers"
+  }
+}

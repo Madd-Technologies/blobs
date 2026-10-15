@@ -78,7 +78,12 @@
     "build:mermaid": "node scripts/build-mermaid.mjs",
     "postinstall": "patch-package",
     "build:pdfjs": "node scripts/build-pdfjs.mjs",
-    "build:site": "node scripts/build-site.mjs"
+    "build:site": "node scripts/build-site.mjs",
+    "demo:start": "scripts/demo/demo.sh start",
+    "demo:stop": "scripts/demo/demo.sh stop",
+    "demo:reset": "scripts/demo/demo.sh reset",
+    "demo:status": "scripts/demo/demo.sh status",
+    "demo:password": "scripts/demo/demo.sh password"
   },
   "private": true
 }

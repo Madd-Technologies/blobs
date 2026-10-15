@@ -88,7 +88,8 @@ Two ids exist for every session. Do not mix them up:
 - `session.active_list {}` → `{sessions: [{id (live), session_key (stored), status, current, model, last_active,
   started_at, message_count, preview, title}]}` (verified). There is **no profile field**: map rows to bots by
   matching `session_key` / `id` against each roster row's `canonical_session.id` / `resolved_id`. `status` is
-  `idle | starting | working | waiting`; `waiting` means clarify, sudo or secret, **not** approvals.
+  `idle | starting | working | waiting`; `waiting` means clarify, sudo or secret on older servers, and on 0.21.6 also
+  a held approval (found on the demo Hermes), so the inbox asks `approval.pending` for both `working` and `waiting`.
 - Bot Chat: open `canonical_session.resolved_id || id`. If a bot has none: `session.list {profile, title:'Bot
   Chat', include_hidden:true}`, else `session.create {profile, title:'Bot Chat', hidden:true,
   follow_profile_config:true}` then `session.title`. *Source.*

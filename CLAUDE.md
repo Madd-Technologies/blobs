@@ -10,6 +10,8 @@ Published by Madd Technologies LLC under the MIT licence.
 - `docs/protocol.md`: the Hermes dashboard protocol as the app uses it. When adding any RPC or event, read the upstream
   contract at the server's release tag in `NousResearch/hermes-agent`, not old captures.
 - `docs/DEVELOPMENT.md`: setup, the local dev server and fake model, smoke tests, checks.
+- `docs/DEMO.md`: the demo Hermes (fictional bots, scripted model) that every screenshot, video and App Review sign-in
+  is made against. Never film or screenshot a real server.
 - `AGENTS.md`: Expo rules.
 - Machine-specific or personal notes (your server, devices, simulators) go in `CLAUDE.local.md`, which is git-ignored.
   Never put them in this file or anywhere else in the repo.

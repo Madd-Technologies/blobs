@@ -1,0 +1,28 @@
+{
+  "collection": {
+    "id": "hosting-plans",
+    "title": "Hosting plans",
+    "description": "The three plans for the new site",
+    "fields": [
+      {"key": "name", "label": "Plan", "type": "text", "required": true},
+      {"key": "price", "label": "Price", "type": "text"},
+      {"key": "support", "label": "Support", "type": "text"},
+      {"key": "storage", "label": "Storage", "type": "text"}
+    ]
+  },
+  "records": [
+    {"source_key": "basic", "values": {"name": "Basic", "price": "$5/mo", "support": "Email, 2 days", "storage": "10 GB"}},
+    {"source_key": "plus", "values": {"name": "Plus", "price": "$12/mo", "support": "Chat, 1 hour", "storage": "50 GB"}},
+    {"source_key": "pro", "values": {"name": "Pro", "price": "$29/mo", "support": "Phone, 24/7", "storage": "250 GB"}}
+  ],
+  "views": [
+    {"id": "research", "title": "Research", "kind": "stat",
+     "config": {"metrics": [
+       {"label": "Plans compared", "value": "3"},
+       {"label": "Cheapest", "value": "$5/mo"},
+       {"label": "Sources read", "value": "12"}
+     ]}},
+    {"id": "plans", "title": "Hosting plans", "kind": "table", "collection": "hosting-plans",
+     "config": {"columns": ["name", "price", "support", "storage"]}}
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "collection": {
+    "id": "requests",
+    "title": "Requests",
+    "description": "What customers asked the shop for this week",
+    "fields": [
+      {"key": "title", "label": "Request", "type": "text", "required": true},
+      {"key": "from_name", "label": "From", "type": "text"},
+      {"key": "received", "label": "Received", "type": "date", "required": true},
+      {"key": "status", "label": "Status", "type": "status", "stages": [{"name": "New"}, {"name": "Doing"}, {"name": "Done", "done": true}]},
+      {"key": "notes", "label": "Notes", "type": "longtext"}
+    ],
+    "feed": {"how": "script", "every": "15m"}
+  },
+  "records": [
+    {"source_key": "req-1", "values": {"title": "Refund for a chipped mug", "from_name": "Mia", "received": "DAY-6", "status": "Done"}},
+    {"source_key": "req-2", "values": {"title": "Change the delivery address", "from_name": "Theo", "received": "DAY-6", "status": "Done"}},
+    {"source_key": "req-3", "values": {"title": "Invoice copy for order 1042", "from_name": "Priya", "received": "DAY-5", "status": "Done"}},
+    {"source_key": "req-4", "values": {"title": "Late order, placed last Monday", "from_name": "Sam", "received": "DAY-4", "status": "New", "notes": "Tracking has not moved since it left the warehouse."}},
+    {"source_key": "req-5", "values": {"title": "Refund for a double charge", "from_name": "Jonas", "received": "DAY-3", "status": "Doing"}},
+    {"source_key": "req-6", "values": {"title": "Gift wrap for order 1077", "from_name": "Lena", "received": "DAY-2", "status": "Doing"}},
+    {"source_key": "req-7", "values": {"title": "Invoice with a company name", "from_name": "Omar", "received": "DAY-1", "status": "New"}},
+    {"source_key": "req-8", "values": {"title": "Swap a size M for an L", "from_name": "Ada", "received": "DAY-1", "status": "Doing"}},
+    {"source_key": "req-9", "values": {"title": "Late order, still not shipped", "from_name": "Ravi", "received": "DAY-0", "status": "New"}},
+    {"source_key": "req-10", "values": {"title": "Discount for 40 mugs", "from_name": "Nora", "received": "DAY-0", "status": "New"}}
+  ],
+  "views": [
+    {"id": "open-requests", "title": "Open requests", "kind": "number", "collection": "requests", "config": {"aggregate": {"op": "count"}}},
+    {"id": "requests-per-day", "title": "Requests per day", "kind": "chart", "collection": "requests",
+     "config": {"aggregate": {"op": "count"}, "field": "received", "bucket": "day", "count": 7, "style": "bar", "filter": null}},
+    {"id": "requests-board", "title": "Requests", "kind": "board", "collection": "requests",
+     "config": {"group_by": "status", "show": {"title": "title", "subtitle": "from_name", "meta": "received"},
+                "needs_you": {"all": [{"field": "status", "op": "eq", "value": "New"}, {"field": "received", "op": "older_than_days", "value": 2}]}}}
+  ]
+}
