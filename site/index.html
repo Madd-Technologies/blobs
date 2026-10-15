@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blobs: a Hermes Agent client</title>
+  <meta name="description" content="Blobs is a mobile app for Hermes Agent. Watch your bots work, answer approvals and questions, and take over a bot's screen, all from your phone.">
+  <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FAFAFA" media="(prefers-color-scheme: light)">
+  <meta property="og:title" content="Blobs: a Hermes Agent client">
+  <meta property="og:description" content="Your Hermes Agent bots on your phone: live tool steps, approvals, a Needs you inbox and their screen.">
+  <meta property="og:url" content="https://blobs.maddtechnologies.com/">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="fonts/Geist_400Regular.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="wrap top">
+    <a class="brand" href="./"><img src="favicon.svg" alt="">Blobs</a>
+    <nav aria-label="Site">
+      <a href="#connect">Set up</a>
+      <a href="https://github.com/Madd-Technologies/blobs">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="wrap hero">
+      <img class="faces" src="assets/blobs.svg" width="612" height="112" alt="Five bot faces, one with an amber dot that means it is waiting for you">
+      <!-- Keep the headline and the line under it in step with the README's first lines. -->
+      <h1>Your agents, in your pocket.</h1>
+      <p class="lede">Blobs is a mobile app for Hermes Agent. Watch your bots work, answer them when they need you, and take over their screen when it's quicker to do it yourself.</p>
+      <div class="actions">
+        <a class="pill primary" href="#get">Join the beta</a>
+        <a class="quiet-link" href="https://github.com/Madd-Technologies/blobs">Source on GitHub</a>
+      </div>
+    </div>
+
+    <section class="wide" aria-labelledby="moments-title">
+      <div class="moments-head">
+        <h2 id="moments-title">Built for the moments a bot needs you</h2>
+        <p class="section-lede">Hermes bots work on their own for hours. Blobs keeps the quiet parts quiet and brings you in only when it's your turn.</p>
+      </div>
+
+      <div class="moments">
+        <figure>
+          <div class="stage" role="img" aria-label="A chat: you ask a bot to clear the build cache and run the tests; two finished steps and one running step follow, one line each">
+            <div class="bubble">Clear the build cache and run the tests</div>
+            <div class="reply">On it.</div>
+            <div class="steps">
+              <div class="step"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Read package.json<span class="time">0.2s</span></div>
+              <div class="step"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Ran npm run clean<span class="time">1.4s</span></div>
+              <div class="step"><span class="spinner" aria-hidden="true"></span>Running npm test</div>
+            </div>
+          </div>
+          <figcaption>
+            <h3>See every step</h3>
+            <p>Each tool call is one quiet line, live as it happens. Tap one to read its output.</p>
+          </figcaption>
+        </figure>
+
+        <figure>
+          <div class="stage" role="img" aria-label="An approval card from Courier: run git push --force origin main? Allow, Deny, more">
+            <div class="card">
+              <div class="who"><img src="assets/face-2.svg" alt="">Courier<span class="when">now</span></div>
+              <p class="ask">Run this command?</p>
+              <pre class="command">git push --force origin main</pre>
+              <p class="why">force push to a shared branch</p>
+              <div class="buttons">
+                <span class="pill primary">Allow</span>
+                <span class="pill secondary">Deny</span>
+                <span class="pill secondary more">···</span>
+              </div>
+            </div>
+          </div>
+          <figcaption>
+            <h3>Answer from anywhere</h3>
+            <p>Approvals and questions arrive as a card. Allow, deny, pick an option or reply in your own words.</p>
+          </figcaption>
+        </figure>
+
+        <figure>
+          <div class="stage" role="img" aria-label="Home: three bots, Courier marked as waiting; a row saying 2 things need you, from Courier and Scout">
+            <div class="crowd">
+              <span><img src="assets/face-1.svg" alt="">Scout<i class="dot"></i></span>
+              <span><img src="assets/face-2.svg" alt="">Courier<i class="dot"></i></span>
+              <span><img src="assets/face-3.svg" alt="">Forge</span>
+            </div>
+            <div class="needs"><span class="dot"></span>2 things need you<span class="names">Courier, Scout</span></div>
+            <div class="roster">
+              <div><img src="assets/face-3.svg" alt=""><b>Forge</b><small>Working…</small></div>
+              <div><img src="assets/face-4.svg" alt=""><b>Scribe</b><small>Summed up the release notes</small></div>
+            </div>
+          </div>
+          <figcaption>
+            <h3>Know what's waiting</h3>
+            <p>Needs you gathers every approval and question, from every bot, in one place.</p>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="wrap" aria-labelledby="features-title">
+      <h2 id="features-title">What it does</h2>
+      <ul class="features">
+        <li><b>Your bots</b><span>Every bot on your server, with its face, what it's doing and its last word.</span></li>
+        <li><b>Live tool activity</b><span>Commands, file reads and output, step by step while a turn runs.</span></li>
+        <li><b>Approvals and questions</b><span>Allow a command, choose an option or reply, without opening a laptop.</span></li>
+        <li><b>Needs you</b><span>One inbox for everything waiting on you, across every bot.</span></li>
+        <li><b>Take over the screen</b><span>Watch a bot's desktop live, and take the keyboard and mouse when it's stuck.</span></li>
+        <li><b>Rooms</b><span>Put several bots in one conversation and @mention who should answer.</span></li>
+        <li><b>Routines and dashboards</b><span>The jobs each bot runs on a schedule, and panels it keeps up to date for you.</span></li>
+        <li><b>Files, voice and more</b><span>Photos, PDFs and voice memos in; math, diagrams and documents out; replies read aloud.</span></li>
+      </ul>
+    </section>
+
+    <section class="wrap" id="connect" aria-labelledby="connect-title">
+      <h2 id="connect-title">Your server, nothing in between</h2>
+      <p class="section-lede">Blobs talks straight to your own Hermes Agent, the same <code>hermes dashboard</code> that serves Hermes's web dashboard. There's no Blobs server, no account with us and no analytics.</p>
+      <ol class="how">
+        <li>
+          <p>On the machine that runs Hermes, start the dashboard on an address your phone can reach. A Tailscale address keeps it private to your own devices. The first time, Hermes asks you to choose a username and password.</p>
+          <pre>hermes dashboard --no-open --host 100.x.y.z --port 9119</pre>
+        </li>
+        <li>
+          <p>Open Blobs, enter <code>http://100.x.y.z:9119</code> and sign in. Your phone keeps the session in its keychain, never the password.</p>
+        </li>
+      </ol>
+      <p class="note">Tested with Hermes Agent 0.21.5 and 0.21.6. Taking over a screen needs a Linux host with Bot Screen. Push notifications on Android, dashboards, Paperless and Google Drive come from optional <a href="https://github.com/Madd-Technologies/blobs-hermes-bot-plugins">server plugins</a>.</p>
+    </section>
+
+    <section class="wrap" id="get" aria-labelledby="get-title">
+      <h2 id="get-title">Get the beta</h2>
+      <p class="section-lede">Blobs is in beta on both platforms. It's free.</p>
+      <div class="list">
+        <div><span>iPhone and iPad</span><span class="value">TestFlight · opening soon</span></div>
+        <div><span>Android</span><span class="value">Google Play · opening soon</span></div>
+        <a href="https://github.com/Madd-Technologies/blobs"><span>Source code</span><span class="value">GitHub, MIT licence</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    <nav aria-label="Footer">
+      <a href="privacy.html">Privacy</a>
+      <a href="https://github.com/Madd-Technologies/blobs/issues">Support</a>
+      <a href="mailto:info@maddtechnologies.com">info@maddtechnologies.com</a>
+      <a href="https://github.com/Madd-Technologies/blobs">Source</a>
+      <a href="https://github.com/Madd-Technologies/blobs/blob/main/LICENSE">MIT licence</a>
+    </nav>
+    <p>Blobs is an independent app made by Madd Technologies LLC. It is not affiliated with or endorsed by Nous Research. Hermes Agent is an open-source project by <a href="https://github.com/NousResearch/hermes-agent">Nous Research</a>.</p>
+    <p>© 2026 Madd Technologies LLC</p>
+  </footer>
+</body>
+</html>

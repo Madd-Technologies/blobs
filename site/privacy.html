@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy · Blobs</title>
+  <meta name="description" content="Blobs collects nothing. It talks only to the Hermes Agent server you connect it to.">
+  <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FAFAFA" media="(prefers-color-scheme: light)">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="wrap top">
+    <a class="brand" href="./"><img src="favicon.svg" alt="">Blobs</a>
+    <nav aria-label="Site">
+      <a href="./#connect">Set up</a>
+      <a href="https://github.com/Madd-Technologies/blobs">GitHub</a>
+    </nav>
+  </header>
+
+  <!-- Keep every statement here in step with what the app does. -->
+  <main class="wrap doc">
+    <h1>Privacy</h1>
+    <p class="updated">Last updated 14 October 2026</p>
+
+    <p class="summary">Blobs collects nothing. There is no Blobs account, no analytics, no ads and no tracking, and Madd Technologies runs no server that your data passes through. The app talks only to the Hermes Agent server you connect it to.</p>
+
+    <h2>What Blobs sends, and where</h2>
+    <p>Everything you do in Blobs goes to the Hermes Agent server whose address you enter: your messages, the photos, files and voice memos you choose to send, your answers to approvals and questions, and your keyboard and mouse input when you take over a bot's screen. That server belongs to you or to someone you trust. It may pass your messages on to the AI model provider it is set up to use, under that provider's terms. Madd Technologies never receives any of it.</p>
+
+    <h2>What stays on your phone</h2>
+    <ul>
+      <li>The server's address and your username.</li>
+      <li>Your sign-in session, kept in the phone's secure storage (the iOS Keychain or the Android Keystore). Your password is never stored.</li>
+      <li>Preferences, and which chats and items you've already seen.</li>
+    </ul>
+    <p>Signing out removes the session. Deleting the app removes everything.</p>
+
+    <h2>Notifications</h2>
+    <p>On Android, if you turn notifications on, your Hermes server sends them through UnifiedPush and a distributor app you choose, such as ntfy, which delivers them under its own terms. Blobs doesn't use Google's Firebase messaging, and nothing passes through Madd Technologies. Your phone registers with your server so it can be reached. While notifications are on, the app also tells your server which chat you have open, so you aren't notified about something you're already looking at. On iPhone and iPad, Blobs doesn't offer notifications yet.</p>
+
+    <h2>Permissions</h2>
+    <ul>
+      <li><b>Microphone:</b> only while you record a voice memo to send.</li>
+      <li><b>Camera and photos:</b> only when you take or choose a picture to send.</li>
+    </ul>
+
+    <h2>Links to other apps</h2>
+    <p>Some things open outside Blobs, such as a Google Drive document in Google's own app. Those apps follow their own privacy policies.</p>
+
+    <h2>Children</h2>
+    <p>Blobs is not directed at children under 13.</p>
+
+    <h2>Changes</h2>
+    <p>If this changes, for example if Blobs ever shows a sponsor or offers a purchase, this page will say exactly what is new, and the date at the top will change.</p>
+
+    <h2>Contact</h2>
+    <p>Blobs is published by Madd Technologies LLC. Questions go to <a href="mailto:info@maddtechnologies.com">info@maddtechnologies.com</a> or <a href="https://github.com/Madd-Technologies/blobs/issues">GitHub Issues</a>.</p>
+  </main>
+
+  <footer class="wrap">
+    <nav aria-label="Footer">
+      <a href="./">Home</a>
+      <a href="https://github.com/Madd-Technologies/blobs/issues">Support</a>
+      <a href="https://github.com/Madd-Technologies/blobs">Source</a>
+    </nav>
+    <p>© 2026 Madd Technologies LLC</p>
+  </footer>
+</body>
+</html>

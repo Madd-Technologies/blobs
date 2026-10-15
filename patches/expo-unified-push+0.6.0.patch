@@ -1,0 +1,20 @@
+diff --git a/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/ExpoUPService.kt b/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/ExpoUPService.kt
+index e417a22..60b9365 100644
+--- a/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/ExpoUPService.kt
++++ b/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/ExpoUPService.kt
+@@ -80,7 +80,14 @@ class ExpoUPService : PushService() {
+ 
+         val module = _module
+         if (module != null) {
+-            module.sendEvent("message", payload)
++            // HermesBot patch: once the app's JS runtime is torn down (a reload, or the activity gone while this process
++            // lives on), the module kept here is stale and sendEvent throws, which crashed the app in the background and,
++            // from onMessage, before the notification was shown. Drop the event: the app registers again when it starts.
++            try {
++                module.sendEvent("message", payload)
++            } catch (err: IllegalArgumentException) {
++                Log.w(TAG, "dropping \"$action\" event, the expo module is gone: $err")
++            }
+         } else {
+             Log.e(TAG, "sendPushEvent called without a reference to the expo module")
+         }

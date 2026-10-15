@@ -1,0 +1,234 @@
+/* Blobs landing page. Colors and type follow the app's tokens (src/theme/tokens.ts): monochrome paper, color only from
+   the faces and one amber "needs you", Geist with Geist Mono for commands, dark by default. */
+
+@font-face { font-family: 'Geist'; src: url('fonts/Geist_400Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('fonts/Geist_500Medium.ttf') format('truetype'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('fonts/Geist_600SemiBold.ttf') format('truetype'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('fonts/Geist_700Bold.ttf') format('truetype'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('fonts/GeistMono_400Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+
+:root {
+  color-scheme: dark;
+  --canvas: #0A0A0A;
+  --sheet: #141416;
+  --tone: #1C1C1F;
+  --raised: #262629;
+  --edge: #38383C;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --pressed: #141416;
+  --track: #38383C;
+  --separator: #1C1C1F;
+  --text: #F4F4F5;
+  --text2: #8E8E93;
+  --amber: #FFB020;
+  --amber-text: #FFB020;
+  --primary: #F4F4F5;
+  --on-primary: #0A0A0A;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --canvas: #FAFAFA;
+    --sheet: #F1F1F2;
+    --tone: #E6E6E8;
+    --raised: #FFFFFF;
+    --edge: #FFFFFF;
+    --shadow: 0 1px 2px rgba(20, 20, 24, 0.08), 0 8px 24px rgba(20, 20, 24, 0.10);
+    --pressed: #F3F3F4;
+    --track: #D7D6D7;
+    --separator: #E6E6E8;
+    --text: #0A0A0A;
+    --text2: #6E6E73;
+    --amber: #F59E0B;
+    --amber-text: #B45309;
+    --primary: #0A0A0A;
+    --on-primary: #FFFFFF;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text);
+  font: 400 17px/1.55 'Geist', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: inherit; text-decoration-color: var(--text2); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--text); }
+:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; border-radius: 6px; }
+
+code, pre { font-family: 'Geist Mono', ui-monospace, monospace; }
+code { font-size: 0.86em; background: var(--tone); padding: 2px 6px; border-radius: 6px; }
+
+.wrap { max-width: 760px; margin: 0 auto; padding-inline: 16px; }
+.wide { max-width: 1080px; margin: 0 auto; padding-inline: 16px; }
+
+/* Header */
+.top { display: flex; align-items: center; justify-content: space-between; padding-top: 20px; padding-bottom: 20px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; text-decoration: none; }
+.brand img { width: 28px; height: 28px; }
+.top nav { display: flex; gap: 20px; font-size: 15px; }
+.top nav a { color: var(--text2); text-decoration: none; }
+.top nav a:hover { color: var(--text); }
+
+/* Hero */
+.hero { text-align: center; padding-top: 56px; padding-bottom: 72px; }
+.hero .faces { width: min(100%, 420px); height: auto; }
+.hero h1 {
+  margin: 36px auto 0;
+  max-width: 15ch;
+  font-size: clamp(36px, 7vw, 56px);
+  line-height: 1.06;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+}
+.lede { margin: 20px auto 0; max-width: 33em; color: var(--text2); font-size: 19px; line-height: 1.5; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: center; align-items: center; margin-top: 32px; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 22px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pill.primary { background: var(--primary); color: var(--on-primary); }
+.pill.secondary { background: var(--pressed); color: var(--text); }
+.quiet-link { color: var(--text2); font-size: 15px; font-weight: 500; text-decoration: none; }
+.quiet-link:hover { color: var(--text); }
+
+/* Sections */
+section { padding-top: 56px; padding-bottom: 56px; }
+h2 { margin: 0; font-size: clamp(26px, 4vw, 32px); line-height: 1.15; letter-spacing: -0.02em; font-weight: 600; }
+.section-lede { margin: 12px 0 0; color: var(--text2); max-width: 36em; }
+
+/* App moments, drawn with the app's own tokens */
+.moments-head { max-width: 760px; margin: 0 auto; text-align: center; }
+.moments-head .section-lede { margin-inline: auto; }
+.moments { display: grid; gap: 32px; margin-top: 40px; }
+@media (min-width: 900px) { .moments { grid-template-columns: repeat(3, 1fr); gap: 24px; } }
+.moments figure { margin: 0; }
+.stage {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  min-height: 300px;
+  padding: 24px 20px;
+  background: var(--sheet);
+  border-radius: 28px;
+  font-size: 15px;
+  line-height: 21px;
+}
+.moments figcaption { padding: 16px 4px 0; }
+.moments h3 { margin: 0; font-size: 17px; font-weight: 600; }
+.moments figcaption p { margin: 4px 0 0; color: var(--text2); font-size: 15px; line-height: 1.5; }
+
+.bubble { align-self: flex-end; max-width: 85%; padding: 10px 14px; background: var(--tone); border-radius: 18px; }
+.reply { color: var(--text); }
+.steps { display: flex; flex-direction: column; gap: 6px; }
+.step { display: flex; align-items: center; gap: 8px; color: var(--text2); font-size: 13px; line-height: 18px; }
+.step svg { flex: none; }
+.step .time { margin-left: auto; font-size: 12px; }
+.spinner {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1.6px solid var(--track);
+  border-top-color: var(--text2);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.card {
+  padding: 16px;
+  background: var(--raised);
+  border-radius: 22px;
+  box-shadow: inset 0 1px 0 var(--edge), var(--shadow);
+}
+.who { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.who img { width: 22px; height: 22px; }
+.who .when { margin-left: auto; color: var(--text2); font-size: 12px; font-weight: 400; }
+.card .ask { margin: 12px 0 10px; font-size: 16px; font-weight: 600; }
+.command { margin: 0; padding: 10px 12px; background: var(--pressed); border-radius: 8px; font-size: 13px; line-height: 19px; white-space: pre-wrap; }
+.card .why { margin: 8px 0 14px; color: var(--text2); font-size: 13px; }
+.buttons { display: flex; gap: 8px; }
+.buttons .pill { flex: 1; min-height: 40px; padding: 0 12px; }
+.buttons .more { flex: none; width: 40px; padding: 0; letter-spacing: 1px; }
+
+.crowd { display: flex; justify-content: center; gap: 22px; }
+.crowd span { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; }
+.crowd img { width: 44px; height: 44px; }
+.crowd .dot { position: absolute; top: 0; right: 0; width: 10px; height: 10px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: none; }
+.needs { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--tone); border-radius: 14px; }
+.needs .names { margin-left: auto; color: var(--text2); font-size: 13px; }
+.roster { display: flex; flex-direction: column; gap: 12px; }
+.roster div { display: grid; grid-template-columns: 32px 1fr; column-gap: 12px; align-items: center; }
+.roster img { width: 32px; height: 32px; grid-row: span 2; }
+.roster b { font-weight: 600; }
+.roster small { color: var(--text2); font-size: 13px; line-height: 18px; }
+
+/* Features */
+.features { display: grid; gap: 28px 40px; margin: 36px 0 0; padding: 0; list-style: none; }
+@media (min-width: 640px) { .features { grid-template-columns: 1fr 1fr; } }
+.features b { display: block; font-weight: 500; }
+.features span { color: var(--text2); font-size: 15px; line-height: 1.5; }
+
+/* Connect */
+.how { counter-reset: step; margin: 32px 0 0; padding: 0; list-style: none; display: grid; gap: 28px; }
+.how li { counter-increment: step; display: grid; grid-template-columns: 28px 1fr; column-gap: 8px; }
+.how li::before { content: counter(step); color: var(--text2); font-weight: 500; }
+.how p { margin: 0; }
+.how pre {
+  grid-column: 2;
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: var(--sheet);
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.note { margin: 28px 0 0; color: var(--text2); font-size: 15px; }
+
+/* Get it: a grouped list, like the app's Settings */
+.list { margin: 32px 0 0; background: var(--sheet); border-radius: 16px; overflow: hidden; }
+.list > * { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 16px; text-decoration: none; }
+.list > * + * { border-top: 1px solid var(--separator); }
+.list .value { margin-left: auto; color: var(--text2); font-size: 15px; text-align: right; }
+.list a:hover .value { color: var(--text); }
+
+/* Footer */
+footer { padding-top: 40px; padding-bottom: 56px; color: var(--text2); font-size: 14px; line-height: 1.6; }
+footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 16px; }
+footer nav a { text-decoration: none; }
+footer nav a:hover { color: var(--text); }
+footer p { margin: 0 0 6px; max-width: 46em; }
+
+/* Long-form pages (privacy) */
+.doc { padding-top: 32px; padding-bottom: 32px; }
+.doc h1 { margin: 0; font-size: clamp(32px, 6vw, 44px); line-height: 1.1; letter-spacing: -0.03em; font-weight: 700; }
+.doc .updated { margin: 8px 0 0; color: var(--text2); font-size: 15px; }
+.doc h2 { margin: 40px 0 0; font-size: 21px; letter-spacing: -0.01em; }
+.doc p, .doc li { color: var(--text); }
+.doc ul { padding-left: 20px; }
+.doc li + li { margin-top: 6px; }
+.summary { margin: 28px 0 0; padding: 18px 20px; background: var(--sheet); border-radius: 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

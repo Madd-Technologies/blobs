@@ -1,0 +1,372 @@
+import { useMemo } from 'react'
+import { create } from 'zustand'
+
+import { buildRoomViews, type RoomData, type RoomView } from '@/features/rooms/view'
+import { describeError, type RespondResult } from '@/features/sessions/store'
+import type { ActiveSessionRow, HostedRoom, RoomMember, RoomPendingAction } from '@/lib/hermes/protocol'
+import {
+  approveRoomAction,
+  createRoom,
+  disbandRoom,
+  listRooms,
+  mergeEvents,
+  readLog,
+  renameRoom,
+  retryRoomTask,
+  roomSessionTitle,
+  roomsAvailable,
+  roomState,
+  sendRoomMessage,
+  stopRoom,
+  whoIsReplying,
+} from '@/lib/hermes/rooms'
+import { getRoomActivity } from '@/lib/hermes/plugins'
+import { call } from '@/lib/hermes/rpc'
+import { startPoller } from '@/lib/poller'
+import { useNow } from '@/lib/useNow'
+import { gateway, useConnection } from '@/stores/connection'
+
+interface RoomsState {
+  /** Whether the server can run rooms (its worker is up). Null until asked. */
+  available: boolean | null
+  rooms: Record<string, RoomData | undefined>
+  /** At least one list has arrived. */
+  loaded: boolean
+  error: string | null
+  refresh: () => Promise<void>
+  refreshRoom: (id: string) => Promise<void>
+}
+
+/** On the first look at a room, start this far back from its newest event instead of replaying everything. */
+const FIRST_LOOK = 60
+
+/** Each room's member sessions (member id → ids), found once per member; one not made yet is looked for again later. */
+const roomSessions = new Map<string, Record<string, string[] | undefined>>()
+const lookedFor = new Map<string, number>()
+const LOOK_AGAIN_MS = 15_000
+
+/**
+ * The hidden session each member answers this room in (`Group: <room id>`, made on its first turn there). A member on another
+ * server, or one that has not answered yet, has none here: the log says who is replying then.
+ */
+async function memberSessions(room: HostedRoom): Promise<Record<string, string[] | undefined>> {
+  const title = roomSessionTitle(room.room_id)
+  const known = { ...roomSessions.get(room.room_id) }
+  const now = Date.now()
+
+  await Promise.all(
+    room.members.map(async member => {
+      const key = `${room.room_id}/${member.member_id}`
+
+      if (known[member.member_id]?.length || now - (lookedFor.get(key) ?? 0) < LOOK_AGAIN_MS) {
+        return
+      }
+
+      lookedFor.set(key, now)
+
+      try {
+        const { sessions } = await call(gateway, 'session.list', { profile: member.profile, title, include_hidden: true })
+        const ids = sessions.filter(session => !session.title || session.title === title).flatMap(session => (session.resolved_id ? [session.id, session.resolved_id] : [session.id]))
+
+        if (ids.length) {
+          known[member.member_id] = ids
+        }
+      } catch {
+        // Not a profile on this server; the log is enough.
+      }
+    }),
+  )
+
+  roomSessions.set(room.room_id, known)
+
+  return known
+}
+
+/** The server's live sessions, read once for every room that asks within a moment of each other. Null when it could not say. */
+let live: { at: number; rows: Promise<ActiveSessionRow[] | null> } | null = null
+
+function liveSessions(): Promise<ActiveSessionRow[] | null> {
+  if (!live || Date.now() - live.at > 1_500) {
+    live = { at: Date.now(), rows: call(gateway, 'session.active_list', {}).then(result => result.sessions, () => null) }
+  }
+
+  return live.rows
+}
+
+/**
+ * Reads one room's newest events and the server's view of its worker. Asks the server for the room's current state
+ * first: a copy fetched earlier would not say whether anything new has been logged since. While the room works, also which
+ * bots are replying.
+ */
+async function syncRoom(room: HostedRoom, previous: RoomData | undefined): Promise<RoomData> {
+  const state = await roomState(gateway, room.room_id)
+  const latest = state.room.latest_seq ?? 0
+  const since = previous && previous.cursor > 0 ? previous.cursor : Math.max(0, latest - FIRST_LOOK)
+  const page = !previous || latest > previous.cursor ? await readLog(gateway, room.room_id, since) : null
+  const events = page ? mergeEvents(previous?.events ?? [], page.events) : (previous?.events ?? [])
+  const status = state.driver_status ?? null
+  const replying = status?.working ? whoIsReplying(state.room, events, status, await memberSessions(state.room), await liveSessions()) : []
+  const sameReplying = (previous?.replying ?? []).join() === replying.join()
+  // What each busy bot is doing (hermes-bot-mobile's room activity), asked only while the room works.
+  const config = useConnection.getState().config
+  const activity = status?.working && config ? await getRoomActivity(config, state.room.room_id).catch(() => previous?.activity ?? null) : null
+  const found = Object.values(roomSessions.get(state.room.room_id) ?? {}).flatMap(ids => ids ?? [])
+  const sessions = previous?.sessions && previous.sessions.join() === found.join() ? previous.sessions : found
+  const unchanged =
+    previous &&
+    events === previous.events &&
+    sameReplying &&
+    sessions === previous.sessions &&
+    JSON.stringify(status) === JSON.stringify(previous.status) &&
+    JSON.stringify(state.room) === JSON.stringify(previous.room) &&
+    JSON.stringify(activity) === JSON.stringify(previous.activity ?? null)
+
+  return unchanged
+    ? previous
+    : { room: state.room, events, cursor: page ? Math.max(page.cursor, previous?.cursor ?? 0) : (previous?.cursor ?? 0), status, replying: sameReplying && previous?.replying ? previous.replying : replying, sessions, activity }
+}
+
+/** Rooms disbanded here: a list read that was already under way must not put one back. */
+const disbanded = new Set<string>()
+
+/**
+ * A copy of a room read from an older point in its log than the one held. The list (every 5 s) and the open room (every 2 s)
+ * read the same rooms, and the slower of two overlapping reads must not put back what the other had moved past.
+ */
+function staler(data: RoomData, held: RoomData | undefined): boolean {
+  return !!held && data.room.room_id === held.room.room_id && data.cursor < held.cursor
+}
+
+export const useRooms = create<RoomsState>((set, get) => {
+  let busy = false
+
+  const put = (id: string, data: RoomData) => {
+    const current = get().rooms[id]
+
+    if (current !== data && !staler(data, current)) {
+      set(state => ({ rooms: { ...state.rooms, [id]: data } }))
+    }
+  }
+
+  /** Rooms being read by the room screen's poll, so a slow read is not overlapped by the next one. */
+  const reading = new Set<string>()
+
+  return {
+    available: null,
+    rooms: {},
+    loaded: false,
+    error: null,
+
+    refresh: async () => {
+      if (busy || useConnection.getState().status !== 'online') {
+        return
+      }
+
+      busy = true
+
+      try {
+        if (get().available !== true) {
+          set({ available: await roomsAvailable(gateway) })
+        }
+
+        if (!get().available) {
+          set({ loaded: true })
+
+          return
+        }
+
+        const listed = await listRooms(gateway)
+        const known = get().rooms
+        const results = await Promise.all(
+          listed.map(async room => {
+            try {
+              return [room.room_id, await syncRoom(room, known[room.room_id])] as const
+            } catch {
+              return [room.room_id, known[room.room_id]] as const
+            }
+          }),
+        )
+        // The room screen may have read a room further while this ran: keep its copy then.
+        const now = get().rooms
+        const next: Record<string, RoomData | undefined> = {}
+        let changed = results.length !== Object.keys(now).length
+
+        for (const [id, data] of results) {
+          if (disbanded.has(id)) {
+            continue
+          }
+
+          next[id] = data && staler(data, now[id]) ? now[id] : data
+          changed = changed || now[id] !== next[id]
+        }
+
+        set(changed ? { rooms: next, loaded: true, error: null } : { loaded: true, error: null })
+      } catch (error) {
+        set({ error: describeError(error), loaded: true })
+      } finally {
+        busy = false
+      }
+    },
+
+    refreshRoom: async id => {
+      const current = get().rooms[id]
+
+      if (!current || reading.has(id) || useConnection.getState().status !== 'online') {
+        return
+      }
+
+      reading.add(id)
+
+      try {
+        put(id, await syncRoom(current.room, current))
+      } catch {
+        // The next poll tries again; the screen keeps what it has.
+      } finally {
+        reading.delete(id)
+      }
+    },
+  }
+})
+
+/** Polls every room every 5 s in the foreground, so Home shows who said what and which room needs you. */
+export function startRoomsSync(): () => void {
+  const stopPoll = startPoller(() => void useRooms.getState().refresh(), 5_000, () => useConnection.getState().status === 'online')
+  const stopConnection = useConnection.subscribe((state, previous) => {
+    if (state.status === 'online' && previous.status !== 'online') {
+      void useRooms.getState().refresh()
+    }
+  })
+
+  return () => {
+    stopPoll()
+    stopConnection()
+  }
+}
+
+/** One room, polled every 2 s while its screen is open (and the app is in front). */
+export function startRoomPoll(id: string): () => void {
+  return startPoller(() => void useRooms.getState().refreshRoom(id), 2_000, () => useConnection.getState().status === 'online')
+}
+
+/** Every room as a row, newest first. */
+export function useRoomViews(): RoomView[] {
+  const rooms = useRooms(state => state.rooms)
+  const now = useNow()
+
+  return useMemo(() => buildRoomViews(rooms, now), [rooms, now])
+}
+
+export function useRoomData(id: string): RoomData | undefined {
+  return useRooms(state => state.rooms[id])
+}
+
+// ── changes: each returns an error to show, or null when it worked ───────────────────────────────
+
+type Outcome = Promise<string | null>
+
+/** Makes a room of these bots and starts watching it. */
+export async function makeRoom(name: string, members: RoomMember[]): Promise<{ id: string } | { error: string }> {
+  try {
+    const room = await createRoom(gateway, name, members)
+    useRooms.setState(state => ({ rooms: { ...state.rooms, [room.room_id]: { room, events: [], cursor: 0, status: null } } }))
+    void useRooms.getState().refreshRoom(room.room_id)
+
+    return { id: room.room_id }
+  } catch (error) {
+    return { error: describeError(error) }
+  }
+}
+
+export async function sendToRoom(id: string, text: string): Outcome {
+  try {
+    const event = await sendRoomMessage(gateway, id, text)
+    const current = useRooms.getState().rooms[id]
+
+    if (current) {
+      useRooms.setState(state => ({ rooms: { ...state.rooms, [id]: { ...current, events: mergeEvents(current.events, [event]), cursor: Math.max(current.cursor, event.seq) } } }))
+    }
+
+    void useRooms.getState().refreshRoom(id)
+
+    return null
+  } catch (error) {
+    return describeError(error)
+  }
+}
+
+export async function stopRoomWork(id: string): Outcome {
+  try {
+    await stopRoom(gateway, id)
+    void useRooms.getState().refreshRoom(id)
+
+    return null
+  } catch (error) {
+    return describeError(error)
+  }
+}
+
+export async function answerRoomApproval(id: string, action: RoomPendingAction, choice: 'once' | 'deny'): Promise<RespondResult> {
+  try {
+    await approveRoomAction(gateway, id, action, choice)
+    void useRooms.getState().refreshRoom(id)
+
+    return 'answered'
+  } catch (error) {
+    void useRooms.getState().refreshRoom(id)
+
+    // Someone else answered it, or the turn ended, before this arrived.
+    return /no longer pending/i.test(describeError(error)) ? 'expired' : 'failed'
+  }
+}
+
+/** `who` names the bot whose reply this runs again, for the message if the server refuses. */
+export async function retryRoomWork(id: string, taskId: string, who = 'The bot'): Outcome {
+  try {
+    await retryRoomTask(gateway, id, taskId)
+    void useRooms.getState().refreshRoom(id)
+
+    return null
+  } catch (error) {
+    void useRooms.getState().refreshRoom(id)
+    const message = describeError(error)
+
+    // The first attempt is still running on the server: it may yet finish by itself.
+    if (/still active/i.test(message)) {
+      return `${who} is still finishing that reply. Try again in a minute.`
+    }
+
+    // Someone else retried it, or it settled, before this arrived: nothing is left to do.
+    return /no retryable room task/i.test(message) ? null : message
+  }
+}
+
+export async function renameRoomTo(id: string, name: string): Outcome {
+  try {
+    const room = await renameRoom(gateway, id, name)
+    const current = useRooms.getState().rooms[id]
+
+    if (current) {
+      useRooms.setState(state => ({ rooms: { ...state.rooms, [id]: { ...current, room } } }))
+    }
+
+    return null
+  } catch (error) {
+    return describeError(error)
+  }
+}
+
+export async function removeRoom(id: string): Outcome {
+  try {
+    await disbandRoom(gateway, id)
+    disbanded.add(id)
+    useRooms.setState(state => {
+      const { [id]: _gone, ...rest } = state.rooms
+
+      return { rooms: rest }
+    })
+
+    return null
+  } catch (error) {
+    return describeError(error)
+  }
+}
