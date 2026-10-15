@@ -14,7 +14,7 @@ import { Press } from '@/components/ui/Press'
 import { Raised } from '@/components/ui/Raised'
 import { Screen } from '@/components/ui/Screen'
 import { T } from '@/components/ui/T'
-import { motionFor } from '@/features/face/motion'
+import { isDozing, motionFor } from '@/features/face/motion'
 import { askAboutPanel, groupNumbers, updatedLine } from '@/features/dashboard/view'
 import { installMessage } from '@/features/plugins/catalog'
 import type { View as DashboardView } from '@/lib/hermes/dashboard'
@@ -102,7 +102,7 @@ export default function BotDashboard() {
         <View style={styles.header}>
           <IconCircle icon="chevron-left" label="Back" bare diameter={40} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
           <Press scale={0.98} accessibilityRole="button" accessibilityLabel={`${name}'s details`} onPress={openDetails} style={styles.identity}>
-            <BotFace name={profile} meta={view?.meta} size={30} mood={working ? 'work' : 'idle'} motion={motionFor({ needsYou: view?.attention.state === 'needsYou', working })} />
+            <BotFace name={profile} meta={view?.meta} size={30} mood={working ? 'work' : 'idle'} motion={motionFor({ needsYou: view?.attention.state === 'needsYou', working, dozing: isDozing(view?.lastActive) })} />
             <View style={styles.flex}>
               <T variant="heading" numberOfLines={1}>
                 {name}

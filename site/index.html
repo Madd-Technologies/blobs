@@ -12,111 +12,300 @@
   <meta property="og:url" content="https://blobs.maddtechnologies.com/">
   <meta property="og:type" content="website">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="preload" href="fonts/Geist_400Regular.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="preload" href="fonts/Geist_700Bold.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
 </head>
 <body>
+  <a class="skip" href="#main">Skip to content</a>
+
   <header class="wrap top">
     <a class="brand" href="./"><img src="favicon.svg" alt="">Blobs</a>
     <nav aria-label="Site">
-      <a href="#connect">Set up</a>
+      <a href="#scenes">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#plugins">Plugins</a>
       <a href="https://github.com/Madd-Technologies/blobs">GitHub</a>
+      <a class="pill secondary small" href="#get">Get the beta</a>
     </nav>
   </header>
 
-  <main>
-    <div class="wrap hero">
-      <img class="faces" src="assets/blobs.svg" width="612" height="112" alt="Five bot faces, one with an amber dot that means it is waiting for you">
+  <main id="main">
+    <section class="wrap hero" aria-labelledby="hero-title">
       <!-- Keep the headline and the line under it in step with the README's first lines. -->
-      <h1>Your agents, in your pocket.</h1>
+      <h1 id="hero-title">Your agents, in your pocket.</h1>
       <p class="lede">Blobs is a mobile app for Hermes Agent. Watch your bots work, answer them when they need you, and take over their screen when it's quicker to do it yourself.</p>
       <div class="actions">
         <a class="pill primary" href="#get">Join the beta</a>
         <a class="quiet-link" href="https://github.com/Madd-Technologies/blobs">Source on GitHub</a>
       </div>
-    </div>
 
-    <section class="wide" aria-labelledby="moments-title">
-      <div class="moments-head">
-        <h2 id="moments-title">Built for the moments a bot needs you</h2>
-        <p class="section-lede">Hermes bots work on their own for hours. Blobs keeps the quiet parts quiet and brings you in only when it's your turn.</p>
+      <div class="crowd" data-crowd>
+        <button type="button" class="face" data-bot="scout" aria-pressed="false" aria-label="Scout: show what it's doing">
+          <span class="bob"><span class="squish"><img src="assets/face-1.svg" alt="" width="136" height="136"></span></span>
+          <span class="name">Scout</span>
+        </button>
+        <button type="button" class="face" data-bot="courier" aria-pressed="false" aria-label="Courier: it's waiting for you">
+          <span class="bob"><span class="squish"><img src="assets/face-2.svg" alt="" width="136" height="136"><span class="dot" data-dot></span></span></span>
+          <span class="name">Courier</span>
+        </button>
+        <button type="button" class="face" data-bot="forge" aria-pressed="false" aria-label="Forge: show what it's doing">
+          <span class="bob"><span class="squish"><img src="assets/face-3.svg" alt="" width="136" height="136"></span></span>
+          <span class="name">Forge</span>
+        </button>
+        <button type="button" class="face" data-bot="scribe" aria-pressed="false" aria-label="Scribe: show what it's doing">
+          <span class="bob"><span class="squish"><img src="assets/face-4.svg" alt="" width="136" height="136"></span></span>
+          <span class="name">Scribe</span>
+        </button>
+        <button type="button" class="face" data-bot="ember" aria-pressed="false" aria-label="Ember: it's dozing">
+          <span class="bob"><span class="squish"><img src="assets/face-5.svg" alt="" width="136" height="136"></span></span>
+          <span class="name">Ember</span>
+        </button>
       </div>
 
-      <div class="moments">
-        <figure>
-          <div class="stage" role="img" aria-label="A chat: you ask a bot to clear the build cache and run the tests; two finished steps and one running step follow, one line each">
-            <div class="bubble">Clear the build cache and run the tests</div>
-            <div class="reply">On it.</div>
-            <div class="steps">
-              <div class="step"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Read package.json<span class="time">0.2s</span></div>
-              <div class="step"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Ran npm run clean<span class="time">1.4s</span></div>
-              <div class="step"><span class="spinner" aria-hidden="true"></span>Running npm test</div>
-            </div>
-          </div>
-          <figcaption>
-            <h3>See every step</h3>
-            <p>Each tool call is one quiet line, live as it happens. Tap one to read its output.</p>
-          </figcaption>
-        </figure>
-
-        <figure>
-          <div class="stage" role="img" aria-label="An approval card from Courier: run git push --force origin main? Allow, Deny, more">
-            <div class="card">
-              <div class="who"><img src="assets/face-2.svg" alt="">Courier<span class="when">now</span></div>
-              <p class="ask">Run this command?</p>
-              <pre class="command">git push --force origin main</pre>
-              <p class="why">force push to a shared branch</p>
-              <div class="buttons">
-                <span class="pill primary">Allow</span>
-                <span class="pill secondary">Deny</span>
-                <span class="pill secondary more">···</span>
-              </div>
-            </div>
-          </div>
-          <figcaption>
-            <h3>Answer from anywhere</h3>
-            <p>Approvals and questions arrive as a card. Allow, deny, pick an option or reply in your own words.</p>
-          </figcaption>
-        </figure>
-
-        <figure>
-          <div class="stage" role="img" aria-label="Home: three bots, Courier marked as waiting; a row saying 2 things need you, from Courier and Scout">
-            <div class="crowd">
-              <span><img src="assets/face-1.svg" alt="">Scout<i class="dot"></i></span>
-              <span><img src="assets/face-2.svg" alt="">Courier<i class="dot"></i></span>
-              <span><img src="assets/face-3.svg" alt="">Forge</span>
-            </div>
-            <div class="needs"><span class="dot"></span>2 things need you<span class="names">Courier, Scout</span></div>
-            <div class="roster">
-              <div><img src="assets/face-3.svg" alt=""><b>Forge</b><small>Working…</small></div>
-              <div><img src="assets/face-4.svg" alt=""><b>Scribe</b><small>Summed up the release notes</small></div>
-            </div>
-          </div>
-          <figcaption>
-            <h3>Know what's waiting</h3>
-            <p>Needs you gathers every approval and question, from every bot, in one place.</p>
-          </figcaption>
-        </figure>
+      <div class="stage" data-stage>
+        <p class="hint" data-hint>Tap a blob to see what it's doing. They watch your pointer, too.</p>
+        <div class="pop" data-pop role="region" aria-live="polite" aria-label="What the bot is doing" hidden></div>
       </div>
     </section>
 
-    <section class="wrap" aria-labelledby="features-title">
-      <h2 id="features-title">What it does</h2>
-      <ul class="features">
-        <li><b>Your bots</b><span>Every bot on your server, with its face, what it's doing and its last word.</span></li>
-        <li><b>Live tool activity</b><span>Commands, file reads and output, step by step while a turn runs.</span></li>
-        <li><b>Approvals and questions</b><span>Allow a command, choose an option or reply, without opening a laptop.</span></li>
-        <li><b>Needs you</b><span>One inbox for everything waiting on you, across every bot.</span></li>
-        <li><b>Take over the screen</b><span>Watch a bot's desktop live, and take the keyboard and mouse when it's stuck.</span></li>
-        <li><b>Rooms</b><span>Put several bots in one conversation and @mention who should answer.</span></li>
-        <li><b>Routines and dashboards</b><span>The jobs each bot runs on a schedule, and panels it keeps up to date for you.</span></li>
-        <li><b>Files, voice and more</b><span>Photos, PDFs and voice memos in; math, diagrams and documents out; replies read aloud.</span></li>
+    <template data-card="scout">
+      <p class="card-text">Pulling this week's release notes together.</p>
+      <ul class="steps">
+        <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Read 3 feeds<span>0.4s</span></li>
+        <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Searched the changelog<span>1.2s</span></li>
+        <li class="now"><span class="spin" aria-hidden="true"></span>Writing the summary<span class="elapsed" data-elapsed="4"> · 4s</span></li>
       </ul>
+    </template>
+    <template data-card="courier">
+      <div data-state="ask">
+        <p class="card-ask">Run this command?</p>
+        <p class="command">git push --force origin main</p>
+        <p class="why">force push to a shared branch</p>
+        <div class="buttons">
+          <button type="button" class="pill primary" data-action="allow">Allow</button>
+          <button type="button" class="pill secondary" data-action="deny">Deny</button>
+          <button type="button" class="pill secondary more" aria-label="More choices">···</button>
+        </div>
+      </div>
+      <div data-state="allowed" hidden>
+        <p class="quiet-line"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>You allowed <code>git push --force origin main</code></p>
+        <p class="card-text">Pushed. The release branch is up to date.</p>
+      </div>
+      <div data-state="denied" hidden>
+        <p class="quiet-line">You said no.</p>
+        <p class="card-text">Understood. I'll open a pull request instead.</p>
+      </div>
+    </template>
+    <template data-card="forge">
+      <p class="card-text">Running the test suite before the release.</p>
+      <ul class="steps">
+        <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Read package.json<span>0.2s</span></li>
+        <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran npm run clean<span>1.4s</span></li>
+        <li class="now"><span class="spin" aria-hidden="true"></span>Running npm test<span class="elapsed" data-elapsed="38"> · 38s</span></li>
+      </ul>
+    </template>
+    <template data-card="scribe">
+      <p class="card-text">The release notes are ready: 12 fixes and 3 new features, grouped by area.</p>
+      <p class="file-chip">docs/CHANGES.md</p>
+    </template>
+    <template data-card="ember">
+      <div data-state="woke">
+        <p class="card-text">Dozing: it hasn't had anything to do for a while. A tap wakes it for a minute.</p>
+        <p class="quiet-line">Morning digest · Every day at 7:00 AM</p>
+        <button type="button" class="pill secondary" data-action="run">Run now</button>
+      </div>
+      <div data-state="running" hidden>
+        <p class="quiet-line"><span class="spin" aria-hidden="true"></span>Routine "Morning digest" is running</p>
+      </div>
+    </template>
+
+    <p class="facts wrap"><span>Works with Hermes Agent 0.21.5 and up</span><span aria-hidden="true">·</span><span>MIT licensed</span><span aria-hidden="true">·</span><span>No account</span><span aria-hidden="true">·</span><span>No analytics</span><span aria-hidden="true">·</span><span>iPhone, iPad and Android</span></p>
+
+    <section id="scenes" class="wrap scenes" aria-labelledby="scenes-title">
+      <h2 id="scenes-title" class="big">Quiet until it's your turn.</h2>
+
+      <article class="scene" data-scene>
+        <div class="scene-copy">
+          <h3>See every step</h3>
+          <p>Hermes bots work on their own for hours. Each tool call is one quiet line, live as it happens. Tap one to read its output.</p>
+        </div>
+        <div class="screen" style="--face: #f18284" aria-label="Forge running the tests, step by step" role="img">
+          <div class="screen-head"><img src="assets/face-3.svg" alt=""><div><b>Forge</b><span>Working…</span></div></div>
+          <p class="bubble">Clear the build cache and run the tests</p>
+          <p class="reply">On it.</p>
+          <ul class="steps">
+            <li style="--i: 0"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Read package.json<span>0.2s</span></li>
+            <li style="--i: 1"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran npm run clean<span>1.4s</span></li>
+            <li style="--i: 2"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran npm test<span>6.1s</span></li>
+          </ul>
+          <p class="output">214 passing</p>
+        </div>
+      </article>
+
+      <article class="scene" data-scene>
+        <div class="scene-copy">
+          <h3>Answer from anywhere</h3>
+          <p>Approvals and questions arrive as a card. Allow, deny, pick an option or reply in your own words, without opening a laptop.</p>
+        </div>
+        <div class="screen" style="--face: #00bbda" aria-label="Courier asks to run git push, and you allow it" role="img">
+          <div class="screen-head"><img src="assets/face-2.svg" alt=""><div><b>Courier</b><span>Waiting for you</span></div></div>
+          <ul class="steps"><li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran the tests<span>6.1s</span></li></ul>
+          <div class="ask-stack">
+            <div class="card ask">
+              <p class="card-ask">Run this command?</p>
+              <p class="command">git push origin main</p>
+              <div class="buttons"><span class="pill primary allow">Allow</span><span class="pill secondary">Deny</span></div>
+            </div>
+            <div class="folded">
+              <p class="quiet-line"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>You allowed <code>git push origin main</code></p>
+              <p class="reply">Pushed.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="scene" data-scene>
+        <div class="scene-copy">
+          <h3>Know what's waiting</h3>
+          <p>Needs you gathers every approval and question from every bot in one place. Swipe one away when it's done.</p>
+        </div>
+        <div class="screen needs" aria-label="The Needs you deck being cleared, one card at a time" role="img">
+          <div class="count"><span class="dot"></span><span class="c3">3 things need you</span><span class="c1">1 thing needs you</span><span class="c0">Nothing needs you</span></div>
+          <div class="deck">
+            <div class="card d3">Scribe · Send the release notes?</div>
+            <div class="card d2">Scout · Which option do you want?</div>
+            <div class="card d1">Courier · Run this command?</div>
+          </div>
+          <div class="toast">Done<b>Undo</b></div>
+          <div class="screen-faces"><span><img src="assets/face-2.svg" alt=""><i class="dot f1"></i></span><span><img src="assets/face-1.svg" alt=""><i class="dot f2"></i></span><span><img src="assets/face-4.svg" alt=""><i class="dot f3"></i></span></div>
+        </div>
+      </article>
+
+      <article class="scene" data-scene>
+        <div class="scene-copy">
+          <h3>Take over the screen</h3>
+          <p>Watch a bot's desktop live. When it gets stuck, take the keyboard and mouse, then hand it back.</p>
+        </div>
+        <div class="screen desk" style="--face: #14c3a3" aria-label="Scout's screen: you take over, then hand it back" role="img">
+          <div class="window"><span class="bar"></span><span class="page"></span><span class="page short"></span></div>
+          <div class="cursor bot"><svg viewBox="0 0 18 22" aria-hidden="true"><path d="M2 2L16 12L9.5 13.2L13 20L10.5 21L7 14.4L2 18Z"></path></svg><span>Scout</span></div>
+          <div class="cursor you"><svg viewBox="0 0 18 22" aria-hidden="true"><path d="M2 2L16 12L9.5 13.2L13 20L10.5 21L7 14.4L2 18Z"></path></svg></div>
+          <span class="pill primary takeover">Take over</span>
+          <span class="pill secondary handback">Hand back</span>
+          <div class="keys"><span>Esc</span><span>Tab</span><span>Ctrl</span><span>⌘</span><span>←</span><span>→</span><span class="enter">Enter</span></div>
+        </div>
+      </article>
     </section>
 
-    <section class="wrap" id="connect" aria-labelledby="connect-title">
-      <h2 id="connect-title">Your server, nothing in between</h2>
+    <section id="features" class="wrap" aria-labelledby="features-title">
+      <h2 id="features-title" class="big">Everything your bots do, from your phone.</h2>
+      <div class="mosaic">
+        <div class="tile span2" style="--face: #14c3a3" data-live>
+          <div class="tile-faces"><img src="assets/face-1.svg" alt=""><img src="assets/face-3.svg" alt=""><img src="assets/face-4.svg" alt=""></div>
+          <div class="room-lines"><p><b>Forge</b> The build passed.</p><p class="mine">@Scout can you check the feeds?</p></div>
+          <p class="typing" aria-hidden="true"><i></i><i></i><i></i>Scout is writing</p>
+          <h3>Rooms</h3>
+          <p>Put several bots in one conversation and @mention who should answer. You see who's writing.</p>
+        </div>
+        <div class="tile" style="--face: #f18284" data-live>
+          <div class="stat"><span class="stat-n" data-count="7">7</span><span>open requests</span></div>
+          <div class="bars" aria-hidden="true"><i style="--h: 40%"></i><i style="--h: 72%"></i><i style="--h: 56%"></i><i style="--h: 92%"></i><i style="--h: 64%"></i></div>
+          <h3>Dashboards</h3>
+          <p>Panels your bots keep up to date, with drafts you approve and buttons that hand work back. With the dashboards plugin.</p>
+        </div>
+        <div class="tile" style="--face: #00bbda" data-live>
+          <div class="notice"><img src="assets/face-2.svg" alt=""><div><b>Courier</b><span>Needs your OK: git push</span></div></div>
+          <h3>Push that needs you</h3>
+          <p>Only approvals, questions and broken routines, through your own UnifiedPush distributor on Android. With the mobile plugin.</p>
+        </div>
+        <div class="tile span2" style="--face: #7ea5fd" data-live>
+          <div class="viewer" aria-hidden="true">
+            <div class="doc-page"><i></i><i></i><i class="short"></i><i></i><i class="short"></i></div>
+            <div class="doc-chips"><code>report.pdf</code><code>CHANGES.md</code><code>app.py</code><code>fix.diff</code></div>
+          </div>
+          <h3>Open what your bots make</h3>
+          <p>A file viewer built in: PDFs page by page, text, Markdown and code, web pages, and diffs of the edits a bot made. Every file a reply names becomes a chip you can tap.</p>
+        </div>
+        <div class="tile" style="--face: #d787d0" data-live>
+          <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <p class="chips"><code>photo.jpg</code><code>voice 0:12</code><code>e^(iπ) + 1 = 0</code></p>
+          <h3>Photos, voice and math</h3>
+          <p>Send photos, files and voice memos. Replies show math and diagrams, and can be read aloud.</p>
+        </div>
+        <div class="tile" style="--face: #14c3a3" data-live>
+          <div class="search" aria-hidden="true"><span>release notes</span></div>
+          <h3>Search every chat</h3>
+          <p>Find any message across a bot's chats, and open the one it came from.</p>
+        </div>
+        <div class="tile" style="--face: #7ea5fd" data-live>
+          <div class="path" aria-hidden="true"><span>phone</span><i class="line"><b></b></i><span>your server</span></div>
+          <h3>Private by design</h3>
+          <p>No account and no analytics. The app talks to your Hermes and nothing else.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="plugins" class="wrap" aria-labelledby="plugins-title">
+      <h2 id="plugins-title" class="big">Add more with server plugins.</h2>
+      <p class="section-lede">Optional Hermes plugins that run on your server and light up parts of the app. In the app, Settings → Server plugins shows which ones your server has and gives you the install command.</p>
+      <div class="plugins">
+        <article class="plugin" style="--face: #f18284">
+          <p class="plugin-id">hermes-paperless</p>
+          <h3>Paperless</h3>
+          <p>Your Paperless-ngx documents, streamed straight into the app's viewer. Any bot can search and read them with the skill that comes with it, and the documents it mentions open with a tap.</p>
+        </article>
+        <article class="plugin" style="--face: #00bbda">
+          <p class="plugin-id">hermes-drive</p>
+          <h3>Google Drive</h3>
+          <p>Files from Drive open in the app's viewer; Google Docs, Sheets and Slides open in Google's own apps. Any bot can find files with its Drive skill. Read only.</p>
+        </article>
+        <article class="plugin" style="--face: #14c3a3">
+          <p class="plugin-id">hermes-dashboard</p>
+          <h3>Dashboards</h3>
+          <p>Each bot keeps panels for you: lists, boards, numbers and charts, kept fresh by a script where it can be, with drafts to approve and buttons that hand work back.</p>
+        </article>
+        <article class="plugin" style="--face: #d787d0">
+          <p class="plugin-id">hermes-bot-mobile</p>
+          <h3>Push and live rooms</h3>
+          <p>Notifications when a bot needs you, encrypted end to end to your phone through UnifiedPush, and live "who's writing" in rooms.</p>
+        </article>
+      </div>
+      <p class="note">All MIT, in <a href="https://github.com/Madd-Technologies/blobs-hermes-bot-plugins">blobs-hermes-bot-plugins</a>.</p>
+    </section>
+
+    <section id="make" class="wrap" aria-labelledby="make-title">
+      <div class="maker" data-maker>
+        <div class="maker-copy">
+          <h2 id="make-title">What does your bot look like?</h2>
+          <p>Type a name and meet its face: the same one Hermes Desktop gives a bot with that name.</p>
+          <label for="blob-name">Bot name</label>
+          <input id="blob-name" type="text" value="nova" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="40" data-name>
+          <p class="slug" data-slug>nova</p>
+          <div class="maker-actions">
+            <button type="button" class="pill primary" data-hi>Say hi</button>
+            <button type="button" class="pill secondary" data-look>Another look</button>
+            <button type="button" class="pill secondary" data-share>Share</button>
+          </div>
+        </div>
+        <div class="maker-stage">
+          <p class="speech" data-speech hidden></p>
+          <div class="maker-face" data-face><img src="assets/face-5.svg" alt="" width="220" height="220"></div>
+        </div>
+        <div class="gallery" data-gallery aria-label="Some names to try"></div>
+      </div>
+    </section>
+
+    <section id="connect" class="wrap" aria-labelledby="connect-title">
+      <h2 id="connect-title" class="big">Your server, nothing in between.</h2>
       <p class="section-lede">Blobs talks straight to your own Hermes Agent, the same <code>hermes dashboard</code> that serves Hermes's web dashboard. There's no Blobs server, no account with us and no analytics.</p>
+      <div class="diagram" data-live aria-hidden="true">
+        <div class="node"><span class="mini-phone"></span>Blobs</div>
+        <div class="wire"><b></b></div>
+        <div class="node"><span class="mini-server">hermes<br>dashboard</span>Your server</div>
+        <div class="wire"><b></b></div>
+        <div class="node"><span class="mini-bots"><img src="assets/face-1.svg" alt=""><img src="assets/face-3.svg" alt=""><img src="assets/face-5.svg" alt=""></span>Your bots</div>
+      </div>
       <ol class="how">
         <li>
           <p>On the machine that runs Hermes, start the dashboard on an address your phone can reach. A Tailscale address keeps it private to your own devices. The first time, Hermes asks you to choose a username and password.</p>
@@ -129,8 +318,8 @@
       <p class="note">Tested with Hermes Agent 0.21.5 and 0.21.6. Taking over a screen needs a Linux host with Bot Screen. Push notifications on Android, dashboards, Paperless and Google Drive come from optional <a href="https://github.com/Madd-Technologies/blobs-hermes-bot-plugins">server plugins</a>.</p>
     </section>
 
-    <section class="wrap" id="get" aria-labelledby="get-title">
-      <h2 id="get-title">Get the beta</h2>
+    <section id="get" class="wrap" aria-labelledby="get-title">
+      <h2 id="get-title" class="big">Get the beta.</h2>
       <p class="section-lede">Blobs is in beta on both platforms. It's free.</p>
       <div class="list">
         <div><span>iPhone and iPad</span><span class="value">TestFlight · opening soon</span></div>
@@ -140,16 +329,21 @@
     </section>
   </main>
 
-  <footer class="wrap">
-    <nav aria-label="Footer">
-      <a href="privacy.html">Privacy</a>
-      <a href="https://github.com/Madd-Technologies/blobs/issues">Support</a>
-      <a href="mailto:info@maddtechnologies.com">info@maddtechnologies.com</a>
-      <a href="https://github.com/Madd-Technologies/blobs">Source</a>
-      <a href="https://github.com/Madd-Technologies/blobs/blob/main/LICENSE">MIT licence</a>
-    </nav>
-    <p>Blobs is an independent app made by Madd Technologies LLC. It is not affiliated with or endorsed by Nous Research. Hermes Agent is an open-source project by <a href="https://github.com/NousResearch/hermes-agent">Nous Research</a>.</p>
-    <p>© 2026 Madd Technologies LLC</p>
+  <footer class="site-foot">
+    <div class="wrap">
+      <nav aria-label="Footer">
+        <a href="privacy.html">Privacy</a>
+        <a href="https://github.com/Madd-Technologies/blobs/issues">Support</a>
+        <a href="mailto:info@maddtechnologies.com">info@maddtechnologies.com</a>
+        <a href="https://github.com/Madd-Technologies/blobs">Source</a>
+        <a href="https://github.com/Madd-Technologies/blobs/blob/main/LICENSE">MIT licence</a>
+      </nav>
+      <p>Blobs is an independent app made by Madd Technologies LLC. It is not affiliated with or endorsed by Nous Research. Hermes Agent is an open-source project by <a href="https://github.com/NousResearch/hermes-agent">Nous Research</a>.</p>
+      <p>© 2026 Madd Technologies LLC</p>
+    </div>
+    <div class="peek" aria-hidden="true">
+      <img src="assets/face-1.svg" alt=""><img src="assets/face-2.svg" alt=""><img src="assets/face-3.svg" alt=""><img src="assets/face-4.svg" alt=""><img src="assets/face-5.svg" alt="">
+    </div>
   </footer>
 </body>
 </html>

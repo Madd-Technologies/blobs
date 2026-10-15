@@ -2,7 +2,7 @@
 // favicon) drawn with the same blobatar library and silhouettes as the app, and the self-hosted Geist fonts.
 // Run with `npm run build:site` and commit the output: GitHub Pages serves site/ as it is, with no build step.
 
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { blobatar } from 'blobatar/blob'
 
 // Same trait positions as BLOB_KIND_TRAIT in src/lib/hermes/blob.ts.
@@ -90,4 +90,11 @@ for (const [family, file] of fonts) {
 }
 
 copyFileSync('node_modules/@expo-google-fonts/geist/LICENSE_FONT', 'site/fonts/OFL.txt')
-console.log('site/: blobs.svg, favicon.svg and fonts written')
+
+// blobatar for the page itself (the crowd and "make your blob"): its self-contained renderer, without the source map line.
+mkdirSync('site/vendor', { recursive: true })
+const { version } = JSON.parse(readFileSync('node_modules/blobatar/package.json', 'utf8'))
+const renderer = readFileSync('node_modules/blobatar/dist/blob.js', 'utf8').replace(/\n\/\/# (debugId|sourceMappingURL)=.*$/gm, '')
+writeFileSync('site/vendor/blobatar.js', `// blobatar ${version} (MIT), https://www.npmjs.com/package/blobatar. Licence: vendor/blobatar-LICENSE.txt\n${renderer}`)
+copyFileSync('node_modules/blobatar/LICENSE', 'site/vendor/blobatar-LICENSE.txt')
+console.log('site/: blobs.svg, favicon.svg, fonts and vendor/blobatar.js written')
