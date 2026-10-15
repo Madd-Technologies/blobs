@@ -39,16 +39,22 @@ const row = (id: string, status: ActiveSessionRow['status']): ActiveSessionRow =
 const approval = (id: string): ApprovalRequestPayload => ({ command: 'cmd', description: 'desc', request_id: id })
 
 describe('inbox refresh', () => {
-  it('asks approval.pending only for working sessions the app has not opened', async () => {
+  it('asks approval.pending for working and waiting sessions the app has not opened', async () => {
     const { inbox, calls } = setup({
-      active: [row('a', 'working'), row('b', 'idle'), row('c', 'waiting'), row('d', 'working')],
-      open: ['d'],
+      active: [row('a', 'working'), row('b', 'idle'), row('c', 'waiting'), row('d', 'working'), row('e', 'waiting')],
+      open: ['d', 'e'],
       approvals: { a: [approval('r1')] },
     })
     await inbox.refresh()
-    assert.deepEqual(calls.filter(call => call.method === 'approval.pending').map(call => call.params.session_id), ['a'])
+    assert.deepEqual(calls.filter(call => call.method === 'approval.pending').map(call => call.params.session_id), ['a', 'c'])
     assert.deepEqual(Object.keys(inbox.store.getState().polled), ['a'])
     assert.equal(inbox.store.getState().loadedAt, 42)
+  })
+
+  it('finds an approval on a session the server marks waiting (Hermes 0.21.6)', async () => {
+    const { inbox } = setup({ active: [row('courier', 'waiting')], approvals: { courier: [approval('r1')] } })
+    await inbox.refresh()
+    assert.deepEqual(inbox.store.getState().polled.courier?.map(entry => entry.request_id), ['r1'])
   })
 
   it('does not hold a refresh for the 30 s approval.pending can block', async () => {

@@ -1,7 +1,7 @@
 /**
  * Polls what is going on across all bots: `session.active_list` for status, and `approval.pending`
- * for sessions that are working but not open in the app (their approval prompts were never sent to
- * this connection). Framework-free with injected dependencies; the app wires the real one.
+ * for sessions that are working or waiting but not open in the app (their approval prompts were never
+ * sent to this connection). Framework-free with injected dependencies; the app wires the real one.
  */
 
 import { createStore, type StoreApi } from 'zustand/vanilla'
@@ -36,8 +36,9 @@ export function createInbox(deps: InboxDeps) {
     try {
       const { sessions } = await call(deps.client, 'session.active_list', {})
       const open = deps.openLiveIds()
-      // Only `working` sessions can hold an approval; `waiting` does not include approvals.
-      const candidates = sessions.filter(row => row.status === 'working' && !open.has(row.id))
+      // A session holding an approval reads `working` on older servers and `waiting` on 0.21.6, so ask both. A `waiting`
+      // session that is asking a question, a sudo or a secret answers with an empty list.
+      const candidates = sessions.filter(row => (row.status === 'working' || row.status === 'waiting') && !open.has(row.id))
 
       const results = await Promise.allSettled(
         candidates.map(async row => ({ id: row.id, approvals: (await call(deps.client, 'approval.pending', { session_id: row.id }, { timeoutMs: PENDING_TIMEOUT_MS })).approvals })),
