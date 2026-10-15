@@ -58,6 +58,7 @@ function setupCrowd() {
   let presses = 0
   let approval = 'ask'
   let emberAwake = false
+  let emberTimer = 0
   let emberRunning = false
   let happyUntil = 0
   let pointer = null
@@ -73,11 +74,14 @@ function setupCrowd() {
     faces[id] = { ...face, ...spec, id, button, squish: button.querySelector('.squish'), dot: button.querySelector('[data-dot]') }
     button.addEventListener('click', () => select(id))
   }
+  faces.courier.button.classList.add('needs')
 
+  // Eye heights from the app's face motions (src/features/face/motion.ts): dozing shut, working alert, needing you wide.
   function eyeScale(id) {
-    if (id === 'ember' && !emberAwake) return 0.16
+    if (id === 'ember' && !emberAwake) return 0.12
     if (id === 'courier' && Date.now() < happyUntil) return 0.5
-    if (id === selected && (id === 'scout' || id === 'forge')) return 1.15
+    if (id === 'courier' && approval === 'ask') return 1.22
+    if (id === selected && (id === 'scout' || id === 'forge')) return 1.08
     return 1
   }
 
@@ -137,6 +141,23 @@ function setupCrowd() {
     pop.hidden = false
     replay(pop, ['rise-a', 'rise-b'], presses)
     place()
+    tick()
+  }
+
+  // A running step's time ticks up, as on the app's activity line ("· 38s", "· 1m 5s").
+  let ticker = 0
+  function tick() {
+    clearInterval(ticker)
+    const clocks = pop.querySelectorAll('[data-elapsed]')
+    if (!clocks.length) return
+    ticker = setInterval(() => {
+      if (pop.hidden) return clearInterval(ticker)
+      for (const clock of clocks) {
+        const seconds = Number(clock.dataset.elapsed) + 1
+        clock.dataset.elapsed = String(seconds)
+        clock.textContent = ` · ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}`
+      }
+    }, 1000)
   }
 
   pop.addEventListener('click', event => {
@@ -144,6 +165,7 @@ function setupCrowd() {
     if (action === 'allow' || action === 'deny') {
       approval = action === 'allow' ? 'allowed' : 'denied'
       faces.courier.dot?.classList.add('gone')
+      faces.courier.button.classList.remove('needs')
       if (action === 'allow') {
         happyUntil = Date.now() + 900
         replay(faces.courier.squish, ['hop', 'hop'], 0)
@@ -164,7 +186,12 @@ function setupCrowd() {
     for (const face of Object.values(faces)) face.button.setAttribute('aria-pressed', String(face.id === selected))
     if (selected) {
       replay(faces[id].squish, ['pa', 'pb'], presses)
-      if (id === 'ember') emberAwake = true
+      // Like the app: a tap wakes a dozing face for a minute, then it nods off again.
+      if (id === 'ember') {
+        emberAwake = true
+        clearTimeout(emberTimer)
+        emberTimer = setTimeout(() => { emberAwake = false; drawEyes() }, 60_000)
+      }
     }
     const color = selected ? faces[selected].color : null
     document.body.style.setProperty('--tint', color ?? '')

@@ -24,6 +24,7 @@
     <nav aria-label="Site">
       <a href="#scenes">How it works</a>
       <a href="#features">Features</a>
+      <a href="#plugins">Plugins</a>
       <a href="https://github.com/Madd-Technologies/blobs">GitHub</a>
       <a class="pill secondary small" href="#get">Get the beta</a>
     </nav>
@@ -56,7 +57,7 @@
           <span class="bob"><span class="squish"><img src="assets/face-4.svg" alt="" width="136" height="136"></span></span>
           <span class="name">Scribe</span>
         </button>
-        <button type="button" class="face" data-bot="ember" aria-pressed="false" aria-label="Ember: it's asleep">
+        <button type="button" class="face" data-bot="ember" aria-pressed="false" aria-label="Ember: it's dozing">
           <span class="bob"><span class="squish"><img src="assets/face-5.svg" alt="" width="136" height="136"></span></span>
           <span class="name">Ember</span>
         </button>
@@ -73,7 +74,7 @@
       <ul class="steps">
         <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Read 3 feeds<span>0.4s</span></li>
         <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Searched the changelog<span>1.2s</span></li>
-        <li><span class="spin" aria-hidden="true"></span>Writing the summary</li>
+        <li class="now"><span class="spin" aria-hidden="true"></span>Writing the summary<span class="elapsed" data-elapsed="4"> · 4s</span></li>
       </ul>
     </template>
     <template data-card="courier">
@@ -97,9 +98,12 @@
       </div>
     </template>
     <template data-card="forge">
-      <p class="quiet-line"><span class="spin" aria-hidden="true"></span>Running npm test</p>
-      <div class="progress" aria-hidden="true"><span></span></div>
-      <p class="quiet-line">214 passed so far, none failed</p>
+      <p class="card-text">Running the test suite before the release.</p>
+      <ul class="steps">
+        <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Read package.json<span>0.2s</span></li>
+        <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran npm run clean<span>1.4s</span></li>
+        <li class="now"><span class="spin" aria-hidden="true"></span>Running npm test<span class="elapsed" data-elapsed="38"> · 38s</span></li>
+      </ul>
     </template>
     <template data-card="scribe">
       <p class="card-text">The release notes are ready: 12 fixes and 3 new features, grouped by area.</p>
@@ -107,8 +111,9 @@
     </template>
     <template data-card="ember">
       <div data-state="woke">
-        <p class="card-text">You woke me. My next routine is the morning digest at 7:00 AM.</p>
-        <button type="button" class="pill secondary" data-action="run">Run it now</button>
+        <p class="card-text">Dozing: it hasn't had anything to do for a while. A tap wakes it for a minute.</p>
+        <p class="quiet-line">Morning digest · Every day at 7:00 AM</p>
+        <button type="button" class="pill secondary" data-action="run">Run now</button>
       </div>
       <div data-state="running" hidden>
         <p class="quiet-line"><span class="spin" aria-hidden="true"></span>Routine "Morning digest" is running</p>
@@ -132,7 +137,7 @@
           <ul class="steps">
             <li style="--i: 0"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Read package.json<span>0.2s</span></li>
             <li style="--i: 1"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran npm run clean<span>1.4s</span></li>
-            <li style="--i: 2"><span class="spin" aria-hidden="true"></span>Running npm test</li>
+            <li style="--i: 2"><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran npm test<span>6.1s</span></li>
           </ul>
           <p class="output">214 passing</p>
         </div>
@@ -207,18 +212,31 @@
           <div class="stat"><span class="stat-n" data-count="7">7</span><span>open requests</span></div>
           <div class="bars" aria-hidden="true"><i style="--h: 40%"></i><i style="--h: 72%"></i><i style="--h: 56%"></i><i style="--h: 92%"></i><i style="--h: 64%"></i></div>
           <h3>Dashboards</h3>
-          <p>Panels your bots keep up to date, with drafts you approve and buttons that hand work back.</p>
+          <p>Panels your bots keep up to date, with drafts you approve and buttons that hand work back. With the dashboards plugin.</p>
         </div>
         <div class="tile" style="--face: #00bbda" data-live>
           <div class="notice"><img src="assets/face-2.svg" alt=""><div><b>Courier</b><span>Needs your OK: git push</span></div></div>
           <h3>Push that needs you</h3>
-          <p>Only approvals, questions and broken routines. On Android through your own UnifiedPush distributor, never Firebase.</p>
+          <p>Only approvals, questions and broken routines, through your own UnifiedPush distributor on Android. With the mobile plugin.</p>
+        </div>
+        <div class="tile span2" style="--face: #7ea5fd" data-live>
+          <div class="viewer" aria-hidden="true">
+            <div class="doc-page"><i></i><i></i><i class="short"></i><i></i><i class="short"></i></div>
+            <div class="doc-chips"><code>report.pdf</code><code>CHANGES.md</code><code>app.py</code><code>fix.diff</code></div>
+          </div>
+          <h3>Open what your bots make</h3>
+          <p>A file viewer built in: PDFs page by page, text, Markdown and code, web pages, and diffs of the edits a bot made. Every file a reply names becomes a chip you can tap.</p>
         </div>
         <div class="tile" style="--face: #d787d0" data-live>
           <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          <p class="chips"><code>report.pdf</code><code>voice 0:12</code><code>e^(iπ) + 1 = 0</code></p>
-          <h3>Files, voice and math</h3>
-          <p>Photos, PDFs and voice memos in. Math, diagrams and documents out. Replies read aloud.</p>
+          <p class="chips"><code>photo.jpg</code><code>voice 0:12</code><code>e^(iπ) + 1 = 0</code></p>
+          <h3>Photos, voice and math</h3>
+          <p>Send photos, files and voice memos. Replies show math and diagrams, and can be read aloud.</p>
+        </div>
+        <div class="tile" style="--face: #14c3a3" data-live>
+          <div class="search" aria-hidden="true"><span>release notes</span></div>
+          <h3>Search every chat</h3>
+          <p>Find any message across a bot's chats, and open the one it came from.</p>
         </div>
         <div class="tile" style="--face: #7ea5fd" data-live>
           <div class="path" aria-hidden="true"><span>phone</span><i class="line"><b></b></i><span>your server</span></div>
@@ -226,6 +244,34 @@
           <p>No account and no analytics. The app talks to your Hermes and nothing else.</p>
         </div>
       </div>
+    </section>
+
+    <section id="plugins" class="wrap" aria-labelledby="plugins-title">
+      <h2 id="plugins-title" class="big">Add more with server plugins.</h2>
+      <p class="section-lede">Optional Hermes plugins that run on your server and light up parts of the app. In the app, Settings → Server plugins shows which ones your server has and gives you the install command.</p>
+      <div class="plugins">
+        <article class="plugin" style="--face: #f18284">
+          <p class="plugin-id">hermes-paperless</p>
+          <h3>Paperless</h3>
+          <p>Your Paperless-ngx documents, streamed straight into the app's viewer. Any bot can search and read them with the skill that comes with it, and the documents it mentions open with a tap.</p>
+        </article>
+        <article class="plugin" style="--face: #00bbda">
+          <p class="plugin-id">hermes-drive</p>
+          <h3>Google Drive</h3>
+          <p>Files from Drive open in the app's viewer; Google Docs, Sheets and Slides open in Google's own apps. Any bot can find files with its Drive skill. Read only.</p>
+        </article>
+        <article class="plugin" style="--face: #14c3a3">
+          <p class="plugin-id">hermes-dashboard</p>
+          <h3>Dashboards</h3>
+          <p>Each bot keeps panels for you: lists, boards, numbers and charts, kept fresh by a script where it can be, with drafts to approve and buttons that hand work back.</p>
+        </article>
+        <article class="plugin" style="--face: #d787d0">
+          <p class="plugin-id">hermes-bot-mobile</p>
+          <h3>Push and live rooms</h3>
+          <p>Notifications when a bot needs you, encrypted end to end to your phone through UnifiedPush, and live "who's writing" in rooms.</p>
+        </article>
+      </div>
+      <p class="note">All MIT, in <a href="https://github.com/Madd-Technologies/blobs-hermes-bot-plugins">blobs-hermes-bot-plugins</a>.</p>
     </section>
 
     <section id="make" class="wrap" aria-labelledby="make-title">
