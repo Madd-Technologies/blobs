@@ -139,8 +139,8 @@ capture/out/emulator.log            the Android emulator's own log
 A clip is cut from its raw recording at the flow's `clip start` and `clip end` marks, which Maestro timestamps in
 `commands.json`, plus 0.4 s before and 0.6 s after. Both recorders only write a frame when the screen changes, so the
 raw files are variable frame rate with gaps; the cut makes them constant 60 fps first and cuts by time from the start
-(seeking into a gap with `-ss` loses time). Clips are raw footage: captions, device frames and the stores' preview sizes
-come later (Remotion).
+(seeking into a gap with `-ss` loses time). Clips are raw footage: the captions, the colour and the App Store's preview
+size come from `npm run capture:compose` ([below](#the-designed-store-set)).
 
 ## Google Play
 
@@ -158,6 +158,66 @@ Checked against Play Console Help's
 So the Android screenshots meet every phone requirement as they come out, including the promotion ones. Play's preview
 video is a YouTube link, not an upload: the clips are raw material for that video (and the website), not files for the
 Play Console.
+
+## The designed store set
+
+The raw captures are the material; the store listings use a designed set made from them: a bold headline per frame,
+each frame in its bot's own face colour, the phone with the real capture, one piece of its UI lifted out larger, and the
+bot's face peeking over the phone. This is direction B, "Face colour", picked from three on the
+"Blobs store listing" canvas (2026-10-15). One command renders all of it from whatever the rig last wrote:
+
+```bash
+npm run capture:compose                              # everything below, from capture/out
+npm run capture:compose -- --only=app-store,feature  # just some parts: app-store, preview, play, feature
+npm run capture:compose -- --in <folder> --out <folder>
+```
+
+```
+capture/out/store/
+  app-store/iphone-6.9/01-home.png …   7 stills, 1320 x 2868 PNG without alpha (App Store 6.9", also used for 6.5")
+  app-store/iphone-6.3/01-home.png …   the same at 1206 x 2622 (6.3": the size App Store Connect lists as required)
+  app-store/preview-iphone-6.9.mp4     the App Store preview: 886 x 1920, 27.5 s, 30 fps, H.264 High 4.0 at ~11 Mbps,
+                                       silent stereo AAC 256 kbps (App Store Connect wants an audio track)
+  google-play/phone/01-home.png …      7 stills, 1080 x 1920 PNG (9:16, ≥ 1080 px: eligible for Play's promotions),
+                                       from the Android captures
+  google-play/feature-graphic.png      1024 x 500, no device frame (Google's rule), the Android approval card
+  contact-app-store.png, contact-google-play.png   each set side by side, to review at a glance
+```
+
+A part whose captures are missing is skipped with a note (no Android captures, no Play stills). Needs ffmpeg, like
+the rig; the first run downloads Remotion's headless Chrome (about 170 MB).
+
+How it is built:
+
+- `capture/compose/set.ts` is the whole design as data: the cast (the demo's blobatar seeds), the seven frames
+  (headline, which capture, which bot's colour, which way the phone leans, which card is lifted), the crop rectangle of
+  each lifted card per platform, and the preview's segments (which clip, which seconds of it). Change copy or order
+  there. Its tests run with `npm test`.
+- `capture/compose/remotion/` holds the Remotion compositions: `Still` (App Store and Play), `FeatureGraphic` and
+  `Preview`. Everything is laid out on a 440 x 956 grid and scaled to each output; the 9:16 Play stills show more of
+  the same scene at the sides. The faces are drawn by the app's own blobatar code (`src/lib/hermes/blob.ts`).
+- `capture/compose/compose.ts` stages the captures and Geist into a public folder, renders, flattens the PNGs to RGB
+  and re-encodes the preview to Apple's spec.
+- To look at a composition live after one compose run:
+  `npx remotion studio capture/compose/remotion/index.ts --public-dir capture/out/store/.stage`.
+
+Keep in mind:
+
+- **Crops follow the app's layout.** A lifted card is drawn from a fixed rectangle of its capture (`CROPS` in
+  `set.ts`, measured on the 6.9" iPhone and the 1440 x 2560 Android captures; other resolutions scale by width). If a
+  UI change moves the approval card, the steps, the deck, the room's composer, the chart or Ember's details, measure
+  it again there; the contact sheets show a bad crop at once.
+- **Preview windows follow the flows' timing.** Each segment plays a window of its clip (seconds in `PREVIEW`); if a
+  flow's holds change, check the moment still lands inside its window. A clip shorter than its window stops the run.
+- **Apple's preview rules:** only footage of the app, captions as overlays, simple dissolves; no hands. The footage
+  plays untouched in a bare screen (no device frame) with the colour and the faces around it. App Store Connect's
+  default poster frame (5 s) lands on Courier's approval card; pick another there if wanted.
+- **Google's rules:** taglines under 20 % of the image, no claims or calls to action, and no device in the feature
+  graphic. The Play promo video is a YouTube link, so it is not rendered here.
+- **The storyboard's "Take over its screen" is not in the set** until the rig films Bot Screen.
+- **Remotion's licence:** free for individuals and for-profit companies with up to 3 employees (its LICENSE.md, checked
+  2026-10-15); a bigger company needs Remotion's company licence to run this step. It is a dev dependency only and
+  never ships in the app.
 
 ## Options
 

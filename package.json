@@ -48,6 +48,9 @@
   },
   "devDependencies": {
     "@novnc/novnc": "1.7.0",
+    "@remotion/bundler": "4.0.535",
+    "@remotion/cli": "4.0.535",
+    "@remotion/renderer": "4.0.535",
     "@types/node": "^26.6.4",
     "@types/react": "~19.2.2",
     "esbuild": "^0.28.2",
@@ -56,6 +59,7 @@
     "mermaid": "^12.1.0",
     "patch-package": "^8.0.1",
     "pdfjs-dist": "^4.10.38",
+    "remotion": "4.0.535",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -65,7 +69,7 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/**/*.test.ts\"",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/**/*.test.ts\" \"capture/**/*.test.ts\"",
     "dev:server": "scripts/dev-server.sh",
     "check": "tsc --noEmit && expo lint && npm test",
     "dev:stop": "scripts/dev-server.sh --stop",
@@ -86,7 +90,8 @@
     "demo:password": "scripts/demo/demo.sh password",
     "capture": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON capture/capture.ts",
     "capture:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON capture/capture.ts build",
-    "capture:device": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON capture/capture.ts device"
+    "capture:device": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON capture/capture.ts device",
+    "capture:compose": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON capture/compose/compose.ts"
   },
   "private": true
 }
