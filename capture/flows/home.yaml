@@ -1,0 +1,42 @@
+# Home: what needs you comes first (the raised Needs-you sheet), then the pinned bots' dashboards, then every bot and the
+# room, Ember dozing. Review all opens the deck with its top card raised. Changes nothing.
+appId: ${APP_ID}
+name: home
+---
+- runFlow: _home.yaml
+
+- evalScript:
+    script: ${output.clip = 'home'}
+    label: clip start
+- takeScreenshot: 01-home
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 2000
+- runFlow:
+    when:
+      platform: iOS
+    file: _tap.yaml
+    env:
+      TARGET: "Review all"
+      THEN: "Allow"
+# Android: capture.ts taps Review all with adb where it sits on the rig's emulator, when this label goes by (see
+# docs/CAPTURE.md, "adb tap"); the deck's Allow checks it landed.
+- runFlow:
+    when:
+      platform: Android
+    label: adb tap 81%,16%
+    commands:
+      - extendedWaitUntil:
+          visible: "Allow"
+          timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: 02-needs-you
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 2000
+- evalScript:
+    script: ${output.clip = 'done'}
+    label: clip end

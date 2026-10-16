@@ -2,7 +2,8 @@
 
 Every screenshot, App Preview, README loop and website clip of Blobs is made against a **demo Hermes**: a separate,
 fictional Hermes Agent on your Mac with five bots in known states and a scripted model. Nothing in it comes from a
-real server, and it never touches one. It is also the world App Review sign-ins are meant to see.
+real server, and it never touches one. It is also the world App Review sign-ins are meant to see. The capture rig
+([CAPTURE.md](CAPTURE.md)) films it.
 
 ```bash
 npm run demo:start      # first run: installs Hermes, builds the demo world, starts it
@@ -13,8 +14,10 @@ npm run demo:password   # copies the sign-in password to the clipboard (never pr
 ```
 
 Sign in from the app at `http://127.0.0.1:9219` as **demo**. For a simulator, put the password on its pasteboard with
-`npm run demo:password -- --sim <udid>`, long-press the Password field and Paste. A reset keeps the token secret, so the
-app stays signed in across resets.
+`npm run demo:password -- --sim <udid>`, long-press the Password field and Paste. For an Android emulator, which has no
+pasteboard to fill from outside, focus the Password field and `npm run demo:password -- --adb <serial>` types it in (on
+the emulator shell's stdin, never on a command line). A reset keeps the token secret, so the app stays signed in across
+resets.
 
 ## What is in it
 

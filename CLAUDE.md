@@ -12,6 +12,8 @@ Published by Madd Technologies LLC under the MIT licence.
 - `docs/DEVELOPMENT.md`: setup, the local dev server and fake model, smoke tests, checks.
 - `docs/DEMO.md`: the demo Hermes (fictional bots, scripted model) that every screenshot, video and App Review sign-in
   is made against. Never film or screenshot a real server.
+- `docs/CAPTURE.md`: the capture rig. `npm run capture` resets the demo and writes every store screenshot and clip
+  (Maestro flows in `capture/flows/`, a Release build on its own simulator).
 - `AGENTS.md`: Expo rules.
 - Machine-specific or personal notes (your server, devices, simulators) go in `CLAUDE.local.md`, which is git-ignored.
   Never put them in this file or anywhere else in the repo.

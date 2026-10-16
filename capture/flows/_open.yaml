@@ -1,0 +1,18 @@
+# Opens a screen of the app by its link (LINK, e.g. hermesbot://bot/forge) and waits for TEXT to show.
+# iOS asks "Open in …?" for a link from outside the app; that is answered here, before any clip starts. Android opens
+# it straight away (the app is the only one that takes hermesbot:// links).
+appId: ${APP_ID}
+---
+- openLink: ${LINK}
+- runFlow:
+    when:
+      platform: iOS
+      visible: "Open in .*"
+    commands:
+      - tapOn:
+          text: "Open"
+          retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible: ${TEXT}
+    timeout: 30000
+- waitForAnimationToEnd

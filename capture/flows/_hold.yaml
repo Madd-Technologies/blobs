@@ -1,0 +1,8 @@
+# Holds the frame for MS milliseconds, so a clip lingers on what just happened. Maestro has no plain sleep: this waits
+# for text that is never on screen and lets the wait run out (it shows as WARNED in Maestro's output, which is fine).
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible: "capture rig: never on screen"
+    timeout: ${MS}
+    optional: true

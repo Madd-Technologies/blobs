@@ -83,7 +83,10 @@
     "demo:stop": "scripts/demo/demo.sh stop",
     "demo:reset": "scripts/demo/demo.sh reset",
     "demo:status": "scripts/demo/demo.sh status",
-    "demo:password": "scripts/demo/demo.sh password"
+    "demo:password": "scripts/demo/demo.sh password",
+    "capture": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON capture/capture.ts",
+    "capture:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON capture/capture.ts build",
+    "capture:device": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON capture/capture.ts device"
   },
   "private": true
 }

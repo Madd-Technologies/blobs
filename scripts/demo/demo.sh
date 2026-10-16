@@ -6,8 +6,9 @@
 #   scripts/demo/demo.sh stop       stop the demo's own processes and its Linux VM (never any other Hermes)
 #   scripts/demo/demo.sh reset      stop, wipe the demo world (not the install or the login), seed it again
 #   scripts/demo/demo.sh status     what is running, and whether the seeded states are still live
-#   scripts/demo/demo.sh password [--sim <udid>]
-#                                   copy the sign-in password to the clipboard (or a simulator's), never print it
+#   scripts/demo/demo.sh password [--sim <udid> | --adb <serial>]
+#                                   copy the sign-in password to the clipboard (or a simulator's), or type it into
+#                                   an Android emulator's focused field, never print it
 #
 # Everything lives in $DEMO_ROOT (default ~/blobs-demo, outside the repo): the Hermes install, its own
 # HERMES_HOME, logs, and the login file. The bots' fictional project lives in $DEMO_WORKSPACE (default
@@ -296,8 +297,19 @@ stop_all() {
   stop_process dashboard
   stop_process gateway
   stop_process model
-  # A bot's long test run is started by Hermes in a session of its own.
-  pkill -f "scripts/test.mjs --browsers" 2>/dev/null || true
+  stop_test_runs
+}
+
+# A bot's long test run is started by Hermes in a session of its own. Only this demo's runs stop (they work in
+# $DEMO_WORKSPACE): another copy of the demo on this Mac may be running its own.
+stop_test_runs() {
+  local pid cwd
+  for pid in $(pgrep -f "scripts/test.mjs --browsers" 2>/dev/null); do
+    cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"
+    case "$cwd" in
+      "$DEMO_WORKSPACE" | "$DEMO_WORKSPACE"/*) kill "$pid" 2>/dev/null || true ;;
+    esac
+  done
 }
 
 # Installs the dashboard plugin into the demo home (no profile) or one of its bots. HERMES_HOME is what
@@ -465,6 +477,12 @@ cmd_password() {
     [ -n "${2:-}" ] || fail "usage: demo.sh password --sim <udid>"
     login_value DEMO_PASSWORD | tr -d '\n' | xcrun simctl pbcopy "$2"
     say "the password is on simulator $2's pasteboard"
+  elif [ "${1:-}" = "--adb" ]; then
+    # Android has no pasteboard to fill from outside, so it is typed into the field that has focus. The command
+    # goes to the emulator's shell on stdin (printf is a builtin), so the password is never on a command line here.
+    [ -n "${2:-}" ] || fail "usage: demo.sh password --adb <serial>"
+    printf "input text '%s'\n" "$(login_value DEMO_PASSWORD)" | "${ADB:-adb}" -s "$2" shell >/dev/null
+    say "the password is typed into $2's focused field"
   else
     login_value DEMO_PASSWORD | tr -d '\n' | pbcopy
     say "the password is on the clipboard"
@@ -478,7 +496,7 @@ case "${1:-}" in
   status) cmd_status ;;
   password) shift && cmd_password "$@" ;;
   *)
-    echo "usage: scripts/demo/demo.sh start|stop|reset|status|password [--sim <udid>]" >&2
+    echo "usage: scripts/demo/demo.sh start|stop|reset|status|password [--sim <udid> | --adb <serial>]" >&2
     exit 2
     ;;
 esac

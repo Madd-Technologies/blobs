@@ -1,0 +1,14 @@
+# Taps TARGET and waits for THEN, something only the next screen shows. A tap can be lost while the app is still busy
+# (it happened once in a recorded pass); then both are tried again. A tap that did work has left TARGET behind, so a
+# retry never presses twice.
+appId: ${APP_ID}
+---
+- retry:
+    maxRetries: 2
+    commands:
+      - tapOn:
+          text: ${TARGET}
+          retryTapIfNoChange: false
+      - extendedWaitUntil:
+          visible: ${THEN}
+          timeout: 10000

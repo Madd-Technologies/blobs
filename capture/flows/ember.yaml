@@ -1,0 +1,38 @@
+# Ember dozing: nothing to do since its 7:00 routine, eyes shut and still (capture.ts moves its chats 8 hours back, past
+# the app's 6-hour doze). A tap on its big face wakes it. Opens Ember's details by link, not its chat, so nothing it
+# does counts as new activity. Changes nothing (it nods off again after a minute).
+appId: ${APP_ID}
+name: ember
+---
+- runFlow: _home.yaml
+- runFlow:
+    file: _open.yaml
+    env:
+      LINK: hermesbot://bot/ember/details
+      TEXT: "Morning briefs and routines"
+
+- evalScript:
+    script: ${output.clip = 'ember'}
+    label: clip start
+- takeScreenshot: 08-ember-dozing
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 2000
+# The face is decorative (no accessibility label), so it is tapped where it sits: centred, above the name. Measured on
+# the 6.9" iPhone; another layout may need its own point.
+- tapOn:
+    point: "50%,16%"
+    retryTapIfNoChange: false
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 700
+- takeScreenshot: 09-ember-awake
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 2000
+- evalScript:
+    script: ${output.clip = 'done'}
+    label: clip end
