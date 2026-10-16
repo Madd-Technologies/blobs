@@ -100,6 +100,15 @@ export const STORIES = [
     ],
   },
   {
+    // Scout, on its Bot Screen (a Linux sandbox): the shop open in its browser, ready to take over.
+    match: 'open the shop preview',
+    steps: [
+      { say: 'Starting the preview.', tool: 'terminal', args: { command: 'npm run preview', background: true } },
+      { tool: 'terminal', args: { command: 'npm run show' } },
+      { say: 'The shop is open on my screen. Take over if you want to try the search.' },
+    ],
+  },
+  {
     // Courier: a push it has to ask about (Hermes asks before any force push).
     match: 'push the release to main',
     steps: [

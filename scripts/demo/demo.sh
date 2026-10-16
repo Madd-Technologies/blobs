@@ -3,7 +3,7 @@
 # See docs/DEMO.md.
 #
 #   scripts/demo/demo.sh start      install if needed, create and seed the demo world if it is new, start it
-#   scripts/demo/demo.sh stop       stop the demo's own processes (never any other Hermes)
+#   scripts/demo/demo.sh stop       stop the demo's own processes and its Linux VM (never any other Hermes)
 #   scripts/demo/demo.sh reset      stop, wipe the demo world (not the install or the login), seed it again
 #   scripts/demo/demo.sh status     what is running, and whether the seeded states are still live
 #   scripts/demo/demo.sh password [--sim <udid>]
@@ -37,6 +37,11 @@ URL="http://127.0.0.1:$PORT"
 # A non-loopback public URL is what turns Hermes's sign-in gate on for a loopback bind. Nothing resolves
 # or serves this name; the app connects to $URL.
 PUBLIC_URL="http://blobs-demo.localhost:$PORT"
+# Scout's sandbox (and with it its Bot Screen) runs in a Linux VM of its own: a Colima profile used only by the
+# demo, reached through DOCKER_HOST so the Mac's own Docker context is never switched.
+COLIMA_PROFILE="blobs-demo"
+DOCKER_SOCK="$HOME/.colima/$COLIMA_PROFILE/docker.sock"
+SANDBOX_IMAGE="nousresearch/hermes-sandbox:v0.21.6-desktop"
 NODE_FLAGS=(--disable-warning=MODULE_TYPELESS_PACKAGE_JSON)
 
 say() { printf 'demo: %s\n' "$*"; }
@@ -55,9 +60,12 @@ safe_to_delete() {
 # Every Hermes command the demo runs gets the demo home and nothing from the caller's Hermes setup.
 # (HERMES_DESKTOP would make the server reap "orphaned" Hermes processes machine-wide.)
 # A turn outlives the socket that started it (the seeder's), and a foreground command may run for 12
-# hours (Forge's long test run keeps it busy; the default cap of 600 s would background it).
+# hours (Forge's long test run keeps it busy; the default cap of 600 s would background it). Hermes forgets an
+# idle sandbox after TERMINAL_LIFETIME_SECONDS (300 s) while its container runs on, and the screen bridge then
+# cannot reach Scout's screen, so the demo keeps sandboxes for two days.
 HERMES_ENV=(env -u HERMES_DESKTOP -u HERMES_DASHBOARD_SESSION_TOKEN -u HERMES_DASHBOARD_PUBLIC_URL
-  HERMES_HOME="$HOME_DIR" HERMES_TUI_WS_ORPHAN_REAP_GRACE_S=0 TERMINAL_MAX_FOREGROUND_TIMEOUT=43200)
+  HERMES_HOME="$HOME_DIR" HERMES_TUI_WS_ORPHAN_REAP_GRACE_S=0 TERMINAL_MAX_FOREGROUND_TIMEOUT=43200
+  TERMINAL_LIFETIME_SECONDS=172800 DOCKER_HOST="unix://$DOCKER_SOCK")
 
 # ── install ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -122,8 +130,10 @@ login_value() {
 write_workspace() {
   local project="$DEMO_WORKSPACE/storefront"
   safe_to_delete "$DEMO_WORKSPACE"
-  rm -rf "$DEMO_WORKSPACE"
   mkdir -p "$DEMO_WORKSPACE"
+  # Emptied, not deleted: the demo's Linux VM mounts this folder, and a folder made anew would leave that mount
+  # stale and empty.
+  find "$DEMO_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   cp -R "$REPO/scripts/demo/storefront" "$project"
 
   # A repo whose main has two fixup commits already on its (local, bare) remote, then squashed
@@ -310,6 +320,11 @@ build_world() {
   start_servers
   say "creating the five bots"
   seed_step bots
+  if start_sandbox_vm; then
+    configure_scout_sandbox
+  else
+    say "no Colima here, so Scout has no Bot Screen (brew install colima docker, then npm run demo:reset)"
+  fi
   # Hermes loads plugins per bot, so each bot with a dashboard gets its own copy.
   for bot in courier scout forge; do
     install_plugin "$bot"
@@ -333,6 +348,80 @@ check_states() {
   seed_step status
 }
 
+# ── Scout's Bot Screen (a Linux sandbox) ─────────────────────────────────────────────────────────
+
+has_sandbox() {
+  command -v colima >/dev/null 2>&1 && command -v docker >/dev/null 2>&1
+}
+
+demo_docker() {
+  DOCKER_HOST="unix://$DOCKER_SOCK" docker "$@"
+}
+
+# The demo's own Colima VM: 2 CPUs, 4 GB, and only the demo's folders mounted (Hermes bind-mounts parts of the
+# bot's home, so the demo root is mounted too). --activate=false leaves the Mac's Docker context alone.
+start_sandbox_vm() {
+  has_sandbox || return 1
+  if ! colima status --profile "$COLIMA_PROFILE" >/dev/null 2>&1; then
+    say "starting the demo's Linux VM (Colima profile $COLIMA_PROFILE)"
+    mkdir -p "$DEMO_WORKSPACE" "$LOGS"
+    colima start --profile "$COLIMA_PROFILE" --cpus 2 --memory 4 --disk 20 --vm-type vz --mount-type virtiofs \
+      --mount "$DEMO_WORKSPACE:w" --mount "$DEMO_ROOT:w" --activate=false >>"$LOGS/setup.log" 2>&1 ||
+      fail "the demo's Colima VM did not start; see $LOGS/setup.log"
+  fi
+  # A mounted folder that was deleted and made again shows up empty in the VM: restart the VM to remount it.
+  if [ -d "$DEMO_WORKSPACE/storefront" ] &&
+    ! colima ssh --profile "$COLIMA_PROFILE" -- test -d "$DEMO_WORKSPACE/storefront" >/dev/null 2>&1; then
+    say "remounting the demo's folders in its Linux VM"
+    colima restart --profile "$COLIMA_PROFILE" >>"$LOGS/setup.log" 2>&1 || fail "restarting the demo's Colima VM failed; see $LOGS/setup.log"
+  fi
+  if ! demo_docker image inspect "$SANDBOX_IMAGE" >/dev/null 2>&1; then
+    say "pulling $SANDBOX_IMAGE (about 1.2 GB, once)"
+    demo_docker pull -q "$SANDBOX_IMAGE" >>"$LOGS/setup.log" 2>&1 || fail "pulling $SANDBOX_IMAGE failed; see $LOGS/setup.log"
+  fi
+}
+
+# Scout's commands, browser and screen run in a container of that image, with the bots' project at /workspace.
+configure_scout_sandbox() {
+  local setting
+  for setting in \
+    "terminal.backend=docker" \
+    "terminal.docker_image=$SANDBOX_IMAGE" \
+    "terminal.docker_volumes=[\"$DEMO_WORKSPACE:/workspace\"]" \
+    "terminal.cwd=/workspace/storefront" \
+    "terminal.container_cpu=2" \
+    "terminal.container_memory=3072" \
+    "bot_desktop.geometry=1280x800" \
+    "bot_desktop.idle_stop_minutes=0"; do
+    "${HERMES_ENV[@]}" "$HERMES" -p scout config set "${setting%%=*}" "${setting#*=}" >>"$LOGS/setup.log" 2>&1 ||
+      fail "setting Scout's ${setting%%=*} failed; see $LOGS/setup.log"
+  done
+  # Hermes 0.21.6 finds a screen's sandbox for the viewer (a request with no chat session) by the launch
+  # profile's terminal backend: only when that is docker too does it look under Scout's own key. The launch
+  # profile is the hidden default bot, which the demo never uses; bots made from it later get a sandbox too.
+  "${HERMES_ENV[@]}" "$HERMES" config set terminal.backend docker >>"$LOGS/setup.log" 2>&1 &&
+    "${HERMES_ENV[@]}" "$HERMES" config set terminal.docker_image "$SANDBOX_IMAGE" >>"$LOGS/setup.log" 2>&1 ||
+    fail "setting the default profile's sandbox failed; see $LOGS/setup.log"
+  say "Scout's sandbox: $SANDBOX_IMAGE in the demo's Colima VM"
+}
+
+# Removes the demo's sandbox containers (the VM runs nothing else).
+remove_sandboxes() {
+  has_sandbox && colima status --profile "$COLIMA_PROFILE" >/dev/null 2>&1 || return 0
+  local ids
+  ids="$(demo_docker ps -aq --filter label=hermes-agent=1 2>/dev/null || true)"
+  [ -z "$ids" ] || demo_docker rm -f $ids >/dev/null 2>&1 || true
+}
+
+stop_sandbox_vm() {
+  has_sandbox || return 0
+  if colima status --profile "$COLIMA_PROFILE" >/dev/null 2>&1; then
+    remove_sandboxes
+    colima stop --profile "$COLIMA_PROFILE" >/dev/null 2>&1 || true
+    say "stopped the demo's Linux VM"
+  fi
+}
+
 # ── commands ─────────────────────────────────────────────────────────────────────────────────────
 
 cmd_start() {
@@ -341,6 +430,9 @@ cmd_start() {
   if [ ! -f "$HOME_DIR/config.yaml" ]; then
     build_world
   else
+    if grep -q "backend: docker" "$HOME_DIR/profiles/scout/config.yaml" 2>/dev/null; then
+      start_sandbox_vm || say "Scout's sandbox needs Colima, which is missing; its Bot Screen will not start"
+    fi
     start_servers
     check_states || say "some seeded states are gone (a restart ends waiting turns): npm run demo:reset brings them back"
   fi
@@ -351,6 +443,7 @@ cmd_reset() {
   stop_all
   install_hermes
   ensure_login
+  remove_sandboxes
   safe_to_delete "$DEMO_ROOT"
   rm -rf "$HOME_DIR" "$LOGS"
   build_world
@@ -380,7 +473,7 @@ cmd_password() {
 
 case "${1:-}" in
   start) cmd_start ;;
-  stop) stop_all ;;
+  stop) stop_all && stop_sandbox_vm ;;
   reset) cmd_reset ;;
   status) cmd_status ;;
   password) shift && cmd_password "$@" ;;
