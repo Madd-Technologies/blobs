@@ -674,3 +674,51 @@ the spinner's track colours. After the turn, the chat header's quiet line says t
 the line as it always did. When the helpers' results wake the bot (the `Subagent Task…` status), the header and Home say
 "Reading the result…" for that turn instead of "Working…". Home previews a bot that is idle while its helpers work as
 "Background · <goal>".
+
+## Where a bot runs ("Runs on") (Hermes 0.21.6 and 0.22.2, verified on local copies; hermes-bot-mobile 0.1.4)
+
+**What Hermes reads.** A bot's terminal comes from its own scope (`build_profile_terminal_scope`): defaults ← that bot's
+`.env` (`TERMINAL_*`) ← its `config.yaml` `terminal:` section, the last one winning, bound per turn. The keys are `backend`
+(`local`, `docker`, `ssh`, or a cloud sandbox: `modal`, `daytona`, `vercel_sandbox`, `singularity`), `ssh_host`, `ssh_user`,
+`ssh_port`, `ssh_key` (a full path: Hermes hands it to `ssh -i` without expanding `~`) and `cwd`. Its SSH backend always
+connects with `-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10`, `-p` only when the port is not 22,
+and `-i <ssh_key>` when one is set (`tools/environments/ssh.py`).
+
+**What the app writes.** `GET`/`PUT /api/config?profile=<bot>` (the PUT deep-merges), as for approvals: `{terminal: {backend}}`
+for this computer or a container, `{terminal: {backend: "ssh", ssh_host, ssh_user, ssh_port, ssh_key}}` for another computer.
+A blank `ssh_key` is never written, since it would hide a key named in `.env`. Moving onto SSH also sets `cwd: "~"` when the
+folder was a path on the server (anything but `~…`, `.`, `auto` or `cwd`); moving back does not restore it. Cloud sandboxes
+need keys on the server, so the app only shows them.
+
+**When it takes effect.** The terminal environment is cached per chat (`session:<key>`) and reused until it has been idle for
+`TERMINAL_LIFETIME_SECONDS` (300 s; a cleanup thread checks every 60 s). A new chat runs in the new place at once; a chat that
+already ran a command stays where it was until 5 quiet minutes have passed (verified on 0.22.2: an open chat kept running
+locally, then moved). `session.info`'s `terminal_backend` is not reliable for named bots (it reports the launch profile's
+backend), so the app never uses it for this.
+
+**SSH set up by Hermes's own wizard** keeps the address in the bot's `.env` (`TERMINAL_SSH_HOST`, `_USER`, `_PORT`, `_KEY`), so
+`config.yaml` can say `backend: ssh` with no host. `GET /api/env` only returns redacted values, but
+`GET /api/tools/terminal/backends?profile=<bot>` (0.21.6+) has an `ssh` row whose `detail` is `user@host` (it reads `terminal.*`,
+then `TERMINAL_SSH_*`). The app shows that read-only and writes nothing unless the person enters another computer.
+
+**What SSH copies.** When it connects, Hermes uploads the bot's skills, cache files and credential files
+(`get_credential_file_mounts`) to `~/.hermes` on the other computer, as one tar stream over SSH, and syncs back only those
+files. The bot's home, `.env` and `.ssh` are not copied (verified: the bot's key was not on the other computer).
+
+**hermes-bot-mobile 0.1.4** adds what a phone cannot do, under `/api/plugins/hermes-bot-mobile/runs-on/`:
+
+- `GET /key?profile=` → `{public: "ssh-ed25519 … blobs-<profile>" | null, path}`; `POST /key {profile}` → `{public, path,
+  created}`, idempotent (503 without `ssh-keygen`). The key is `<profile home>/.ssh/runs_on_ed25519` (ed25519, no passphrase,
+  0600 in a 0700 folder). Hermes counts a profile's `.ssh` as a credential store, so exports leave it out, and deleting the bot
+  deletes its key (verified on 0.21.6 and 0.22.2). Only the public line and the path reach the phone.
+- `POST /check {profile, backend: "ssh"|"docker", host, user, port, key}` → `{ok: true, system}` (`uname -srm` over SSH with
+  Hermes's options, or Docker's server version) or `{ok: false, reason, detail}`. `reason` is one of `auth`, `too_many_keys`,
+  `host_key`, `unknown_host`, `refused`, `timeout`, `unreachable`, `key_missing`, `no_ssh`, `no_docker`, `docker_down` or
+  `other`. An unknown bot is 404 `"No bot called <name> on this server."`, and a host or user that ssh could read as an option
+  is 422.
+- An older plugin answers these routes with a plain 404 `Not Found`; the app then asks for a key file on the server instead.
+- `too_many_keys`: ssh offers the server's agent keys before `-i`, so a server whose agent holds many keys reaches the other
+  computer's `MaxAuthTries` ("Too many authentication failures") before the bot's key, even when that key is trusted.
+- Hermes's plugin install scan (0.21.6 and 0.22.2) reads the name of SSH's trusted-keys file in a plugin's README prose as a
+  critical `ssh_backdoor` and blocks the install, even with `--force`. The plugin's docs leave the name out; the app's own
+  words are not scanned.
