@@ -5,7 +5,7 @@ import { JsonRpcGatewayClient, type ConnectionState, type GatewayEvent } from '@
 import { SignInError } from '@/lib/hermes/auth'
 import { createKeeper, refreshDelayMs } from '@/lib/hermes/keeper'
 import { advertiseServerRequests, createRequestBridge } from '@/lib/hermes/server-requests'
-import { gatewayWsUrl, HermesHttpError, type ServerConfig } from '@/lib/hermes/server'
+import { gatewayWsUrl, HermesHttpError, probeServer, type ServerConfig } from '@/lib/hermes/server'
 import { secure } from '@/lib/secure'
 
 const CONFIG_KEY = 'hermesbot.server'
@@ -47,6 +47,8 @@ interface ConnectionStore {
   signedOut: SignedOut | null
   /** Bumps on every successful (re)connect so screens can re-resume sessions. */
   generation: number
+  /** The Hermes version the server reported when it was last reached (`/api/status`); null when it did not say. */
+  serverVersion: string | null
   hydrate: () => Promise<void>
   saveConfig: (config: ServerConfig) => Promise<void>
   forget: () => Promise<void>
@@ -154,6 +156,7 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
   lastError: null,
   signedOut: null,
   generation: 0,
+  serverVersion: null,
 
   hydrate: async () => {
     const raw = await secure.get(CONFIG_KEY)
@@ -208,13 +211,14 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
     })
 
     try {
-      const asked = await Promise.race([
+      const [asked, version] = await Promise.race([
         (async () => {
           await gateway.connect(await openUrl())
 
           // Before any chat is opened: a newer server withdraws every prompt from a client that has not said
-          // it can answer them. An older server has no such call and keeps using events.
-          return advertiseServerRequests(gateway)
+          // it can answer them. An older server has no such call and keeps using events. The version says what
+          // else the server reports (`lib/hermes/capabilities.ts`), so it is known before chats open too.
+          return Promise.all([advertiseServerRequests(gateway), probeServer(config.baseUrl).then(probe => probe.version ?? null)])
         })(),
         deadline,
       ])
@@ -224,7 +228,7 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
       }
 
       startStableTimer()
-      set(s => ({ status: 'online', lastError: null, generation: s.generation + 1 }))
+      set(s => ({ status: 'online', lastError: null, serverVersion: version, generation: s.generation + 1 }))
     } catch (error) {
       if (error instanceof SignInError && error.kind === 'expired') {
         await signOut(get)

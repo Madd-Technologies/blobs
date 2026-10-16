@@ -173,6 +173,9 @@ h1, h2, h3, p { margin: 0; }
 .steps li.now span.elapsed:last-child { margin-left: 0; font-size: 13px; color: var(--text2); white-space: pre; font-variant-numeric: tabular-nums; }
 .check { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .spin { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1.6px solid var(--track); border-top-color: var(--text2); animation: spin .9s linear infinite; }
+/* A background run's newest output line, under its step, as on the app's activity line. */
+.live-out { margin: 4px 0 0 20px; font: 12px/18px 'Geist Mono', ui-monospace, monospace; color: var(--text2); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.needs { margin-top: 12px; font-size: 12px; color: var(--text2); }
 
 .facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; padding-top: 40px; padding-bottom: 72px; font-size: 14px; color: var(--text2); }
 

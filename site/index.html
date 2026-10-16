@@ -98,12 +98,13 @@
       </div>
     </template>
     <template data-card="forge">
-      <p class="card-text">Running the test suite before the release.</p>
+      <p class="card-text">Running the full test suite on every browser. It takes a while, so it runs in the background.</p>
       <ul class="steps">
         <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Read package.json<span>0.2s</span></li>
-        <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran npm run clean<span>1.4s</span></li>
-        <li class="now"><span class="spin" aria-hidden="true"></span>Running npm test<span class="elapsed" data-elapsed="38"> · 38s</span></li>
+        <li class="now"><span class="spin" aria-hidden="true"></span>Running npm run test:browsers<span class="elapsed" data-elapsed="842"> · 14m 2s</span></li>
       </ul>
+      <p class="live-out" data-lines="firefox   cart      103/214|firefox   coupons   120/214|firefox   checkout  172/214|firefox   orders    201/214">firefox   cart      103/214</p>
+      <p class="needs">Live output from long runs needs Hermes Agent 0.22.</p>
     </template>
     <template data-card="scribe">
       <p class="card-text">The release notes are ready: 12 fixes and 3 new features, grouped by area.</p>

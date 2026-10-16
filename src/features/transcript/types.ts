@@ -36,6 +36,37 @@ export interface Step {
   diff?: string
   /** The file a step wrote or read, as an absolute path on the server, to open in the viewer. */
   file?: string
+  /**
+   * The step started work the server keeps running after it returned: a background command (`proc_…`) or a batch of
+   * helpers (`deleg_…`). Its live state is the `Job` with this id, when the server reports it (Hermes 0.22+).
+   */
+  jobId?: string
+}
+
+/**
+ * Work that outlives the step that started it (Hermes 0.22+): a command the server runs in the background, or helpers
+ * (subagents) a bot sent off. Only what the server reports: output it relayed, children it said finished.
+ */
+export interface Job {
+  /** The process id (`proc_…`) or the delegation id (`deleg_…`). */
+  id: string
+  kind: 'command' | 'helpers'
+  /** The command, or what the helpers were asked to do. */
+  label: string
+  state: 'running' | 'done' | 'failed'
+  /** Wall-clock ms it started (or when the app first saw it, less the uptime the server gave). */
+  startedAt?: number
+  /** Wall-clock ms it ended, once known. */
+  endedAt?: number
+  /** A command's newest line of output. */
+  line?: string
+  /** A command's output so far (its tail), for the expanded step. */
+  output?: string
+  exitCode?: number
+  /** Helpers: how many the server said it started (`task_count`). */
+  total?: number
+  /** Helpers: each child's state, by subagent id. */
+  children?: Record<string, 'running' | 'done' | 'failed'>
 }
 
 /** `pending` waits for the user, `answered` was handled (here or elsewhere), `expired` timed out. */
@@ -103,6 +134,13 @@ export interface TranscriptState {
    * is the bot working, and when the turn ends its last reply (the summary for the person) is shown.
    */
   routineFrom?: number | null
+  /**
+   * The server reports work that outlives a step (Hermes 0.22+: background commands' output, helpers' progress). Off, those
+   * events are ignored and every step reads as it always has.
+   */
+  liveWork?: boolean
+  /** Background commands and helpers this chat's steps started, by id (only with `liveWork`). */
+  jobs?: Record<string, Job>
   /** Counter for ids of items that have no server id. */
   nextId: number
 }

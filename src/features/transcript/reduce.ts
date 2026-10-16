@@ -7,7 +7,8 @@
 import type { AttachmentChip } from '../../lib/hermes/attachments.ts'
 import { imageOfResult } from '../../lib/hermes/media.ts'
 import type { ApprovalChoice, ClarifyQuestion, ClarifyRequestPayload, HermesEvent, ToolResult } from '../../lib/hermes/protocol.ts'
-import type { Item, PromptItem, Step, StepState, TranscriptState } from './types.ts'
+import { jobIdOfResult, jobOfResult, withOutput, withSubagent } from './jobs.ts'
+import type { Item, Job, PromptItem, Step, StepState, TranscriptState } from './types.ts'
 
 export function initialTranscript(items: Item[] = []): TranscriptState {
   return {
@@ -411,6 +412,11 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
     }
 
     case 'status.update':
+      // With live work, a background job's news (finished, failed, a heartbeat's output) is the job's own line, not the header's.
+      if (state.liveWork && event.payload.kind === 'process') {
+        return state
+      }
+
       return { ...state, statusLine: quietStatus(event.payload.text) || null }
 
     case 'tool.generating':
@@ -447,6 +453,9 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
     case 'tool.complete': {
       const { tool_id: toolId, name, args, duration_s: durationS, result } = event.payload
       const read = readResult(result)
+      // The step returned but left work running (a background command, helpers): that work is followed as a job.
+      const jobId = state.liveWork ? jobIdOfResult(name, result) : undefined
+      let job: Job | undefined
       const finish = (step: Step): Step => ({
         ...step,
         // A non-zero exit that is only an answer (or a signal) is a finished step, with its exit code kept.
@@ -459,19 +468,56 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
         ...(read.image && (step.name === 'image_generate' || name === 'image_generate') ? { image: read.image } : {}),
         ...(read.diff || event.payload.inline_diff ? { diff: read.diff ?? event.payload.inline_diff } : {}),
         ...(read.file ? { file: read.file } : {}),
+        ...(jobId ? { jobId } : {}),
       })
+      const follow = (step: Step): Step => {
+        const done = finish(step)
+        job = jobId ? jobOfResult({ ...done, name }, result, now, state.jobs?.[jobId]) : undefined
+
+        return done
+      }
+      const jobs = (): Partial<TranscriptState> => (job ? { jobs: { ...state.jobs, [job.id]: job } } : {})
       // The tool ran, so any approval it was waiting on has been answered (maybe on another device).
       const base = settlePending(state.items, 'answered').map(item => (item.kind === 'approval' && item.state === 'answered' && !item.choice ? { ...item, choice: read.state === 'blocked' ? ('deny' as const) : ('once' as const) } : item))
-      const updated = setStep(base, toolId, finish)
+      const updated = setStep(base, toolId, follow)
 
       if (updated) {
-        return withItems(state, updated, { phase: 'thinking' })
+        return withItems(state, updated, { phase: 'thinking', ...jobs() })
       }
 
       // Complete without a start (resumed mid-turn): show it as a finished step.
-      const step = finish({ toolId, name, context: contextFromArgs(args), state: 'done', args })
+      const step = follow({ toolId, name, context: contextFromArgs(args), state: 'done', args })
 
-      return { ...pushStep(state, closeStreaming(base), step), phase: 'thinking' }
+      return { ...pushStep(state, closeStreaming(base), step), phase: 'thinking', ...jobs() }
+    }
+
+    case 'agent.terminal.output': {
+      const { process_id: id, chunk } = event.payload
+
+      if (!state.liveWork || !id || typeof chunk !== 'string') {
+        return state
+      }
+
+      // Output from a command this chat has not seen start (it began before the chat was opened): followed all the same.
+      const job: Job = state.jobs?.[id] ?? { id, kind: 'command', label: '', state: 'running', startedAt: now }
+
+      return { ...state, jobs: { ...state.jobs, [id]: withOutput(job, chunk) } }
+    }
+
+    case 'subagent.spawn_requested':
+    case 'subagent.start':
+    case 'subagent.progress':
+    case 'subagent.tool':
+    case 'subagent.complete': {
+      const id = event.payload.delegation_id ?? event.payload.subagent_id
+
+      if (!state.liveWork || !id) {
+        return state
+      }
+
+      const job = withSubagent(state.jobs?.[id], event.type, event.payload, now)
+
+      return job && job !== state.jobs?.[id] ? { ...state, jobs: { ...state.jobs, [id]: job } } : state
     }
 
     case 'todo.updated':

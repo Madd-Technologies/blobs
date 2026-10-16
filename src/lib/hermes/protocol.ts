@@ -264,8 +264,9 @@ export type MessageStatus = 'complete' | 'interrupted' | 'error'
 
 export interface ToolResult {
   output?: string
-  exit_code?: number
-  error?: string
+  exit_code?: number | null
+  /** Hermes sends `null` when there was none. */
+  error?: string | null
   /** `blocked` when the user denied an approval. */
   status?: string
   [key: string]: unknown
@@ -306,6 +307,49 @@ export interface ClarifyRequestPayload {
   multi_select?: boolean
 }
 
+/**
+ * A `subagent.*` event (helpers a bot sent off with `delegate_task`), as far as the app reads it. Hermes 0.22 always runs them in
+ * the background: these frames keep coming after the step that started them returned.
+ */
+export interface SubagentEventPayload {
+  goal?: string
+  /** How many children the delegation started. */
+  task_count?: number
+  task_index?: number
+  subagent_id?: string
+  delegation_id?: string
+  /** On `subagent.complete`: `completed`, `failed`, `error`, `timeout` or `interrupted`. */
+  status?: string
+  duration_seconds?: number
+}
+
+/** A `process.list` row: a background process the session owns, running or recently finished. */
+export interface ProcessListRow {
+  /** The process id (`proc_…`), not a chat session. */
+  session_id: string
+  command?: string
+  /** Seconds since it started at the moment of the call; it keeps counting after the process exits. */
+  uptime_seconds?: number
+  /** `running` or `exited`. */
+  status?: string
+  exit_code?: number | null
+  /** Epoch seconds. */
+  exited_at?: number | null
+  /** The last 4000 characters of output. */
+  output_tail?: string | null
+  output_preview?: string
+}
+
+/** A `subagent.list` row: a child that is still running (finished ones drop out of the list). */
+export interface SubagentListRow {
+  subagent_id: string
+  goal?: string | null
+  delegation_id?: string | null
+  /** Epoch seconds. */
+  started_at?: number | null
+  status?: string | null
+}
+
 /** Payload of every event the app handles. Events not listed here are ignored. */
 export interface EventPayloads {
   'gateway.ready': { replay_epoch?: string; heartbeat?: boolean }
@@ -334,6 +378,13 @@ export interface EventPayloads {
     inline_diff?: string
   }
   'todo.updated': { todos?: unknown[]; [key: string]: unknown }
+  /** Hermes 0.22: what a background command printed, sent to the chat whose step started it. */
+  'agent.terminal.output': { process_id: string; chunk: string }
+  'subagent.spawn_requested': SubagentEventPayload
+  'subagent.start': SubagentEventPayload
+  'subagent.progress': SubagentEventPayload
+  'subagent.tool': SubagentEventPayload
+  'subagent.complete': SubagentEventPayload
   'approval.request': ApprovalRequestPayload
   'clarify.request': ClarifyRequestPayload
   'secret.request': { request_id: string; prompt?: string; env_var?: string }
@@ -389,6 +440,12 @@ const EVENT_TYPES: ReadonlySet<string> = new Set<EventType>([
   'tool.progress',
   'tool.complete',
   'todo.updated',
+  'agent.terminal.output',
+  'subagent.spawn_requested',
+  'subagent.start',
+  'subagent.progress',
+  'subagent.tool',
+  'subagent.complete',
   'approval.request',
   'clarify.request',
   'secret.request',

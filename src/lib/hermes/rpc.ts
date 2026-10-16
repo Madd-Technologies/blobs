@@ -25,6 +25,7 @@ import type {
   AttachedPdfResult,
   HostedRoom,
   ModelOptions,
+  ProcessListRow,
   ProfileConfigureParams,
   ProfileConfigureResult,
   ProfileCreateParams,
@@ -34,6 +35,7 @@ import type {
   SessionCreateResult,
   SessionInfo,
   SessionResumeResult,
+  SubagentListRow,
 } from './protocol.ts'
 
 /** The slice of the gateway client that `call` needs. */
@@ -163,6 +165,10 @@ export interface RpcMethods {
   }
   'groups.retry': { params: { room_id: string; task_id: string }; result: { retried: boolean } }
   'groups.disband': { params: { room_id: string; cancel_id?: string }; result: { tombstone: Record<string, unknown> } }
+  /** Background processes the session owns, running or recently finished (Hermes Desktop's status stack polls it). */
+  'process.list': { params: { session_id: string }; result: { processes: ProcessListRow[] } }
+  /** Helpers (subagents) the session sent off that are still running. */
+  'subagent.list': { params: { session_id: string }; result: { subagents: SubagentListRow[]; delegations?: unknown[] } }
   'tools.configure': {
     params: { profile?: string; action: 'enable' | 'disable'; names: string[]; session_id?: string }
     result: Record<string, unknown>
