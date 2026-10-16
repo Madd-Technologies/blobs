@@ -163,7 +163,7 @@ const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit
     case 'activity':
       return (
         <View style={styles.activity}>
-          <ActivityLine item={item} botName={botName} latest={latest} carriedOn={entry.carriedOn} onOpenScreen={() => router.push({ pathname: '/screens/[profile]', params: { profile } })} />
+          <ActivityLine item={item} botName={botName} profile={profile} latest={latest} carriedOn={entry.carriedOn} onOpenScreen={() => router.push({ pathname: '/screens/[profile]', params: { profile } })} />
           {entry.made?.map(path => (
             <ServerPicture key={path} path={path} name={path.split('/').pop() || 'Picture'} profile={profile} />
           ))}

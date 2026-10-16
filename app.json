@@ -1,14 +1,24 @@
 {
   "expo": {
-    "name": "HermesBot",
-    "slug": "hermesbot",
+    "name": "Blobs",
+    "slug": "blobs",
+    "owner": "madd-technologies",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.maddtechnologies.blobs"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.maddtechnologies.blobs",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSLocalNetworkUsageDescription": "Blobs connects to the Hermes server you choose, which can be on your local network."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +28,12 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": true,
-      "package": "com.maddtechnologies.blobs"
+      "package": "com.maddtechnologies.blobs",
+      "permissions": [
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -35,14 +50,14 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "HermesBot uses the microphone to record voice messages you send to your bots."
+          "microphonePermission": "Blobs uses the microphone to record voice messages you send to your bots."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "HermesBot lets you pick photos to send to your bots.",
-          "cameraPermission": "HermesBot uses the camera to take photos you send to your bots.",
+          "photosPermission": "Blobs lets you pick photos to send to your bots.",
+          "cameraPermission": "Blobs uses the camera to take photos you send to your bots.",
           "microphonePermission": false
         }
       ],
@@ -59,6 +74,11 @@
     "scheme": "hermesbot",
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "72a92f6b-f4e9-485c-9371-56363acd0835"
+      }
     }
   }
 }

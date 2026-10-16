@@ -1,0 +1,41 @@
+# Scribe's finished reply, its file as a chip; tapping the chip opens the release notes in the viewer. Changes nothing.
+appId: ${APP_ID}
+name: scribe
+---
+- runFlow: _home.yaml
+- scrollUntilVisible:
+    element: "Scribe\\..*"
+- runFlow:
+    file: _tap.yaml
+    env:
+      TARGET: "Scribe\\..*"
+      THEN: "Message Scribe.*"
+- extendedWaitUntil:
+    visible: "The release notes for 1.4 are ready.*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- evalScript:
+    script: ${output.clip = 'scribe'}
+    label: clip start
+- takeScreenshot: 05-scribe
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 1500
+- runFlow:
+    file: _tap.yaml
+    env:
+      TARGET: "Open release-notes-1.4.md"
+      THEN: ".*Saved carts.*"
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: 06-scribe-file
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 2000
+- evalScript:
+    script: ${output.clip = 'done'}
+    label: clip end

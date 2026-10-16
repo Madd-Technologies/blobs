@@ -4,7 +4,8 @@
  * Run by scripts/demo/demo.sh, not by hand.
  *
  *   bots     create the five bots (before their plugins are installed)
- *   world    put each bot into its state: chats, the routine, the room
+ *   world    put each bot into its state: chats, the routine, the room, Scout's screen
+ *   screen   only Scout's Bot Screen (start it, open the shop)
  *   status   check the seeded live states are still there (exit 1 if not)
  *
  * Every word the bots say comes from scripts/demo/demo-llm.mjs; this script only sends the messages
@@ -25,8 +26,8 @@ const baseUrl = process.env.DEMO_URL ?? 'http://127.0.0.1:9219'
 const command = process.argv[2]
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
-if (command !== 'bots' && command !== 'world' && command !== 'status') {
-  console.error('usage: seed.ts bots|world|status (run through scripts/demo/demo.sh)')
+if (command !== 'bots' && command !== 'world' && command !== 'screen' && command !== 'status') {
+  console.error('usage: seed.ts bots|world|screen|status (run through scripts/demo/demo.sh)')
   process.exit(2)
 }
 
@@ -132,10 +133,22 @@ function expect(ok: boolean, what: string) {
   }
 }
 
-/** Opens a bot's main chat the way the app does (hidden, titled "Bot Chat") and returns its live id. */
+/**
+ * Opens a bot's main chat the way the app does (hidden, titled "Bot Chat") and returns its live id. An app that is
+ * signed in while the demo resets makes that chat itself as soon as the bot appears; a title is unique per bot, so the
+ * seeder then uses the app's chat rather than starting a second one the bot's row would never open.
+ */
 async function openChat(profile: string): Promise<string> {
+  const { profiles } = await call(client, 'profiles.list', { include_sessions: true })
+  const existing = profiles.find(row => row.name === profile)?.canonical_session
+
+  if (existing?.title === 'Bot Chat') {
+    return (await call(client, 'session.resume', { session_id: existing.resolved_id ?? existing.id, profile, omit_messages: true })).session_id
+  }
+
   const created = await call(client, 'session.create', { profile, title: 'Bot Chat', hidden: true, follow_profile_config: true })
-  await call(client, 'session.title', { session_id: created.session_id, title: 'Bot Chat' }).catch(() => undefined)
+  const titled = await call(client, 'session.title', { session_id: created.session_id, title: 'Bot Chat' }).catch(() => undefined)
+  expect(titled?.title === undefined || titled.title === 'Bot Chat', `${profile}'s chat is its "Bot Chat"`)
 
   return created.session_id
 }
@@ -240,6 +253,27 @@ async function room() {
   }
 }
 
+/**
+ * Scout's Bot Screen: its sandbox (a Linux container in the demo's Colima VM) starts a screen, and Scout opens the
+ * shop in its browser there, so watching and taking over shows the fictional storefront. Skipped without Colima.
+ */
+async function screen(scout: string) {
+  const status = await client.request<{ supported?: boolean; installed?: boolean; placement?: string; blocker?: string | null }>('display.status', { profile: 'scout' }, 60_000)
+
+  if (!status.supported || !status.installed || !String(status.placement).startsWith('terminal:')) {
+    console.log(`  --   Scout has no Bot Screen here (${status.blocker ?? status.placement ?? 'unsupported'}); skipped`)
+
+    return
+  }
+
+  const started = await client.request<{ running?: boolean }>('display.start', { profile: 'scout' }, 240_000)
+  expect(started.running === true, "Scout's Bot Screen is up")
+  const mark = seen.length
+  await turn(scout, 'Open the shop preview')
+  const opened = seen.slice(mark).some(event => event.session_id === scout && event.type === 'tool.complete' && JSON.stringify(event).includes('opened http://localhost:4173'))
+  expect(opened, "the shop is open on Scout's screen")
+}
+
 async function world() {
   // Forge: a finished run first, then the long one it is still on.
   const forge = await openChat('forge')
@@ -254,8 +288,9 @@ async function world() {
   await routine()
   await room()
 
-  // Scout: a question with options, waiting for you.
+  // Scout: its screen first, then a question with options, waiting for you.
   const scout = await openChat('scout')
+  await screen(scout)
   await call(client, 'prompt.submit', { session_id: scout, text: 'Compare the three hosting plans for the new site' })
   expect(await waitFor(() => askedIn(scout, 'clarify')), 'Scout is asking which plan matters most')
 
@@ -275,7 +310,10 @@ async function status() {
     const row = profiles.find(entry => entry.name === profile)
     const keys = new Set([row?.canonical_session?.id, row?.canonical_session?.resolved_id].filter(Boolean))
 
-    return sessions.find(entry => keys.has(entry.session_key))?.status ?? 'not open'
+    // A chat open in the app as well is listed once per client; the strongest state is the bot's.
+    const states = sessions.filter(entry => keys.has(entry.session_key)).map(entry => entry.status)
+
+    return (['waiting', 'working', 'starting', 'idle'] as const).find(state => states.includes(state)) ?? 'not open'
   }
 
   const want: [string, string, string][] = [
@@ -288,6 +326,12 @@ async function status() {
     const now = stateOf(profile)
     expect(now === state, `${what} (${now})`)
   }
+
+  const screen = await client.request<{ placement?: string; running?: boolean }>('display.status', { profile: 'scout' }, 60_000)
+
+  if (String(screen.placement).startsWith('terminal:')) {
+    expect(screen.running === true, `Scout's Bot Screen is up (${screen.running ? 'running' : 'stopped'})`)
+  }
 }
 
 try {
@@ -296,6 +340,8 @@ try {
 
   if (command === 'bots') {
     await createBots()
+  } else if (command === 'screen') {
+    await screen(await openChat('scout'))
   } else if (command === 'world') {
     await world()
   } else {

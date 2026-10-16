@@ -1,0 +1,57 @@
+# The "Launch week" room: Scout, Forge and Scribe in one conversation, two exchanges seeded. On the last pass (ACT=true)
+# a mention chip starts "@scout", the question goes out, and Scout answers in the room: a reset brings the room back.
+appId: ${APP_ID}
+name: room
+---
+- runFlow: _home.yaml
+- scrollUntilVisible:
+    element: "Launch week, a room.*"
+- runFlow:
+    file: _tap.yaml
+    env:
+      TARGET: "Launch week, a room.*"
+      THEN: "Message Launch week.*"
+- extendedWaitUntil:
+    visible: "Draft: .*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- evalScript:
+    script: ${output.clip = 'room'}
+    label: clip start
+- takeScreenshot: 10-room
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 1500
+- runFlow:
+    when:
+      true: ${ACT == 'true'}
+    commands:
+      # A chip only inserts "@scout ": focus the composer first (clearing any draft), so the typing lands there too.
+      - tapOn:
+          text: "Message Launch week.*"
+          retryTapIfNoChange: false
+      - eraseText: 60
+      - tapOn:
+          text: "Mention Scout"
+          retryTapIfNoChange: false
+      - inputText: "can you check the feeds?"
+      - tapOn:
+          text: "Send"
+          retryTapIfNoChange: false
+      - extendedWaitUntil:
+          visible: "Checked\\. Three mentions overnight.*"
+          timeout: 60000
+      - hideKeyboard
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - takeScreenshot: 11-room-reply
+      - runFlow:
+          file: _hold.yaml
+          env:
+            MS: 2000
+- evalScript:
+    script: ${output.clip = 'done'}
+    label: clip end

@@ -1,0 +1,56 @@
+# Signs the app in to the demo Hermes when it shows its Connect screen; does nothing when it is already signed in.
+# Nothing ever prints the demo password. On iOS, capture.ts puts it on the simulator's pasteboard just before this runs
+# and clears it straight after, so the flow pastes it. Android has no pasteboard to fill from outside: the flow only
+# focuses the field, and capture.ts, seeing a password field focused, types it in and presses Go while this waits.
+appId: ${APP_ID}
+name: Sign in to the demo
+---
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: "Connect to Hermes|Scout.*"
+    timeout: 30000
+- runFlow:
+    when:
+      visible: "Connect to Hermes"
+    commands:
+      - runFlow:
+          when:
+            visible: "Use a username and password"
+          commands:
+            # A toggle: Maestro's retry on "nothing changed yet" would flip it straight back.
+            - tapOn:
+                text: "Use a username and password"
+                retryTapIfNoChange: false
+            - waitForAnimationToEnd
+      - tapOn: "Server address"
+      - eraseText: 80
+      - inputText: ${DEMO_URL}
+      # Each field shares its name with the label above it: index 1 is the field.
+      - tapOn:
+          text: "Username"
+          index: 1
+      - eraseText: 40
+      - inputText: "demo"
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - longPressOn:
+                text: "Password"
+                index: 1
+            - tapOn: "Paste"
+            # The keyboard covers Sign in; the password field's Go key submits.
+            - pressKey: Enter
+      - runFlow:
+          when:
+            platform: Android
+          commands:
+            # The keyboard covers the password field on this shorter screen.
+            - hideKeyboard
+            - tapOn:
+                text: "Password"
+                index: 1
+- extendedWaitUntil:
+    visible: "Scout.*"
+    timeout: 60000

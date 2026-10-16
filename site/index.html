@@ -98,12 +98,13 @@
       </div>
     </template>
     <template data-card="forge">
-      <p class="card-text">Running the test suite before the release.</p>
+      <p class="card-text">Running the full test suite on every browser. It takes a while, so it runs in the background.</p>
       <ul class="steps">
         <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Read package.json<span>0.2s</span></li>
-        <li><svg class="check" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>Ran npm run clean<span>1.4s</span></li>
-        <li class="now"><span class="spin" aria-hidden="true"></span>Running npm test<span class="elapsed" data-elapsed="38"> · 38s</span></li>
+        <li class="now"><span class="spin" aria-hidden="true"></span>Running npm run test:browsers<span class="elapsed" data-elapsed="842"> · 14m 2s</span></li>
       </ul>
+      <p class="live-out" data-lines="firefox   cart      103/214|firefox   coupons   120/214|firefox   checkout  172/214|firefox   orders    201/214">firefox   cart      103/214</p>
+      <p class="needs">Live output from long runs needs Hermes Agent 0.22.</p>
     </template>
     <template data-card="scribe">
       <p class="card-text">The release notes are ready: 12 fixes and 3 new features, grouped by area.</p>
@@ -120,7 +121,7 @@
       </div>
     </template>
 
-    <p class="facts wrap"><span>Works with Hermes Agent 0.21.5 and up</span><span aria-hidden="true">·</span><span>MIT licensed</span><span aria-hidden="true">·</span><span>No account</span><span aria-hidden="true">·</span><span>No analytics</span><span aria-hidden="true">·</span><span>iPhone, iPad and Android</span></p>
+    <p class="facts wrap"><span>Works with Hermes Agent 0.21.5 and up</span><span aria-hidden="true">·</span><span>MIT licensed</span><span aria-hidden="true">·</span><span>No account</span><span aria-hidden="true">·</span><span>No analytics</span><span aria-hidden="true">·</span><span>iPhone and Android</span></p>
 
     <section id="scenes" class="wrap scenes" aria-labelledby="scenes-title">
       <h2 id="scenes-title" class="big">Quiet until it's your turn.</h2>
@@ -322,7 +323,7 @@
       <h2 id="get-title" class="big">Get the beta.</h2>
       <p class="section-lede">Blobs is in beta on both platforms. It's free.</p>
       <div class="list">
-        <div><span>iPhone and iPad</span><span class="value">TestFlight · opening soon</span></div>
+        <div><span>iPhone</span><span class="value">TestFlight · opening soon</span></div>
         <div><span>Android</span><span class="value">Google Play · opening soon</span></div>
         <a href="https://github.com/Madd-Technologies/blobs"><span>Source code</span><span class="value">GitHub, MIT licence</span></a>
       </div>

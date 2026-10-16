@@ -1,0 +1,38 @@
+# Courier's dashboard, opened from Home's strip: open requests, requests per day, and the board with the late order
+# that needs you; the board slides over to the Done column. Changes nothing.
+appId: ${APP_ID}
+name: dashboard
+---
+- runFlow: _home.yaml
+- runFlow:
+    file: _tap.yaml
+    env:
+      TARGET: "Courier's dashboard.*"
+      THEN: "Message Courier"
+# The panels can take a few seconds to arrive; the clip starts once they are there.
+- extendedWaitUntil:
+    visible: "Open requests: 7"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- evalScript:
+    script: ${output.clip = 'dashboard'}
+    label: clip start
+- takeScreenshot: 07-dashboard
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 1500
+- swipe:
+    from: "Doing · 3"
+    direction: LEFT
+- waitForAnimationToEnd:
+    timeout: 1500
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 1500
+- evalScript:
+    script: ${output.clip = 'done'}
+    label: clip end

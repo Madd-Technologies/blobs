@@ -1,0 +1,53 @@
+# Forge at work: its long browser run with the step's time ticking, then the finished run above it opened to its steps
+# (the storyboard's "See every step"). Changes nothing.
+appId: ${APP_ID}
+name: forge
+---
+- runFlow: _home.yaml
+- runFlow:
+    file: _tap.yaml
+    env:
+      TARGET: "Forge\\..*"
+      THEN: "Message Forge.*"
+- extendedWaitUntil:
+    visible: "Running npm run test:browsers.*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- evalScript:
+    script: ${output.clip = 'forge'}
+    label: clip start
+- takeScreenshot: 03-forge-working
+# Long enough to see the time tick over a few seconds.
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 3500
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          text: "Ran 3 steps.*"
+          retryTapIfNoChange: false
+# Android: capture.ts taps "Ran 3 steps" with adb where it sits on the rig's emulator (see docs/CAPTURE.md, "adb tap");
+# the opened run lists its steps.
+- runFlow:
+    when:
+      platform: Android
+    label: adb tap 21%,49%
+    commands:
+      - extendedWaitUntil:
+          visible: "Ran npm test"
+          timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: 04-forge-steps
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 2000
+- evalScript:
+    script: ${output.clip = 'done'}
+    label: clip end

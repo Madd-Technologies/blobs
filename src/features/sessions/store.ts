@@ -14,6 +14,7 @@ import type { RequestBridge } from '../../lib/hermes/server-requests.ts'
 import { HermesHttpError, type ServerConfig } from '../../lib/hermes/server.ts'
 import { historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter, turnIsStored } from '../transcript/history.ts'
 import { routineDelivery } from '../transcript/injected.ts'
+import { withLists } from '../transcript/jobs.ts'
 import { chipOf, messageFor, refusal, uploadAttachment, type PendingFile, type Uploaded } from '../../lib/hermes/attachments.ts'
 import { answerPrompt, appendError, appendOutput, appendUser, dropPendingUser, expirePrompt, failUser, finishOutput, initialTranscript, reduceEvent, revealLastReply, startOutput } from '../transcript/reduce.ts'
 import { skillInvocation } from '../transcript/userContent.ts'
@@ -80,6 +81,11 @@ export interface SessionsDeps {
   timers?: QueueTimers
   /** Waits between retries of a settling session. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * The server reports work that outlives a step (Hermes 0.22+, `lib/hermes/capabilities.ts`): background commands and helpers
+   * are then followed. Absent or false, every step reads as it always has.
+   */
+  liveWork?: () => boolean
 }
 
 export type RespondResult = 'answered' | 'expired' | 'failed'
@@ -92,7 +98,7 @@ export interface ClarifyAnswer {
 }
 
 /** Events that arrive in bulk and can wait for the next flush; everything else flushes at once. */
-const BATCHABLE = new Set<HermesEvent['type']>(['message.delta', 'thinking.delta', 'reasoning.delta', 'status.update', 'session.usage'])
+const BATCHABLE = new Set<HermesEvent['type']>(['message.delta', 'thinking.delta', 'reasoning.delta', 'status.update', 'session.usage', 'agent.terminal.output', 'subagent.tool', 'subagent.progress'])
 
 export function blankSession(profile: string): BotSession {
   return { profile, phase: 'idle', error: null, storedId: null, liveId: null, transcript: initialTranscript(), info: null, rows: [], hasOlder: false, loadingOlder: false }
@@ -243,8 +249,42 @@ export function createSessions(deps: SessionsDeps) {
 
     if (event && profile) {
       queueFor(profile).push(event)
+
+      // A background job's news (it finished, failed or sent a heartbeat): the list has its exit status and output.
+      if (event.type === 'status.update' && event.payload.kind === 'process') {
+        void refreshJobs(profile)
+      }
     }
   })
+
+  /**
+   * What the server is still running for a bot's open chat (Hermes 0.22+): its background commands and its helpers, merged into the
+   * jobs its steps started. Run when the chat opens, when a job sends news, and every so often while one runs on screen.
+   */
+  async function refreshJobs(profile: string): Promise<void> {
+    const { liveId, transcript } = get(profile)
+
+    if (!liveId || !transcript.liveWork) {
+      return
+    }
+
+    const [processes, subagents] = await Promise.all([
+      call(deps.client, 'process.list', { session_id: liveId }).then(
+        result => result.processes ?? [],
+        () => null,
+      ),
+      call(deps.client, 'subagent.list', { session_id: liveId }).then(
+        result => result.subagents ?? [],
+        () => null,
+      ),
+    ])
+
+    if (get(profile).liveId !== liveId || (!processes && !subagents)) {
+      return
+    }
+
+    patchTranscript(profile, current => ({ ...current, jobs: withLists(current.jobs, processes, subagents, now()) }))
+  }
 
   // ── opening ────────────────────────────────────────────────────────────────────────────────────
 
@@ -340,6 +380,10 @@ export function createSessions(deps: SessionsDeps) {
       queues.get(profile)?.dispose()
       queues.delete(profile)
 
+      const liveWork = deps.liveWork?.() ?? false
+      // The same chat opened again keeps the jobs it was following (a helper count the lists cannot give back).
+      const kept = get(profile).storedId === storedId ? get(profile).transcript.jobs : undefined
+
       patch(profile, {
         phase: 'ready',
         error: null,
@@ -349,11 +393,15 @@ export function createSessions(deps: SessionsDeps) {
         rows: page.messages,
         hasOlder: page.pagination.returned >= PAGE_SIZE,
         loadingOlder: false,
-        transcript: buildTranscript(page.messages, resumed),
+        transcript: { ...buildTranscript(page.messages, resumed), ...(liveWork ? { liveWork, ...(kept ? { jobs: kept } : {}) } : {}) },
       })
 
       // Prompts still waiting on a person (Hermes 0.21.5+): show them, and be able to answer them.
       deps.requests?.ingest(resumed.session_id, resumed.open_requests)
+
+      if (liveWork) {
+        void refreshJobs(profile)
+      }
     } catch (error) {
       // A failed silent re-open keeps what was on screen; the first open shows the error.
       patch(profile, bot => ({ phase: bot.phase === 'ready' && silent ? 'ready' : 'error', error: describeError(error) }))
@@ -1041,7 +1089,7 @@ export function createSessions(deps: SessionsDeps) {
     queues.clear()
   }
 
-  return { store, open, openChat, openLinked, newChat, leaveSide, forget, listChats, deleteChat, loadOlder, send, runCommand, showOutput, stop, respondApproval, respondClarify, respondSecret, respondSudo, reattachAll, knownLiveIds, dispose }
+  return { store, open, openChat, openLinked, newChat, leaveSide, forget, listChats, deleteChat, loadOlder, send, runCommand, showOutput, stop, respondApproval, respondClarify, respondSecret, respondSudo, reattachAll, knownLiveIds, refreshJobs, dispose }
 }
 
 export type Sessions = ReturnType<typeof createSessions>

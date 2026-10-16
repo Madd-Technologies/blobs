@@ -18,10 +18,11 @@ import { pendingPrompts } from '@/features/transcript/reduce'
 import { buildDisplay, type DisplayItem } from '@/features/transcript/display'
 import { botLastActive } from '@/features/attention/derive'
 import { runningLine } from '@/features/transcript/display'
+import { jobsLine, runningJobs } from '@/features/transcript/jobs'
 import { ageLabel } from '@/features/roster/derive'
 import type { PendingFile } from '@/lib/hermes/attachments'
 import { classify, helpGroups, helpText, type SlashAction } from '@/lib/hermes/slash'
-import { useNow } from '@/lib/useNow'
+import { useNow, useNowMs } from '@/lib/useNow'
 import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useViewableRows } from '@/lib/useViewableRows'
 import { useBotView, useFaceColor } from '@/stores/bots'
@@ -40,7 +41,7 @@ import { BotTint } from '@/theme/ThemeProvider'
  * The quiet line under the bot's name. Once the chat is open its own transcript is the truth about
  * what the bot is doing; the polled status (which lags by seconds) only fills in before that.
  */
-function statusLine(view: BotView | undefined, session: BotSession | undefined, nowS: number): string {
+function statusLine(view: BotView | undefined, session: BotSession | undefined, nowS: number, jobNowMs: number): string {
   const transcript = session?.phase === 'ready' ? session.transcript : undefined
 
   if (transcript) {
@@ -50,6 +51,13 @@ function statusLine(view: BotView | undefined, session: BotSession | undefined, 
 
     if (transcript.running) {
       return runningLine(transcript.phase, transcript.statusLine)
+    }
+
+    // Work the bot left running after its turn (Hermes 0.22+): it says so here until it is over.
+    const working = jobsLine(transcript.jobs, jobNowMs)
+
+    if (working) {
+      return working
     }
   } else if (view?.attention.state === 'needsYou') {
     return 'Waiting for you'
@@ -122,6 +130,20 @@ export default function BotChat() {
 
   const transcript = session?.transcript
   const itemCount = transcript?.items.length ?? 0
+  // Background commands and helpers still going: the header's clock moves, and the server's lists are read again now and then,
+  // which catches a job that ends without news (one started without asking to be told).
+  const jobsRunning = runningJobs(transcript?.jobs).length > 0
+  const jobNowMs = useNowMs(jobsRunning, 15_000)
+
+  useEffect(() => {
+    if (!jobsRunning) {
+      return
+    }
+
+    const timer = setInterval(() => void sessions.refreshJobs(profile), 20_000)
+
+    return () => clearInterval(timer)
+  }, [jobsRunning, profile])
 
   // The `/` picker lists this bot's skills, which only the server knows; ask once the chat is live (and again if it is re-attached).
   const liveId = session?.liveId
@@ -285,7 +307,7 @@ export default function BotChat() {
         <ChatHeader
           profile={profile}
           view={view}
-          status={chatStatus(statusLine(view, session, nowS), !!chosen, itemCount)}
+          status={chatStatus(statusLine(view, session, nowS, jobsRunning ? jobNowMs : nowS * 1000), !!chosen, itemCount)}
           waiting={transcript ? pendingPrompts(transcript).length > 0 : view?.attention.state === 'needsYou'}
           working={!!transcript?.running}
         />

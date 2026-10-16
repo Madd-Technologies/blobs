@@ -52,7 +52,7 @@ Blobs is in beta.
 
 | Platform | Where |
 | --- | --- |
-| iPhone and iPad | TestFlight, opening soon |
+| iPhone | TestFlight, opening soon |
 | Android | Google Play testing, opening soon |
 | From source | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 

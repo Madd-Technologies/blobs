@@ -6,6 +6,7 @@
 import type { StoredMessage } from '../../lib/hermes/rest.ts'
 import { deliveryTarget, messageAgentTarget, noteFor, routineDelivery, routineNote, teammateMessage } from './injected.ts'
 import { splitUserContent } from './userContent.ts'
+import { jobIdOfResult } from './jobs.ts'
 import { commandOf, isRealFailure, readResult, revealLastReply } from './reduce.ts'
 import type { Item, Step } from './types.ts'
 
@@ -171,7 +172,8 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
     }
 
     if (row.role === 'tool' && row.tool_call_id) {
-      const read = readResult(parseJson(row.content) as Parameters<typeof readResult>[0])
+      const parsed = parseJson(row.content)
+      const read = readResult(parsed as Parameters<typeof readResult>[0])
       const started = issuedAt.get(row.tool_call_id)
 
       for (let i = items.length - 1; i >= 0; i--) {
@@ -193,6 +195,13 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
           step.diff = read.diff
           step.file = read.file
           step.durationS = started !== undefined && row.timestamp !== undefined ? Math.max(0, row.timestamp - started) : undefined
+          // Work it left running is only followed when the server reports it (live work); otherwise this id is unused.
+          const jobId = jobIdOfResult(step.name, parsed ?? row.content)
+
+          if (jobId) {
+            step.jobId = jobId
+          }
+
           break
         }
       }

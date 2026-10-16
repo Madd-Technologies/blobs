@@ -8,10 +8,10 @@
 
 export const PLUGINS_REPO = 'Madd-Technologies/blobs-hermes-bot-plugins'
 /** `hermes plugins install --ref` takes an exact 40-character commit, so what installs is what was checked. */
-export const PLUGINS_COMMIT = 'c4a245ea7d72d587f2ba9b6e421901545f5e22ce'
+export const PLUGINS_COMMIT = '338f3119bee765d3babb187135bd37cdc904f8de'
 
 export const RELEASES = {
-  'hermes-bot-mobile': '0.1.2',
+  'hermes-bot-mobile': '0.1.3',
   'hermes-paperless': '0.3.0',
   'hermes-drive': '0.1.0',
   'hermes-dashboard': '0.3.1',
@@ -22,7 +22,7 @@ export type PluginName = keyof typeof RELEASES
 /** What each one is, in a sentence the bot reads before installing it. */
 const ABOUT: Record<PluginName, string> = {
   'hermes-bot-mobile':
-    'push notifications to my phone only when a bot needs me (an approval, a question, a routine that broke; never that a reply finished or a routine ran), each naming the chat or routine it is about, and what bots in a group room are doing right now. It replaces the older hermes-push plugin and copies its registered phones on first start.',
+    'push notifications to my phone when a bot needs me (an approval, a question, a routine that broke) and, for a bot set to Everything, the start of each reply it gives me, like a message (never that a turn finished or a routine ran), each naming the chat or routine it is about, and what bots in a group room are doing right now. It replaces the older hermes-push plugin and copies its registered phones on first start.',
   'hermes-paperless': 'streams Paperless documents to my phone’s viewer, a read-only skill for bots, a dashboard tab and a Hermes Desktop page. It reads the Paperless address and token already in ~/.hermes/.env.',
   'hermes-drive': 'streams Google Drive files to my phone’s viewer (Google Docs, Sheets and Slides as PDF) with the google-workspace skill’s sign-in, read only, and a read-only skill for bots.',
   'hermes-dashboard': 'a dashboard for each bot on my phone: collections the bot designs (fields, statuses, drafts and buttons) and panels kept up to date by code wherever possible (panels that read a live source, panels computed from records, script feeds through its write.py), waking the bot only when something needs judgment, through four dashboard_* tools and a skill. It keeps one SQLite database under ~/.hermes/hermes-dashboard/.',

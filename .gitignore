@@ -46,3 +46,6 @@ __pycache__/
 # personal and machine-specific notes (never commit)
 CLAUDE.local.md
 .claude/settings.local.json
+
+# capture rig output (screenshots, clips, raw recordings, Maestro logs)
+/capture/out/

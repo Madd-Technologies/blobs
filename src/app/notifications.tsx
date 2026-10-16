@@ -19,7 +19,7 @@ import { toast } from '@/stores/toast'
 const NTFY_URL = 'https://play.google.com/store/apps/details?id=io.heckel.ntfy'
 
 const LEVELS: { value: PushLevel; label: string; hint: string }[] = [
-  { value: 'all', label: 'Everything', hint: 'Approvals, questions, long tasks and routines.' },
+  { value: 'all', label: 'Everything', hint: 'Approvals, questions, failed routines, and the start of each reply.' },
   { value: 'needs_you', label: 'Needs you', hint: 'Only approvals, questions and routines that fail.' },
   { value: 'off', label: 'Off', hint: 'Nothing from this bot.' },
 ]

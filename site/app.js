@@ -144,18 +144,28 @@ function setupCrowd() {
     tick()
   }
 
-  // A running step's time ticks up, as on the app's activity line ("· 38s", "· 1m 5s").
+  // A running step's time ticks up, as on the app's activity line ("· 38s", "· 1m 5s"), and a background run's
+  // newest output line moves on now and then, as Hermes 0.22 relays it.
   let ticker = 0
   function tick() {
     clearInterval(ticker)
     const clocks = pop.querySelectorAll('[data-elapsed]')
-    if (!clocks.length) return
+    const outputs = pop.querySelectorAll('[data-lines]')
+    if (!clocks.length && !outputs.length) return
+    let beat = 0
     ticker = setInterval(() => {
       if (pop.hidden) return clearInterval(ticker)
+      beat++
       for (const clock of clocks) {
         const seconds = Number(clock.dataset.elapsed) + 1
         clock.dataset.elapsed = String(seconds)
         clock.textContent = ` · ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}`
+      }
+      if (beat % 6 === 0) {
+        for (const output of outputs) {
+          const lines = output.dataset.lines.split('|')
+          output.textContent = lines[Math.min(lines.length - 1, beat / 6)]
+        }
       }
     }, 1000)
   }

@@ -6,6 +6,8 @@
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "test": "node scripts/test.mjs",
-    "test:browsers": "node scripts/test.mjs --browsers"
+    "test:browsers": "node scripts/test.mjs --browsers",
+    "preview": "python3 -m http.server 4173 --bind 127.0.0.1 --directory site",
+    "show": "sh scripts/show.sh"
   }
 }

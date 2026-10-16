@@ -1,0 +1,58 @@
+# Courier waiting for your OK: the approval card raised under its force push. On the last pass (ACT=true) Allow is
+# pressed and Courier reports back; the push goes to the demo's own local remote, and a reset brings the wait back.
+appId: ${APP_ID}
+name: courier
+---
+- runFlow: _home.yaml
+- runFlow:
+    file: _tap.yaml
+    env:
+      TARGET: "Courier\\. Needs you.*"
+      THEN: "Message Courier.*"
+- extendedWaitUntil:
+    visible: "Run this command\\?"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- evalScript:
+    script: ${output.clip = 'courier'}
+    label: clip start
+- takeScreenshot: 12-courier-approval
+- runFlow:
+    file: _hold.yaml
+    env:
+      MS: 2000
+- runFlow:
+    when:
+      true: ${ACT == 'true'}
+    commands:
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - tapOn:
+                text: "Allow"
+                retryTapIfNoChange: false
+      # Android: capture.ts taps Allow with adb where it sits on the rig's emulator (see docs/CAPTURE.md, "adb tap").
+      - runFlow:
+          when:
+            platform: Android
+          label: adb tap 25%,81%
+          commands:
+            - extendedWaitUntil:
+                visible: "Allowed"
+                timeout: 10000
+      - extendedWaitUntil:
+          visible: "Pushed\\..*"
+          timeout: 60000
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - takeScreenshot: 13-courier-allowed
+      - runFlow:
+          file: _hold.yaml
+          env:
+            MS: 2000
+- evalScript:
+    script: ${output.clip = 'done'}
+    label: clip end

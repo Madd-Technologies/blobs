@@ -1,0 +1,11 @@
+# Starts the app fresh on Home and waits until it knows what needs you: the Courier push, Scout's question and the late
+# order on Courier's dashboard (docs/DEMO.md). Every moment starts here, outside its clip.
+appId: ${APP_ID}
+---
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: "3 things need you"
+    timeout: 60000
+- waitForAnimationToEnd:
+    timeout: 1500

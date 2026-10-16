@@ -586,3 +586,75 @@ words plus a chip.
   the server's own background installer. **Always send `profile`**: an RPC alternative, `tools.configure {action, names}`, resolves the profile
   from a live `session_id` and, without one, edits the *server's default profile's* config, which the app never does.
 - Seen live on a throwaway bot: 20 of 29 on; switching Text-to-Speech off persisted across an app restart (19 of 29).
+
+## Live work: background commands and helpers (Hermes 0.22.2, from source at tag `v0.22.2` and verified on a local 0.22.2)
+
+**What there is not:** no event reports progress *inside* a running tool step, on 0.21 or 0.22. A foreground step is
+`tool.start` … `tool.complete` and nothing in between (the app's `tool.progress` case is for older servers and never fires;
+the gateway drops `tool.started` on purpose). No fraction is ever sent for a terminal command. What 0.22 does report is work
+that **outlives** the step that started it, and the app follows that (`features/transcript/jobs.ts`).
+
+The upstream contract is `tui_gateway/contracts/events.py` (events) and `contracts/tools_commands.py`,
+`contracts/profiles_vault_complete_foreign_subagents.py` (RPCs). Read from source, 0.21.6 already has the same events, RPCs and
+background behaviour (not exercised there). The app turns this on only for a server whose `/api/status` `version` is 0.22.0 or
+later (`LIVE_WORK_SINCE` in `lib/hermes/capabilities.ts`), so a 0.21 server's lines are exactly as before.
+
+**Background commands.** A `terminal` call leaves a process running and returns at once when it asked for `background: true`,
+when its `timeout` is over the foreground cap (`TERMINAL_MAX_FOREGROUND_TIMEOUT`, default 600 s; 0.22.0 runs it in the
+background instead of refusing it, and adds `promoted_from_foreground`), or when you send a message mid-command (the command
+is moved aside, `status: "yielded_to_background"`, with what it printed so far as `output`). Its `tool.complete` result:
+
+```json
+{"output": "Background process started", "session_id": "proc_380c75f424d9", "pid": 63439, "exit_code": 0, "error": null,
+ "notify_on_complete": true}
+```
+
+`session_id` here is the **process** id, not a chat. Then, to the chat whose step started it (routed by the stored session, so a
+re-attached chat still gets them):
+
+- `agent.terminal.output {process_id, chunk}`: raw output as the process prints it (verified: one frame per line the test
+  runner printed). This is the progress text the app shows: the newest line, with a `\r`-redrawn bar read as its last frame.
+- When it ends: `status.update {kind: "process", text: "Background Process Finished: <command>"}` (or `"… Failed (exit -15):
+  …"`), then the bot is woken for a turn (`message.start` … `message.complete`) with the result as a stored user row (the
+  app's quiet "note"). Nothing carries the process id at the end; `terminal.close {process_id}` exists but only closes Hermes
+  Desktop's terminal tab, it is **not** sent when a process exits (verified).
+- `process.list {session_id: <live chat id>}` → `{processes: [{session_id, command, cwd, pid, owner_task_id, started_at,
+  uptime_seconds, status: "running"|"exited", output_preview, output_tail, notify_on_complete, exit_code, exited_at,
+  completion_reason, …}]}`, running and recently finished, owned by that chat. `uptime_seconds` keeps counting after exit
+  (use `exited_at`, epoch seconds); `started_at` is the server's local time without a zone; `output_tail` is the last 4000
+  characters. Hermes Desktop polls it for its status stack; the app reads it when a chat opens, when a `process` status
+  arrives, and every 20 s while a job runs on screen (a job started without `notify_on_complete` sends no news at all).
+- `heartbeat: N` (seconds, min 60) on a background `terminal` call wakes **the model** every N s with the output since the
+  last one (only when there is new output), as a hidden user row (`display_kind: "hidden"`); the client sees a turn and a
+  `status.update {kind: "process"}` whose text is the whole heartbeat message. It is model plumbing, not a progress event; the
+  app keeps `process` statuses off the header when it follows live work.
+
+**Helpers (subagents).** On 0.22 a top-level `delegate_task` always runs its children in the background. Verified order:
+`tool.start` → one `subagent.start` per child → `tool.complete` with
+
+```json
+{"status": "dispatched", "mode": "background", "count": 3, "delegation_id": "deleg_1d34ef0b", "goals": ["…", "…", "…"],
+ "subagent_ids": ["sa-0-d6dae026", "sa-1-4d132c81", "sa-2-14dfa1fd"], "note": "…", "live_transcripts": ["…"]}
+```
+
+then, after the turn ended, `subagent.tool` / `subagent.thinking` / `subagent.progress` and one `subagent.complete` per child.
+Every `subagent.*` payload has `goal`, `task_count`, `task_index` and (0.22) `subagent_id`, `delegation_id`, `depth`, `model`,
+`tool_count`; `subagent.complete` adds `status` (`completed`, `failed`, `error`, `timeout`, `interrupted`), `summary`,
+`duration_seconds`, token counts and `output_tail`. `subagent.progress`'s `text` is preformatted (`"🔀 [set 1 · 2/3] terminal"`)
+and not parsed. When the last child ends: `status.update {kind: "process", text: "Subagent Tasks Completed: … (3 tasks)"}` and a
+turn with the results. `subagent.list {session_id}` → `{subagents: [{subagent_id, parent_id, depth, goal, delegation_id, model,
+started_at, status, tool_count, last_tool, accepting_steer}], delegations: [failed ones]}` holds **only live children** (a
+finished one drops out), so after a reopen the app knows who is still working but not how many there were until the next frame
+brings `task_count`. Finished-of-`task_count` is the only fraction the server gives, and the only thing the app draws as a bar.
+
+**Other progress frames, not tied to a step:** `moa.progress {label, refs_done, refs_total}` (mixture-of-agents is a model
+mode in 0.22, not a tool), `browser.progress {message, level}` (connecting the browser), `session.resume_progress`,
+`preview.restart.progress`, `pet.*.progress`. 0.22.1's "managed tool progress" is `tool.start`/`tool.complete` with only
+`{tool_call_id, name}` for managed-worker turns (no arguments or results), not a progress event.
+
+**What the app shows (Card Stock, one quiet line per run):** while a step's job runs, it keeps the run's line: "Running npm run
+test:browsers · 14m 2s" with the newest output line under it in mono, or "3 helpers working · 1 of 3 done" with a 3 px bar in
+the spinner's track colours. After the turn, the chat header's quiet line says that something still runs ("In the background ·
+14m", "Helpers · 1 of 3 done", "2 in the background"); it has room for little more next to its buttons. A finished job folds away: the header line goes, and the run reads "Ran 2 steps · 1h
+12m", counting the job's time; its output and exit code are in the expanded step. A step still running in the foreground keeps
+the line as it always did.

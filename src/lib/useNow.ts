@@ -13,7 +13,7 @@ export function useNow(intervalS = 30): number {
   return now
 }
 
-/** The current time in milliseconds, refreshed every `intervalMs` while `active`; frozen otherwise. */
+/** The current time in milliseconds, refreshed every `intervalMs` while `active` (and at once when it becomes active); frozen otherwise. */
 export function useNowMs(active: boolean, intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now())
 
@@ -22,9 +22,14 @@ export function useNowMs(active: boolean, intervalMs = 1000): number {
       return
     }
 
-    const timer = setInterval(() => setNow(Date.now()), intervalMs)
+    const tick = () => setNow(Date.now())
+    const first = setTimeout(tick, 0)
+    const timer = setInterval(tick, intervalMs)
 
-    return () => clearInterval(timer)
+    return () => {
+      clearTimeout(first)
+      clearInterval(timer)
+    }
   }, [active, intervalMs])
 
   return now

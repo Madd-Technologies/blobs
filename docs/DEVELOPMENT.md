@@ -84,7 +84,8 @@ imports and use relative `.ts` imports, so Node runs their tests directly (nativ
 ## Testing
 
 Screenshots, videos and App Review use the demo Hermes instead: a separate, fictional Hermes with five bots in known
-states (`npm run demo:start`, see [DEMO.md](DEMO.md)).
+states (`npm run demo:start`, see [DEMO.md](DEMO.md)). `npm run capture` makes the whole screenshot set and the clips
+from it in one go ([CAPTURE.md](CAPTURE.md)).
 
 The real test is a real Hermes: the signed-in app against your own server (see above). The local dev server and its
 fake model are Hermes 0.21.0, which speaks an older protocol than 0.21.5, so a green local run can hide a real bug

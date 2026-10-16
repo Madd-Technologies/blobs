@@ -3,13 +3,16 @@ import { memo, useState } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 
 import { Pill } from '@/components/ui/Pill'
+import { ProgressBar } from '@/components/ui/ProgressBar'
 import { Raised } from '@/components/ui/Raised'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
-import { formatDuration, summarizeActivity, usesScreen, waitingOnYou, wording } from '@/features/transcript/activity'
+import { formatDuration, usesScreen, waitingOnYou, wording } from '@/features/transcript/activity'
+import { summarizeWork, withJob } from '@/features/transcript/jobs'
 import type { Item, Step } from '@/features/transcript/types'
 import { fileName } from '@/features/viewer/kind'
 import { openDocument, openFile } from '@/stores/documents'
+import { useStepJobs } from '@/stores/sessions'
 import { useNowMs } from '@/lib/useNow'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
@@ -94,16 +97,23 @@ function fileOf(step: Step): string | undefined {
 /**
  * Tool work as one quiet line: what it is doing now (with the clock and its last line of output), or
  * "Ran 4 steps · 1m 12s" once finished. Tap to see the steps. No boxes.
+ *
+ * On a server that reports live work (Hermes 0.22+), a step that returned but left work running (a background command,
+ * helpers) keeps the line until that work is over: the command's newest output under it, the helpers' finished-of-started
+ * count with a bar. Elsewhere the line is exactly as before.
  */
 export const ActivityLine = memo(function ActivityLine({
   item,
   botName,
+  profile,
   latest,
   carriedOn = false,
   onOpenScreen,
 }: {
   item: Activity
   botName: string
+  /** The bot whose chat this is, to follow the jobs its steps started. */
+  profile?: string
   /** The newest thing in the chat. */
   latest?: boolean
   /** The bot did more after this run in the same turn, so a failure it ended on was handled. */
@@ -112,10 +122,14 @@ export const ActivityLine = memo(function ActivityLine({
 }) {
   const { c } = useTheme()
   const [open, setOpen] = useState(false)
-  const running = item.steps.some(step => step.state === 'running')
+  const jobs = useStepJobs(profile, item.steps)
+  const running = item.steps.some(step => step.state === 'running') || Object.values(jobs ?? {}).some(job => job.state === 'running')
   const now = useNowMs(running)
-  const summary = summarizeActivity(item.steps, now, carriedOn)
-  const finished = item.steps.filter(step => step.state !== 'running')
+  const summary = summarizeWork(item.steps, jobs, now, carriedOn)
+  const finished = item.steps.filter(step => step.state !== 'running' && step !== summary.current).map(step => withJob(step, jobs))
+  // A job's line is only what it printed (nothing until it prints); a foreground step's is its last result line.
+  const live = summary.kind !== 'running' ? undefined : summary.job ? summary.job.detail : summary.current?.resultLine
+  const fraction = summary.job?.fraction
   const expandable = summary.kind !== 'running' || finished.length > 0
   const onScreen = item.steps.some(usesScreen)
   // The bot is stuck on the screen because you hold it: the one moment in a run that needs you.
@@ -134,7 +148,11 @@ export const ActivityLine = memo(function ActivityLine({
         {summary.kind === 'running' ? <Spinner /> : <Feather name={summary.kind === 'failed' ? 'x' : 'check'} size={14} color={summary.kind === 'failed' ? c.danger : c.text2} />}
         <T variant="label" color={summary.kind === 'failed' ? 'danger' : summary.kind === 'running' ? 'text' : 'text2'} numberOfLines={1} style={styles.title}>
           {summary.title}
-          {summary.kind === 'running' && summary.elapsedS !== undefined ? <T variant="label" color="text2">{` · ${formatDuration(summary.elapsedS)}`}</T> : null}
+          {fraction ? (
+            <T variant="label" color="text2">{` · ${fraction.done} of ${fraction.total} done`}</T>
+          ) : summary.kind === 'running' && summary.elapsedS !== undefined ? (
+            <T variant="label" color="text2">{` · ${formatDuration(summary.elapsedS)}`}</T>
+          ) : null}
         </T>
         {expandable ? <Feather name={open ? 'chevron-down' : 'chevron-right'} size={13} color={summary.kind === 'failed' ? c.danger : c.text2} /> : null}
       </Pressable>
@@ -158,15 +176,21 @@ export const ActivityLine = memo(function ActivityLine({
         </Raised>
       ) : null}
 
-      {summary.kind === 'running' && summary.current?.resultLine ? (
+      {fraction ? (
+        <View style={styles.bar}>
+          <ProgressBar done={fraction.done} total={fraction.total} label={`${fraction.done} of ${fraction.total} done`} />
+        </View>
+      ) : null}
+
+      {live ? (
         <T variant="monoSmall" color="text2" numberOfLines={1} style={styles.live}>
-          {summary.current.resultLine}
+          {live}
         </T>
       ) : null}
 
       {open ? (
         <View style={styles.steps}>
-          {(summary.kind === 'running' ? finished : item.steps).map(step => (
+          {(summary.kind === 'running' ? finished : item.steps.map(step => withJob(step, jobs))).map(step => (
             <StepRow key={step.toolId} step={step} handled={summary.kind !== 'failed'} />
           ))}
         </View>
@@ -181,6 +205,7 @@ const styles = StyleSheet.create({
   line: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, minHeight: 28 },
   title: { flexShrink: 1 },
   live: { paddingLeft: 24 },
+  bar: { paddingLeft: 24, paddingTop: 2, paddingBottom: 4, width: 220, maxWidth: '100%' },
   screenLink: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 24, paddingVertical: 2 },
   stepLinks: { flexDirection: 'row', gap: 16, paddingLeft: 19, paddingTop: 2 },
   stepLink: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 },

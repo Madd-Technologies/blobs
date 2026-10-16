@@ -5,6 +5,7 @@
  */
 
 import type { StoredMessage } from '../../lib/hermes/rest.ts'
+import { formatDuration } from './activity.ts'
 import { skillInvocation } from './userContent.ts'
 
 /** `display_kind` values Hermes gives bookkeeping rows it stores as user turns: shown as one quiet line, not a bubble. */
@@ -51,6 +52,87 @@ const SERVER_TEXTS: [prefix: string, line: string][] = [
   ['Continue from the compressed conversation context above.', 'Chat compacted'],
 ]
 
+// ── helpers' results ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How Hermes words a batch of helpers' outcome (`async_delegation_display_text`, tools/process_registry_notifications.py at
+ * v0.22.2): "Subagent Task Completed: <goal>", "Subagent Tasks Finished with Issues: <goals> (3 tasks)".
+ */
+const HELPERS_TITLE = /^Subagent Tasks? (Completed|Incomplete|Failed|Cancelled|Interrupted|Timed Out|Stalled|Unknown|Finished with Issues)\b/
+
+/** What happened to them, for one helper and for several. */
+const HELPERS_OUTCOME: Record<string, [one: string, many: string]> = {
+  Completed: ['finished', 'finished'],
+  Failed: ['failed', 'failed'],
+  Incomplete: ["didn't finish", "didn't finish"],
+  Cancelled: ['was cancelled', 'were cancelled'],
+  Interrupted: ['was stopped', 'were stopped'],
+  'Timed Out': ['timed out', 'timed out'],
+  Stalled: ['stalled', 'stalled'],
+  Unknown: ['ended', 'ended'],
+}
+
+const count = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined)
+
+/**
+ * The one line for helpers' results (`delegate_task` children that ran in the background, Hermes 0.21.6+): "3 helpers finished ·
+ * 5m 2s", "3 helpers finished · 1 failed", "A helper timed out". Hermes's own display text lists every goal in full, which is the
+ * model's business; this says how many, whether any failed and how long it took. `outcome` is Hermes's word for it.
+ */
+export function helpersLine(found: { total?: number; failed?: number; outcome?: string; durationS?: number }): string {
+  const total = found.total && found.total > 0 ? found.total : 1
+  const failed = found.failed ?? 0
+  const who = total === 1 ? 'A helper' : `${total} helpers`
+  const outcome = found.outcome ?? (failed >= total ? 'Failed' : failed > 0 ? 'Finished with Issues' : 'Completed')
+  const words = HELPERS_OUTCOME[outcome]
+  const what = words ? (total === 1 ? words[0] : words[1]) : failed > 0 ? `finished · ${failed} failed` : 'finished, not all cleanly'
+  const took = found.durationS !== undefined && found.durationS > 0 ? ` · ${formatDuration(found.durationS)}` : ''
+
+  return `${who} ${what}${took}`
+}
+
+/** Helpers' results from a labelled row: the counts Hermes keeps in `display_metadata`, or null when it is not that kind of row. */
+function helpersFromMetadata(meta: Record<string, unknown> | null): string | null {
+  const text = typeof meta?.display_text === 'string' ? meta.display_text.trim() : ''
+  const title = HELPERS_TITLE.exec(text)
+  const total = count(meta?.task_count)
+
+  if (!title && total === undefined) {
+    return null
+  }
+
+  const durationS = typeof meta?.duration_seconds === 'number' ? meta.duration_seconds : undefined
+
+  return helpersLine({ total, failed: count(meta?.failed_count), outcome: title?.[1], durationS })
+}
+
+/**
+ * Helpers' results stored with no label: the wording Hermes wakes the bot with (`[ASYNC DELEGATION COMPLETE — deleg_…]`, `…
+ * BATCH COMPLETE — deleg_…]` with "3 subagent(s)" and a ✓/✗ per task, `… TASK FAILED — deleg_…, task 2/3]`).
+ */
+function helpersFromText(text: string): string | null {
+  const head = /^\[ASYNC DELEGATION (COMPLETE|BATCH COMPLETE|TASK FAILED)\b[^\]]*\]/.exec(text.trim())
+
+  if (!head) {
+    return null
+  }
+
+  if (head[1] === 'TASK FAILED') {
+    return helpersLine({ total: 1, failed: 1 })
+  }
+
+  if (head[1] === 'COMPLETE') {
+    const status = /^Status:\s*(\w+)/m.exec(text)?.[1]?.toLowerCase()
+
+    return helpersLine({ total: 1, failed: status === 'failed' || status === 'error' ? 1 : 0 })
+  }
+
+  const total = count(Number(/(\d+) subagent\(s\)/.exec(text)?.[1]))
+  const failed = (text.match(/^--- ✗ TASK /gm) ?? []).length
+
+  return helpersLine({ total, failed })
+}
+
 /**
  * `[IMPORTANT: Background process proc_1 completed normally (exit code 0). Command: ... Output: ...]`: how Hermes wakes
  * a bot for a finished or matching process. Some sessions store it with no `display_kind`, so the wording is the signal.
@@ -60,6 +142,12 @@ function injectedLine(text: string): string | null {
 
   if (fixed) {
     return fixed[1]
+  }
+
+  const helpers = helpersFromText(text)
+
+  if (helpers) {
+    return helpers
   }
 
   // A skill you started is also written `[IMPORTANT: The user has invoked …]`, but it is yours: it reads as what you typed.
@@ -111,9 +199,21 @@ export function noteFor(row: StoredMessage): string | null {
     return FALLBACK.process_complete as string
   }
 
-  const text = metadataOf(row)?.display_text
+  const meta = metadataOf(row)
+  // Helpers' results: the server's display text names every goal; the counts say what matters.
+  const helpers = kind === 'async_delegation_complete' ? helpersFromMetadata(meta) : null
 
-  return typeof text === 'string' && text.trim() ? text.replace(/\s+/g, ' ').trim().slice(0, 140) : (FALLBACK[kind] as string)
+  if (helpers) {
+    return helpers
+  }
+
+  const text = meta?.display_text
+
+  if (typeof text === 'string' && text.trim()) {
+    return text.replace(/\s+/g, ' ').trim().slice(0, 140)
+  }
+
+  return (kind === 'async_delegation_complete' ? helpersFromText(String(row.content ?? '')) : null) ?? (FALLBACK[kind] as string)
 }
 
 // ── routines ─────────────────────────────────────────────────────────────────────────────────────
