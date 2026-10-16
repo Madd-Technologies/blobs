@@ -69,8 +69,9 @@ function newId(state: TranscriptState, prefix: string): [string, number] {
  * line breaks folded into spaces, and a length cap (a memory plugin sends whole paragraphs).
  */
 export function quietStatus(text: string): string {
-  // The wake-up Hermes sends when a background process ends is plumbing: its status text is a command line.
-  if (/^\W*Background process finished\b/i.test(text.trim())) {
+  // The wake-up Hermes sends when a background process ends is plumbing: its status text is a command line. So is the one
+  // for helpers' results ("Subagent Tasks Completed: <every goal> (3 tasks)"), which the chat sums up as a quiet note.
+  if (/^\W*(Background process finished|Subagent Tasks? (Completed|Incomplete|Failed|Cancelled|Interrupted|Timed Out|Stalled|Unknown|Finished with Issues))\b/i.test(text.trim())) {
     return ''
   }
 

@@ -367,6 +367,9 @@ describe('status line', () => {
     assert.equal(quietStatus('⏳ Retrying in 2s…'), 'Retrying in 2s…')
     // The wake-up for a finished background process says nothing worth showing (its text is a command line).
     assert.equal(quietStatus('Background Process Finished: /home/orion/.hermes/tools/python3 /home/orion/x --run-delivery'), '')
+    // Nor does the one for helpers' results: it lists every goal (the chat's note sums it up).
+    assert.equal(quietStatus('Subagent Tasks Completed: Run the cart suite; Run the checkout suite; Run the search suite (3 tasks)'), '')
+    assert.equal(quietStatus('Subagent Task Timed Out: Run the cart suite'), '')
     assert.equal(quietStatus('Recalled\n\n  three   things'), 'Recalled three things')
   })
 

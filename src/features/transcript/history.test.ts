@@ -200,6 +200,35 @@ describe('messages stored as user turns that you did not write', () => {
     assert.deepEqual(items.map(item => (item.kind === 'note' ? item.text : item.kind)), ['2 background agents finished', 'Model changed'])
   })
 
+  it('sums up helpers’ results in one line instead of every goal (rows as Hermes 0.22.2 stores them)', () => {
+    const stored = {
+      display_text: 'Subagent Tasks Completed: Run the cart suite: sleep 30 then npm test; Run the checkout suite: sleep 150 then npm test; Run the search suite: sleep 300 then npm test (3 tasks)',
+      delegation_id: 'deleg_ae270726',
+      task_count: 3,
+      completed_count: 3,
+      failed_count: 0,
+      duration_seconds: 302.43,
+    }
+    const helpers = (meta: Record<string, unknown>) => noteFor(row({ display_kind: 'async_delegation_complete', display_metadata: JSON.stringify(meta), content: '[ASYNC DELEGATION BATCH COMPLETE — deleg_ae270726]\n…' }))
+
+    assert.equal(helpers(stored), '3 helpers finished · 5m 2s')
+    assert.equal(helpers({ ...stored, display_text: 'Subagent Tasks Finished with Issues: a; b; c (3 tasks)', completed_count: 2, failed_count: 1 }), '3 helpers finished · 1 failed · 5m 2s')
+    assert.equal(helpers({ ...stored, display_text: 'Subagent Tasks Failed: a; b; c (3 tasks)', completed_count: 0, failed_count: 3, duration_seconds: undefined }), '3 helpers failed')
+    assert.equal(helpers({ display_text: 'Subagent Task Timed Out: Run the cart suite', task_count: 1, failed_count: 0, duration_seconds: 600 }), 'A helper timed out · 10m 0s')
+    assert.equal(helpers({ display_text: 'Subagent Task Interrupted: Run the cart suite', task_count: 1 }), 'A helper was stopped')
+    // A short text of the server's own (an older server) is kept as it is.
+    assert.equal(helpers({ display_text: '2 background agents finished' }), '2 background agents finished')
+  })
+
+  it('recognises helpers’ results by their wording when the row has no label', () => {
+    const batch = '[ASYNC DELEGATION BATCH COMPLETE — deleg_1]\nA background fan-out unit you dispatched earlier — 3 subagent(s) — has finished.\n--- ✓ TASK 1/3: a  (status=completed)\n--- ✗ TASK 2/3: b  (status=failed)\n--- ✓ TASK 3/3: c  (status=completed)'
+    assert.equal(noteFor(row({ content: batch })), '3 helpers finished · 1 failed')
+    assert.equal(noteFor(row({ content: '[ASYNC DELEGATION COMPLETE — deleg_2]\nStatus: completed   API calls: 2   Duration: 18s' })), 'A helper finished')
+    assert.equal(noteFor(row({ content: '[ASYNC DELEGATION COMPLETE — deleg_2]\nStatus: failed   API calls: 2   Duration: 18s' })), 'A helper failed')
+    assert.equal(noteFor(row({ content: '[ASYNC DELEGATION TASK FAILED — deleg_3, task 2/3]\nStatus: failed' })), 'A helper failed')
+    assert.deepEqual(itemsFromHistory([row({ id: 5, content: batch })]).map(item => item.kind), ['note'])
+  })
+
   it('draws another bot’s message from the sender, without the delivery prefix', () => {
     const items = itemsFromHistory([row({ id: 3, content: 'Message from 🤖 juniper (@juniper): Juniper got the ping.\nAll quiet.' })])
     assert.deepEqual(items, [{ kind: 'teammate', id: 'h-3', handle: 'juniper', text: 'Juniper got the ping.\nAll quiet.', ts: 100_000, chatter: true }])
