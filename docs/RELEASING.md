@@ -10,38 +10,70 @@ the build server), so every native setting lives in `app.json`.
 | --- | --- | --- |
 | `development` | A dev client (APK, iOS ad hoc) that loads JS from Metro | Working on native code on a device |
 | `preview` | A release build installed straight from a link (APK, iOS ad hoc) | Trying a build before it goes to the stores |
-| `production` | An AAB and an IPA for the stores | Google Play and TestFlight / the App Store |
+| `testflight` | An IPA for the stores, sent to TestFlight | Testing on iPhones through TestFlight |
+| `production` | An AAB and an IPA for the stores | Google Play and the App Store |
 
 iOS ad hoc builds only install on devices registered with `eas device:create`.
 
 ## Versions
 
 - `version` in `app.json` is the one people see (1.0.0). Raise it by hand for each store release.
-- Build numbers (`versionCode`, `buildNumber`) belong to EAS (`appVersionSource: remote`), and every production build
-  raises them. Don't add them to `app.json`; `eas build:version:get` shows the current ones.
+- Build numbers (`versionCode`, `buildNumber`) belong to EAS (`appVersionSource: remote`), and every `testflight` and
+  `production` build raises them. Don't add them to `app.json`; `eas build:version:get` shows the current ones.
 
 ## Build and submit
 
-Run `npm run check` first. Then:
+### From GitHub
+
+Actions → **Store builds** → Run workflow, on `main` (`.github/workflows/store-builds.yml`):
+
+| Profile | Platform | What happens |
+| --- | --- | --- |
+| `testflight` | iOS | Builds the commit and sends it to TestFlight (`eas build --auto-submit`, with the `testflight` submit profile). Internal testers can install it once Apple has processed it. |
+| `production` | iOS, Android or both | Builds the commit for the stores, after you type `BUILD_PRODUCTION` to confirm. Nothing is submitted: sending a build to App Review or Google Play is a person's step (below). |
+
+Every run first runs `npm run check` on the exact commit it was started on, and builds only while `main` still points at
+that commit. A push made after the run started is never built by it. The builds sign and upload with what EAS keeps; the
+workflow never signs in to Apple or Google.
+
+Once, before the workflow can run:
+
+1. Make the first iOS build and submit by hand (below). They create the signing credentials and the App Store Connect
+   app, which a run can't do without a person.
+2. Put the App Store Connect app's Apple ID (App Store Connect → App Information → Apple ID) in
+   `submit.testflight.ios.ascAppId` and `submit.production.ios.ascAppId`.
+3. Give EAS an App Store Connect API key for the app (`eas credentials --platform ios` → App Store Connect API Key), so
+   uploads need no Apple sign-in. The team's existing key can be reused.
+4. In the repository's Settings → Secrets and variables → Actions, add the secret `EXPO_TOKEN` (an access token of the
+   Expo account, best a robot user's) and the variable `EAS_BUILD_ENABLED` set to `true`. Until both are there, a run
+   checks the request and stops.
+
+### By hand
+
+Run `npm run check` first. The first iOS build signs in to the Apple account; if EAS offers the team's existing Apple
+Distribution Certificate, reuse it (Apple allows only a few per team).
 
 ```bash
-eas build --platform all --profile production
+eas build --platform ios --profile testflight
 ```
 
 ```bash
-eas submit --platform ios --latest
+eas submit --platform ios --profile testflight --latest
+```
+
+For a store release, build with `--profile production`, then send that build:
+
+```bash
+eas submit --platform ios --profile production --id <build id>
 ```
 
 ```bash
-eas submit --platform android --latest
+eas submit --platform android --profile production --id <build id>
 ```
-
-`eas build --platform all --profile production --auto-submit` does both in one go.
 
 - **iOS:** the first submit signs in to the Apple account, creates the App Store Connect record ("Blobs - a Hermes Agent
-  client", from `submit.production.ios`) and uploads the build to TestFlight. Once the record exists, put its Apple ID
-  (App Store Connect → App Information) in `submit.production.ios.ascAppId`. An App Store Connect API key
-  (`eas credentials --platform ios`) lets later submits run without the Apple sign-in.
+  client", SKU `blobs-ios`, from the submit profile) and uploads the build to TestFlight. Every build that reaches App
+  Store Connect shows in TestFlight; a production one is then picked for App Review there.
 - **Android:** the build goes to the internal testing track as a draft, because Google refuses any other status while
   the app has never been published. Roll it out from Play Console → Test and release → Internal testing. Once the app
   is out of draft, set `releaseStatus` to `completed` so internal builds roll out by themselves. Submitting needs a
@@ -52,8 +84,10 @@ eas submit --platform android --latest
 
 EAS keeps them; none are in the repo (`*.jks`, `*.p8`, `*.p12` and `*.mobileprovision` are ignored).
 
-- **iOS:** the distribution certificate and provisioning profile are made by EAS the first time it signs in to the
-  Apple account during `eas build`.
+- **iOS:** the provisioning profile (and the distribution certificate, unless the team's existing one is reused) is made
+  by EAS the first time it signs in to the Apple account during `eas build`. EAS also keeps the App Store Connect API
+  key that uploads use.
+- **GitHub:** only `EXPO_TOKEN`, as an Actions secret. No Apple or Google credential is ever stored in GitHub.
 - **Android:** EAS makes the upload keystore on the first build. Download a copy straight away (`eas credentials
   --platform android` → Download credentials) and keep two backups outside the repo. A lost upload key can be reset
   through Play support, but it takes days.
