@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { ScrollView, StyleSheet, View } from 'react-native'
 
 import { AttentionDot } from '@/components/bots/AttentionDot'
-import { ApprovalCard } from '@/components/chat/ActionCards'
+import { ApprovalCard, QuestionCard } from '@/components/chat/ActionCards'
 import { AssistantBubble, UserBubble } from '@/components/chat/Bubble'
 import { Composer } from '@/components/chat/Composer'
 import { BotFace } from '@/components/bots/BotFace'
@@ -54,6 +54,19 @@ function ChatSample() {
           choices={['once', 'session', 'always', 'deny']}
           state="pending"
           onChoose={() => undefined}
+        />
+      </View>
+      <View style={{ marginHorizontal: -4 }}>
+        <QuestionCard
+          lead={<BotFace name="courier" meta={{ shape: 'blobatar:courier-6j:droplet' }} size={22} />}
+          questions={[
+            {
+              question: 'The release is ready but two customer requests are still open. What goes out today?',
+              choices: ['Ship the release and email the notes to everyone now', 'Ship the release quietly; send the notes next week', 'Neither'],
+            },
+          ]}
+          state="pending"
+          onAnswer={() => undefined}
         />
       </View>
       <View style={{ marginHorizontal: -32 }}>

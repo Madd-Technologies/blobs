@@ -261,6 +261,7 @@ export function QuestionCard({ questions, state, answer, framed = true, size = '
                 label={choice}
                 variant={on ? 'primary' : 'secondary'}
                 height={42}
+                wrap
                 disabled={busy}
                 onPress={() => (question.multi_select ? setPicked(on ? picked.filter(item => item !== choice) : [...picked, choice]) : void give(choice))}
               />
