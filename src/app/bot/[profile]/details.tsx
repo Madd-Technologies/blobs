@@ -20,11 +20,12 @@ import { afterSheetCloses } from '@/lib/afterSheet'
 import { toolsetsLine } from '@/lib/hermes/toolsets'
 import { useToolsets } from '@/stores/toolsets'
 import { APPROVAL_MODES, bareModel, chatModelDiffers, isProtectedProfile, uniqueSkills, type ApprovalMode } from '@/lib/hermes/profiles'
+import { runsOnLabel } from '@/lib/hermes/runsOn'
 import { useBotView } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useDashboards } from '@/stores/dashboards'
 import { usePrefs } from '@/stores/prefs'
-import { reloadEnv, removeBot, saveApprovalMode, saveBotMeta, useApprovals, useProfileDetail } from '@/stores/profiles'
+import { loadBotSettings, reloadEnv, removeBot, saveApprovalMode, saveBotMeta, useApprovals, useProfileDetail, useRunsOn } from '@/stores/profiles'
 import { useRoutines } from '@/stores/routines'
 import { useBotSession, useChosenChat } from '@/stores/sessions'
 import { toast } from '@/stores/toast'
@@ -48,6 +49,7 @@ export default function BotDetails() {
   // The model the open chat is really using, when it is not the bot's default (a /model switch, or the server's fallback).
   const chatModel = chatModelDiffers(detail?.model.default, chatInfoModel)
   const approvals = useApprovals(state => state.byBot[profile])
+  const runsOn = useRunsOn(state => state.byBot[profile])
   const routineCount = useRoutines(state => state.byBot[profile]?.jobs?.length)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -58,7 +60,7 @@ export default function BotDetails() {
   useEffect(() => {
     if (online) {
       void useProfileDetail.getState().load(profile)
-      void useApprovals.getState().load(profile)
+      void loadBotSettings(profile)
       void useRoutines.getState().load(profile)
       void useToolsets.getState().load(profile)
     }
@@ -156,6 +158,7 @@ export default function BotDetails() {
             <Row label="Tools" value={toolsLine} onPress={() => router.push({ pathname: '/bot/[profile]/tools', params: { profile } })} />
             <Row label="Routines" value={routineCount === undefined ? '' : String(routineCount)} onPress={() => router.push({ pathname: '/bot/[profile]/routines', params: { profile } })} />
             <Row label="Approvals" value={approvals ? APPROVAL_MODES.find(mode => mode.value === approvals)?.label : ''} onPress={() => setChoosingApprovals(true)} />
+            <Row label="Runs on" value={runsOn ? runsOnLabel(runsOn) : ''} onPress={() => router.push({ pathname: '/bot/[profile]/runs-on', params: { profile } })} />
           </GroupedList>
           {chatModel ? (
             <T variant="label" color="text2" style={styles.note}>

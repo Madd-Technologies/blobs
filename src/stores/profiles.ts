@@ -6,6 +6,7 @@ import { approvalModeOf, changeModel, configureProfile, createBot, describeProfi
 import type { ModelOptions, ProfileDescription } from '@/lib/hermes/protocol'
 import { deleteProfile, getBotConfig, updateBotConfig } from '@/lib/hermes/rest'
 import { call } from '@/lib/hermes/rpc'
+import { runsOnOf, sshOnServer, type RunsOn } from '@/lib/hermes/runsOn'
 import { gateway, useConnection } from '@/stores/connection'
 import { useRoster } from '@/stores/roster'
 import { sessions } from '@/stores/sessions'
@@ -181,6 +182,81 @@ export function saveApprovalMode(profile: string, mode: ApprovalMode): Outcome {
 
     await updateBotConfig(config, profile, { approvals: { mode } })
     await useApprovals.getState().load(profile)
+  })
+}
+
+/** Reads a bot's config once for what its details show from it: how it asks first, and where it runs. */
+export async function loadBotSettings(profile: string): Promise<void> {
+  const config = useConnection.getState().config
+
+  if (!config) {
+    return
+  }
+
+  try {
+    const botConfig = await getBotConfig(config, profile)
+    useApprovals.setState(state => ({ byBot: { ...state.byBot, [profile]: approvalModeOf(botConfig) } }))
+    useRunsOn.setState(state => ({ byBot: { ...state.byBot, [profile]: runsOnOf(botConfig) } }))
+    await withServerTarget(profile)
+  } catch {
+    // Left unknown: the rows show nothing rather than a guess.
+  }
+}
+
+// ── runs on ──────────────────────────────────────────────────────────────────────────────────────
+
+interface RunsOnState {
+  byBot: Record<string, RunsOn | undefined>
+  load: (profile: string) => Promise<void>
+}
+
+/** Where each bot's commands run (`terminal` in its config): read when its details or Runs on open. */
+export const useRunsOn = create<RunsOnState>(set => ({
+  byBot: {},
+  load: async profile => {
+    const config = useConnection.getState().config
+
+    if (!config) {
+      return
+    }
+
+    try {
+      const runsOn = runsOnOf(await getBotConfig(config, profile))
+      set(state => ({ byBot: { ...state.byBot, [profile]: runsOn } }))
+      await withServerTarget(profile)
+    } catch {
+      // Left unknown.
+    }
+  },
+}))
+
+/** For SSH set up in the bot's `.env`, the address the server reports (one more read, only for those bots). */
+async function withServerTarget(profile: string): Promise<void> {
+  const config = useConnection.getState().config
+  const runsOn = useRunsOn.getState().byBot[profile]
+
+  if (!config || !runsOn?.fromServer) {
+    return
+  }
+
+  const serverTarget = await sshOnServer(config, profile)
+
+  if (serverTarget) {
+    useRunsOn.setState(state => ({ byBot: { ...state.byBot, [profile]: state.byBot[profile] && { ...state.byBot[profile], serverTarget } } }))
+  }
+}
+
+/** Writes where a bot runs (a change from `runsOnChange`). New chats use it; see the Runs on screen for the open one. */
+export function saveRunsOn(profile: string, change: { terminal: Record<string, unknown> }): Outcome {
+  return attempt(async () => {
+    const config = useConnection.getState().config
+
+    if (!config) {
+      throw new Error('Not connected to a server.')
+    }
+
+    await updateBotConfig(config, profile, change)
+    await useRunsOn.getState().load(profile)
   })
 }
 

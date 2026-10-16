@@ -63,6 +63,7 @@ function RootStack() {
           <Stack.Screen name="bot/[profile]/skills" />
           <Stack.Screen name="bot/[profile]/routines" />
           <Stack.Screen name="bot/[profile]/tools" />
+          <Stack.Screen name="bot/[profile]/runs-on" />
           <Stack.Screen name="bot/[profile]/past" />
           <Stack.Screen name="room/new" />
           <Stack.Screen name="room/[id]" dangerouslySingular />
