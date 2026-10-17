@@ -6,6 +6,7 @@ import { matchActiveToBots, type Attention } from '@/features/attention/derive'
 import { attentionFor, deriveInbox, type InboxEntry } from '@/features/inbox/derive'
 import { visibleState } from '@/features/roster/visible'
 import { createInbox } from '@/features/inbox/store'
+import { supportsLiveHelpers } from '@/lib/hermes/capabilities'
 import { startPoller } from '@/lib/poller'
 import { useNow } from '@/lib/useNow'
 import { gateway, onGatewayEvent, useConnection } from '@/stores/connection'
@@ -18,6 +19,7 @@ import { useVisible } from '@/stores/visible'
 export const inbox = createInbox({
   client: gateway,
   openLiveIds: () => new Set(Object.values(sessions.store.getState().bots).flatMap(bot => (bot.liveId ? [bot.liveId] : []))),
+  liveHelpers: () => supportsLiveHelpers(useConnection.getState().serverVersion),
 })
 
 /** Polls every 30 s in the foreground, and straight away when the server says sessions changed. */

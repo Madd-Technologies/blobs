@@ -34,7 +34,7 @@ const text = (value: unknown): string | undefined => (typeof value === 'string' 
 /**
  * The id of the work a step's result says it left running: a background command (`terminal` with `background`, a timeout over
  * the foreground cap, or a command moved aside when you wrote mid-run) or helpers sent off (`delegate_task`, which always runs
- * them in the background on 0.22). Undefined for anything else, or a start that failed.
+ * them in the background from 0.21.5). Undefined for anything else, or a start that failed.
  */
 export function jobIdOfResult(name: string, result: unknown): string | undefined {
   const value = record(result)
@@ -57,6 +57,14 @@ export function jobIdOfResult(name: string, result: unknown): string | undefined
   }
 
   return undefined
+}
+
+/**
+ * Whether the work this tool leaves running is followed in this chat: everything with `liveWork` (Hermes 0.22+), only helpers
+ * (`delegate_task`) with `liveHelpers` (0.21.5+), where background commands keep their step's line as it always was.
+ */
+export function followsWorkOf(name: string, state: { liveWork?: boolean; liveHelpers?: boolean }): boolean {
+  return !!state.liveWork || (!!state.liveHelpers && name.toLowerCase() === 'delegate_task')
 }
 
 /** The job a finished step left running, merged into what the server already said about it (helpers announce themselves first). */

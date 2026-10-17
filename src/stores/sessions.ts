@@ -6,7 +6,7 @@ import { readAsStringAsync } from 'expo-file-system/legacy'
 
 import { createSessions, type BotSession } from '@/features/sessions/store'
 import type { Job, Step } from '@/features/transcript/types'
-import { supportsLiveWork } from '@/lib/hermes/capabilities'
+import { supportsLiveHelpers, supportsLiveWork } from '@/lib/hermes/capabilities'
 import { gateway, onGatewayEvent, requests, useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
 import { useRoster } from '@/stores/roster'
@@ -20,6 +20,7 @@ export const sessions = createSessions({
   requests,
   readBase64: uri => readAsStringAsync(uri, { encoding: 'base64' }),
   liveWork: () => supportsLiveWork(useConnection.getState().serverVersion),
+  liveHelpers: () => supportsLiveHelpers(useConnection.getState().serverVersion),
 })
 
 // An earlier version kept which side chat a bot was on under this key; that now lives in the prefs (`lastChats`), and only for

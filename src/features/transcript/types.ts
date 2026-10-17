@@ -139,8 +139,15 @@ export interface TranscriptState {
    * events are ignored and every step reads as it always has.
    */
   liveWork?: boolean
-  /** Background commands and helpers this chat's steps started, by id (only with `liveWork`). */
+  /**
+   * The server reports helpers' progress (Hermes 0.21.5+), so they are followed even where background commands are not
+   * (`liveWork` covers both).
+   */
+  liveHelpers?: boolean
+  /** Background commands and helpers this chat's steps started, by id (only with `liveWork` or `liveHelpers`). */
   jobs?: Record<string, Job>
+  /** The running turn is the bot reading its helpers' results, which woke it: "Reading the result…", not "Working…". */
+  wake?: boolean
   /** Counter for ids of items that have no server id. */
   nextId: number
 }

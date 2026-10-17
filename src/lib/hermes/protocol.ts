@@ -350,6 +350,20 @@ export interface SubagentListRow {
   status?: string | null
 }
 
+/**
+ * A `delegation.status` row: one helper running anywhere on the server (`ActiveSubagent`, the same from Hermes 0.21.5 to
+ * 0.22.2), with the stored session id of the chat whose bot sent it off.
+ */
+export interface DelegationStatusRow {
+  subagent_id: string
+  /** Set for a helper another helper started. */
+  parent_id?: string | null
+  goal?: string | null
+  delegation_id?: string | null
+  status?: string | null
+  owner_agent_session_id?: string | null
+}
+
 /** Payload of every event the app handles. Events not listed here are ignored. */
 export interface EventPayloads {
   'gateway.ready': { replay_epoch?: string; heartbeat?: boolean }

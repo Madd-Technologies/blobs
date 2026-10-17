@@ -6,7 +6,7 @@ import type { InboxEntry } from '../inbox/derive.ts'
 import { blankSession } from '../sessions/store.ts'
 import type { BotMeta } from '../../lib/hermes/identity.ts'
 import type { ProfileRow } from '../../lib/hermes/protocol.ts'
-import { buildBotViews, entryPreview, needsYouNames } from './view.ts'
+import { backgroundGoal, buildBotViews, entryPreview, needsYouNames } from './view.ts'
 
 const NOW = 10_000
 
@@ -136,5 +136,40 @@ describe('needsYouNames', () => {
     assert.equal(needsYouNames([view('Forge', 'needsYou'), view('Scribe', 'idle'), view('Courier', 'needsYou')]), 'Forge, Courier')
     assert.equal(needsYouNames([view('A', 'needsYou'), view('B', 'needsYou'), view('C', 'needsYou'), view('D', 'needsYou')]), 'A, B, C +1')
     assert.equal(needsYouNames([view('A', 'idle')]), '')
+  })
+})
+
+describe('a bot whose helpers are still working after its turn', () => {
+  const scribe = bot('scribe', NOW - 600, { canonical_session: { id: 'chat-1', resolved_id: 'chat-2', last_active: NOW - 600, preview: 'Sent two helpers off.' } })
+  const running = { subagent_id: 'sa-0', goal: 'Write the release notes', status: 'running', owner_agent_session_id: 'chat-2' }
+
+  it('says what runs in the background, calmly, instead of its last words', () => {
+    const [view] = buildBotViews({ roster: [scribe], attention: { scribe: idle }, inbox: new Map(), sessions: {}, now: NOW, background: [running] })
+
+    assert.equal(view?.preview, 'Background · Write the release notes')
+    assert.equal(view?.mood, 'idle')
+    assert.equal(view?.urgent, false)
+  })
+
+  it('matches a helper to the bot by the chat that sent it off, and ignores other bots’, finished and nested helpers', () => {
+    assert.equal(backgroundGoal(scribe, undefined, [{ ...running, owner_agent_session_id: 'someone-else' }]), null)
+    assert.equal(backgroundGoal(scribe, undefined, [{ ...running, status: 'completed' }]), null)
+    assert.equal(backgroundGoal(scribe, undefined, [{ ...running, parent_id: 'sa-9' }]), null)
+    assert.equal(backgroundGoal(scribe, undefined, [{ ...running, owner_agent_session_id: 'chat-1' }]), 'Write the release notes')
+  })
+
+  it('prefers the helpers the open chat is following', () => {
+    const blank = blankSession('scribe')
+    const session = { ...blank, transcript: { ...blank.transcript, jobs: { deleg_1: { id: 'deleg_1', kind: 'helpers' as const, label: 'Check the changelog', state: 'running' as const, startedAt: 1 } } } }
+
+    assert.equal(backgroundGoal(scribe, session, [running]), 'Check the changelog')
+  })
+
+  it('reads the result when they wake it', () => {
+    const blank = blankSession('scribe')
+    const session = { ...blank, transcript: { ...blank.transcript, running: true, wake: true } }
+    const [view] = buildBotViews({ roster: [scribe], attention: { scribe: { state: 'working', unread: false } }, inbox: new Map(), sessions: { scribe: session }, now: NOW })
+
+    assert.equal(view?.preview, 'Reading the result…')
   })
 })

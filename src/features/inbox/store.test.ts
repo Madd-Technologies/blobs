@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { ActiveSessionRow, ApprovalRequestPayload } from '../../lib/hermes/protocol.ts'
+import type { ActiveSessionRow, ApprovalRequestPayload, DelegationStatusRow } from '../../lib/hermes/protocol.ts'
 import { createInbox } from './store.ts'
 
-function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string, ApprovalRequestPayload[]>; open?: string[]; fail?: string } = {}) {
+function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string, ApprovalRequestPayload[]>; open?: string[]; fail?: string; helpers?: DelegationStatusRow[] } = {}) {
   const calls: { method: string; params: Record<string, unknown>; timeoutMs?: number }[] = []
   const state = { active: options.active ?? [], approvals: options.approvals ?? {} }
   const client = {
@@ -27,10 +27,14 @@ function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string
         return { resolved: 1 } as T
       }
 
+      if (method === 'delegation.status') {
+        return { active: options.helpers ?? [], paused: false } as T
+      }
+
       throw new Error(`unscripted ${method}`)
     },
   }
-  const inbox = createInbox({ client, openLiveIds: () => new Set(options.open ?? []), now: () => 42 })
+  const inbox = createInbox({ client, openLiveIds: () => new Set(options.open ?? []), liveHelpers: () => options.helpers !== undefined, now: () => 42 })
 
   return { inbox, calls, state }
 }
@@ -104,5 +108,31 @@ describe('inbox respondApproval', () => {
     assert.deepEqual(inbox.store.getState().polled.a?.map(entry => entry.request_id), ['r2'])
     await inbox.respondApproval('a', 'r2', 'once')
     assert.equal('a' in inbox.store.getState().polled, false)
+  })
+})
+
+describe('helpers still running after their bot’s turn', () => {
+  const helper: DelegationStatusRow = { subagent_id: 'sa-0', goal: 'Write the release notes', status: 'running', owner_agent_session_id: 'chat-1' }
+
+  it('are read with the sessions when the server lists them', async () => {
+    const { inbox, calls } = setup({ active: [row('a', 'idle')], helpers: [helper] })
+    await inbox.refresh()
+    assert.deepEqual(inbox.store.getState().background, [helper])
+    assert.equal(calls.filter(call => call.method === 'delegation.status').length, 1)
+  })
+
+  it('are not asked for on a server without them', async () => {
+    const { inbox, calls } = setup({ active: [row('a', 'idle')] })
+    await inbox.refresh()
+    assert.deepEqual(inbox.store.getState().background, [])
+    assert.equal(calls.some(call => call.method === 'delegation.status'), false)
+  })
+
+  it('a failed read shows none and keeps the rest of the poll', async () => {
+    const { inbox } = setup({ active: [row('a', 'idle')], helpers: [helper], fail: 'delegation.status' })
+    await inbox.refresh()
+    assert.deepEqual(inbox.store.getState().background, [])
+    assert.equal(inbox.store.getState().error, null)
+    assert.equal(inbox.store.getState().active.length, 1)
   })
 })

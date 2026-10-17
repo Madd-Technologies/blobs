@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import type { HermesEvent } from '../../lib/hermes/protocol.ts'
-import { describeJob, jobIdOfResult, jobOfResult, jobsLine, lastOutputLine, summarizeWork, withLists, withOutput, withSubagent } from './jobs.ts'
+import { describeJob, followsWorkOf, jobIdOfResult, jobOfResult, jobsLine, lastOutputLine, summarizeWork, withLists, withOutput, withSubagent } from './jobs.ts'
 import { initialTranscript, reduceEvent } from './reduce.ts'
 import type { Job, Step, TranscriptState } from './types.ts'
 
@@ -209,5 +209,38 @@ describe('the reducer with and without live work', () => {
     assert.equal(after.jobs?.proc_380c?.label, 'npm run test:browsers')
     assert.equal(after.jobs?.deleg_1d34?.kind, 'helpers')
     assert.equal(after.statusLine, null)
+  })
+
+  it('a 0.21.5 server: helpers are followed, a background command and its news read as before', () => {
+    const after = play({ ...initialTranscript(), liveHelpers: true })
+    const activity = after.items.find(item => item.kind === 'activity')
+
+    assert.equal(activity?.kind === 'activity' && activity.steps[0]?.jobId, undefined)
+    assert.equal(after.jobs?.proc_380c, undefined)
+    assert.equal(after.jobs?.deleg_1d34?.kind, 'helpers')
+    assert.equal(after.statusLine, 'Background Process Failed (exit -15): npm run test:browsers')
+  })
+
+  it('a 0.21.5 server: the delegate_task step points at its helpers', () => {
+    const sent: HermesEvent[] = [
+      { type: 'message.start', payload: {} },
+      { type: 'tool.start', payload: { tool_id: 'call_3', name: 'delegate_task', context: '3 tasks', args: {} } },
+      { type: 'tool.complete', payload: { tool_id: 'call_3', name: 'delegate_task', args: {}, duration_s: 0.2, result: DISPATCHED } },
+    ]
+    const after = sent.reduce<TranscriptState>((next, event) => reduceEvent(next, event, 1_000), { ...initialTranscript(), liveHelpers: true })
+    const activity = after.items.find(item => item.kind === 'activity')
+
+    assert.equal(activity?.kind === 'activity' && activity.steps[0]?.jobId, 'deleg_1d34')
+    assert.equal(after.jobs?.deleg_1d34?.total, 3)
+  })
+})
+
+describe('followsWorkOf', () => {
+  it('follows everything with live work, only helpers with live helpers, nothing without either', () => {
+    assert.equal(followsWorkOf('terminal', { liveWork: true }), true)
+    assert.equal(followsWorkOf('delegate_task', { liveWork: true }), true)
+    assert.equal(followsWorkOf('delegate_task', { liveHelpers: true }), true)
+    assert.equal(followsWorkOf('terminal', { liveHelpers: true }), false)
+    assert.equal(followsWorkOf('delegate_task', {}), false)
   })
 })

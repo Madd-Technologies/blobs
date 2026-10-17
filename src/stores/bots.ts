@@ -5,7 +5,7 @@ import { buildBotViews, type BotView } from '@/features/roster/view'
 import { faceColor } from '@/lib/hermes/faceColor'
 import type { BotMeta } from '@/lib/hermes/identity'
 import { useNow } from '@/lib/useNow'
-import { useAttentionMap, useInbox } from '@/stores/inbox'
+import { inbox, useAttentionMap, useInbox } from '@/stores/inbox'
 import { useRoster } from '@/stores/roster'
 import { useVisible } from '@/stores/visible'
 import { sessions } from '@/stores/sessions'
@@ -17,10 +17,11 @@ export function useBotViews(options: { includeHidden?: boolean } = {}): BotView[
   const { byBot } = useInbox()
   const bots = useStore(sessions.store, state => state.bots)
   const visible = useVisible(state => state.byBot)
+  const background = useStore(inbox.store, state => state.background)
   const now = useNow()
   const includeHidden = options.includeHidden
 
-  return useMemo(() => buildBotViews({ roster, attention, inbox: byBot, sessions: bots, now, includeHidden, visible }), [roster, attention, byBot, bots, now, includeHidden, visible])
+  return useMemo(() => buildBotViews({ roster, attention, inbox: byBot, sessions: bots, now, includeHidden, visible, background }), [roster, attention, byBot, bots, now, includeHidden, visible, background])
 }
 
 export function useBotView(profile: string): BotView | undefined {

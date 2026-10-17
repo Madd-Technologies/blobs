@@ -86,6 +86,10 @@ export interface SessionsDeps {
    * are then followed. Absent or false, every step reads as it always has.
    */
   liveWork?: () => boolean
+  /**
+   * The server reports helpers' progress (Hermes 0.21.5+): helpers are then followed even where background commands are not.
+   */
+  liveHelpers?: () => boolean
 }
 
 export type RespondResult = 'answered' | 'expired' | 'failed'
@@ -258,21 +262,24 @@ export function createSessions(deps: SessionsDeps) {
   })
 
   /**
-   * What the server is still running for a bot's open chat (Hermes 0.22+): its background commands and its helpers, merged into the
-   * jobs its steps started. Run when the chat opens, when a job sends news, and every so often while one runs on screen.
+   * What the server is still running for a bot's open chat: its background commands (Hermes 0.22+) and its helpers (0.21.5+),
+   * merged into the jobs its steps started. Run when the chat opens, when a job sends news, and every so often while one runs on
+   * screen.
    */
   async function refreshJobs(profile: string): Promise<void> {
     const { liveId, transcript } = get(profile)
 
-    if (!liveId || !transcript.liveWork) {
+    if (!liveId || !(transcript.liveWork || transcript.liveHelpers)) {
       return
     }
 
     const [processes, subagents] = await Promise.all([
-      call(deps.client, 'process.list', { session_id: liveId }).then(
-        result => result.processes ?? [],
-        () => null,
-      ),
+      transcript.liveWork
+        ? call(deps.client, 'process.list', { session_id: liveId }).then(
+            result => result.processes ?? [],
+            () => null,
+          )
+        : null,
       call(deps.client, 'subagent.list', { session_id: liveId }).then(
         result => result.subagents ?? [],
         () => null,
@@ -381,6 +388,7 @@ export function createSessions(deps: SessionsDeps) {
       queues.delete(profile)
 
       const liveWork = deps.liveWork?.() ?? false
+      const liveHelpers = !liveWork && (deps.liveHelpers?.() ?? false)
       // The same chat opened again keeps the jobs it was following (a helper count the lists cannot give back).
       const kept = get(profile).storedId === storedId ? get(profile).transcript.jobs : undefined
 
@@ -393,13 +401,18 @@ export function createSessions(deps: SessionsDeps) {
         rows: page.messages,
         hasOlder: page.pagination.returned >= PAGE_SIZE,
         loadingOlder: false,
-        transcript: { ...buildTranscript(page.messages, resumed), ...(liveWork ? { liveWork, ...(kept ? { jobs: kept } : {}) } : {}) },
+        transcript: {
+          ...buildTranscript(page.messages, resumed),
+          ...(liveWork ? { liveWork } : {}),
+          ...(liveHelpers ? { liveHelpers } : {}),
+          ...((liveWork || liveHelpers) && kept ? { jobs: kept } : {}),
+        },
       })
 
       // Prompts still waiting on a person (Hermes 0.21.5+): show them, and be able to answer them.
       deps.requests?.ingest(resumed.session_id, resumed.open_requests)
 
-      if (liveWork) {
+      if (liveWork || liveHelpers) {
         void refreshJobs(profile)
       }
     } catch (error) {

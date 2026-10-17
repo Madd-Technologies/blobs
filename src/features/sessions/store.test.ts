@@ -62,7 +62,7 @@ interface Harness {
   nextLive: { value: number }
 }
 
-function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>): Harness {
+function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { liveWork?: boolean; liveHelpers?: boolean } = {}): Harness {
   const calls: Harness['calls'] = []
   const listeners = new Set<(event: GatewayEvent) => void>()
   const timers = manualTimers()
@@ -109,6 +109,8 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>): Harness {
     now: () => 1_000,
     timers: timers.timers,
     sleep: async () => undefined,
+    liveWork: () => !!live.liveWork,
+    liveHelpers: () => !!live.liveHelpers,
   })
 
   return {
@@ -220,6 +222,33 @@ describe('open', () => {
     const h = harness()
     await Promise.all([h.sessions.open('bot'), h.sessions.open('bot'), h.sessions.open('bot')])
     assert.equal(h.calls.filter(call => call.method === 'session.resume').length, 1)
+  })
+})
+
+describe('work that outlives the turn, when a chat opens', () => {
+  const settled = () => new Promise(resolve => setImmediate(resolve))
+
+  it('a server that reports only helpers (0.21.5) is asked for the chat’s helpers, not its processes', async () => {
+    const h = harness(undefined, { liveHelpers: true })
+    h.handlers['subagent.list'] = () => ({ subagents: [{ subagent_id: 'sa-0', goal: 'Write the release notes', delegation_id: 'deleg_1', started_at: 0.5 }] })
+    await h.sessions.open('bot')
+    await settled()
+
+    assert.deepEqual(methods(h), ['session.resume', 'subagent.list'])
+    assert.equal(bot(h)?.transcript.liveHelpers, true)
+    assert.equal(bot(h)?.transcript.liveWork, undefined)
+    assert.equal(bot(h)?.transcript.jobs?.deleg_1?.kind, 'helpers')
+  })
+
+  it('a server with live work (0.22) is asked for both', async () => {
+    const h = harness(undefined, { liveWork: true, liveHelpers: true })
+    h.handlers['process.list'] = () => ({ processes: [] })
+    h.handlers['subagent.list'] = () => ({ subagents: [] })
+    await h.sessions.open('bot')
+    await settled()
+
+    assert.deepEqual(methods(h).slice(1).sort(), ['process.list', 'subagent.list'])
+    assert.equal(bot(h)?.transcript.liveWork, true)
   })
 })
 

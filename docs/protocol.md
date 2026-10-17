@@ -596,8 +596,11 @@ that **outlives** the step that started it, and the app follows that (`features/
 
 The upstream contract is `tui_gateway/contracts/events.py` (events) and `contracts/tools_commands.py`,
 `contracts/profiles_vault_complete_foreign_subagents.py` (RPCs). Read from source, 0.21.6 already has the same events, RPCs and
-background behaviour (not exercised there). The app turns this on only for a server whose `/api/status` `version` is 0.22.0 or
-later (`LIVE_WORK_SINCE` in `lib/hermes/capabilities.ts`), so a 0.21 server's lines are exactly as before.
+background behaviour (not exercised there). The app follows background commands only for a server whose `/api/status`
+`version` is 0.22.0 or later (`LIVE_WORK_SINCE` in `lib/hermes/capabilities.ts`). It follows helpers from 0.21.5
+(`LIVE_HELPERS_SINCE`; upstream tag `v2026.9.24`): its top-level `delegate_task` already always runs in the background and
+returns `dispatched`, and its generated gateway contract has the same `subagent.*` payloads, `subagent.list` and
+`delegation.status` as 0.22.2. On a 0.21.5 server a background command's line is exactly as before.
 
 **Background commands.** A `terminal` call leaves a process running and returns at once when it asked for `background: true`,
 when its `timeout` is over the foreground cap (`TERMINAL_MAX_FOREGROUND_TIMEOUT`, default 600 s; 0.22.0 runs it in the
@@ -647,6 +650,17 @@ started_at, status, tool_count, last_tool, accepting_steer}], delegations: [fail
 finished one drops out), so after a reopen the app knows who is still working but not how many there were until the next frame
 brings `task_count`. Finished-of-`task_count` is the only fraction the server gives, and the only thing the app draws as a bar.
 
+`delegation.status {}` → `{active: [{subagent_id, parent_id, depth, goal, delegation_id, model, started_at, status, tool_count,
+owner_agent_session_id}], paused, max_spawn_depth, max_concurrent_children}` lists **every** running helper on the server, with
+the stored session id of the chat whose bot sent it off (`owner_agent_session_id`). The inbox poll reads it (0.21.5+), so Home
+can say "Background · <goal>" for a bot whose chat is not open. The results' title (`async_delegation_display_text`) says
+"Incomplete" for a helper that hit its step limit (`max_iterations`); the app reads it as "stopped at its step limit".
+
+**Kanban news.** A kanban task a chat queued wakes that chat with one line per event (`tui_gateway/session_notifications.py`,
+the same in 0.21.5 and 0.22.2): a mark (✔ done, ⏸ blocked, ✖ gave up or crashed, ⏱ timed out, 🔄 status), maybe `[board]`
+and `@assignee`, then `Kanban t_… <what happened>`. It comes as `status.update {kind: "process"}` and then as the stored user
+row of the turn it wakes; the app shows the row as a quiet note without the mark and the names.
+
 **Other progress frames, not tied to a step:** `moa.progress {label, refs_done, refs_total}` (mixture-of-agents is a model
 mode in 0.22, not a tool), `browser.progress {message, level}` (connecting the browser), `session.resume_progress`,
 `preview.restart.progress`, `pet.*.progress`. 0.22.1's "managed tool progress" is `tool.start`/`tool.complete` with only
@@ -657,4 +671,6 @@ test:browsers · 14m 2s" with the newest output line under it in mono, or "3 hel
 the spinner's track colours. After the turn, the chat header's quiet line says that something still runs ("In the background ·
 14m", "Helpers · 1 of 3 done", "2 in the background"); it has room for little more next to its buttons. A finished job folds away: the header line goes, and the run reads "Ran 2 steps · 1h
 12m", counting the job's time; its output and exit code are in the expanded step. A step still running in the foreground keeps
-the line as it always did.
+the line as it always did. When the helpers' results wake the bot (the `Subagent Task…` status), the header and Home say
+"Reading the result…" for that turn instead of "Working…". Home previews a bot that is idle while its helpers work as
+"Background · <goal>".

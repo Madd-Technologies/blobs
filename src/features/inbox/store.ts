@@ -1,18 +1,21 @@
 /**
- * Polls what is going on across all bots: `session.active_list` for status, and `approval.pending`
+ * Polls what is going on across all bots: `session.active_list` for status, `approval.pending`
  * for sessions that are working or waiting but not open in the app (their approval prompts were never
- * sent to this connection). Framework-free with injected dependencies; the app wires the real one.
+ * sent to this connection), and `delegation.status` for helpers still running after their bot's turn.
+ * Framework-free with injected dependencies; the app wires the real one.
  */
 
 import { createStore, type StoreApi } from 'zustand/vanilla'
 
-import type { ActiveSessionRow, ApprovalChoice, ApprovalRequestPayload } from '../../lib/hermes/protocol.ts'
+import type { ActiveSessionRow, ApprovalChoice, ApprovalRequestPayload, DelegationStatusRow } from '../../lib/hermes/protocol.ts'
 import { call, type RpcClient } from '../../lib/hermes/rpc.ts'
 
 export interface InboxState {
   active: ActiveSessionRow[]
   /** Open approvals for sessions this app has not opened, by live id. Sensitive: memory only. */
   polled: Record<string, ApprovalRequestPayload[]>
+  /** Every helper running on the server (`delegation.status`), each with the chat whose bot sent it off. */
+  background: DelegationStatusRow[]
   loadedAt: number | null
   error: string | null
 }
@@ -21,6 +24,8 @@ export interface InboxDeps {
   client: RpcClient
   /** Live ids of chats the app has open, which already hear their own prompts. */
   openLiveIds: () => ReadonlySet<string>
+  /** The server lists running helpers (Hermes 0.21.5+). Absent or false, none are asked for. */
+  liveHelpers?: () => boolean
   now?: () => number
 }
 
@@ -29,12 +34,16 @@ const PENDING_TIMEOUT_MS = 8_000
 
 export function createInbox(deps: InboxDeps) {
   const now = deps.now ?? Date.now
-  const store: StoreApi<InboxState> = createStore<InboxState>(() => ({ active: [], polled: {}, loadedAt: null, error: null }))
+  const store: StoreApi<InboxState> = createStore<InboxState>(() => ({ active: [], polled: {}, background: [], loadedAt: null, error: null }))
   let refreshing: Promise<void> | null = null
 
   async function doRefresh() {
     try {
-      const { sessions } = await call(deps.client, 'session.active_list', {})
+      const [{ sessions }, background] = await Promise.all([
+        call(deps.client, 'session.active_list', {}),
+        // A failed read shows no helpers rather than failing the whole poll.
+        deps.liveHelpers?.() ? call(deps.client, 'delegation.status', {}).then(result => result.active ?? [], () => [] as DelegationStatusRow[]) : ([] as DelegationStatusRow[]),
+      ])
       const open = deps.openLiveIds()
       // A session holding an approval reads `working` on older servers and `waiting` on 0.21.6, so ask both. A `waiting`
       // session that is asking a question, a sudo or a secret answers with an empty list.
@@ -52,7 +61,7 @@ export function createInbox(deps: InboxDeps) {
         }
       }
 
-      store.setState({ active: sessions, polled, loadedAt: now(), error: null })
+      store.setState({ active: sessions, polled, background, loadedAt: now(), error: null })
     } catch (error) {
       // Keep the last good picture; just note that it is stale.
       store.setState({ error: error instanceof Error ? error.message : String(error) })

@@ -7,7 +7,8 @@
 import type { AttachmentChip } from '../../lib/hermes/attachments.ts'
 import { imageOfResult } from '../../lib/hermes/media.ts'
 import type { ApprovalChoice, ClarifyQuestion, ClarifyRequestPayload, HermesEvent, ToolResult } from '../../lib/hermes/protocol.ts'
-import { jobIdOfResult, jobOfResult, withOutput, withSubagent } from './jobs.ts'
+import { isHelpersResult } from './injected.ts'
+import { followsWorkOf, jobIdOfResult, jobOfResult, withOutput, withSubagent } from './jobs.ts'
 import type { Item, Job, PromptItem, Step, StepState, TranscriptState } from './types.ts'
 
 export function initialTranscript(items: Item[] = []): TranscriptState {
@@ -413,6 +414,11 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
     }
 
     case 'status.update':
+      // Helpers' results woke the bot ("Subagent Task Completed: <goal>"): the turn that follows is it reading them.
+      if (event.payload.kind === 'process' && isHelpersResult(event.payload.text)) {
+        return { ...state, wake: true, statusLine: null }
+      }
+
       // With live work, a background job's news (finished, failed, a heartbeat's output) is the job's own line, not the header's.
       if (state.liveWork && event.payload.kind === 'process') {
         return state
@@ -455,7 +461,7 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
       const { tool_id: toolId, name, args, duration_s: durationS, result } = event.payload
       const read = readResult(result)
       // The step returned but left work running (a background command, helpers): that work is followed as a job.
-      const jobId = state.liveWork ? jobIdOfResult(name, result) : undefined
+      const jobId = followsWorkOf(name, state) ? jobIdOfResult(name, result) : undefined
       let job: Job | undefined
       const finish = (step: Step): Step => ({
         ...step,
@@ -512,7 +518,7 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
     case 'subagent.complete': {
       const id = event.payload.delegation_id ?? event.payload.subagent_id
 
-      if (!state.liveWork || !id) {
+      if (!(state.liveWork || state.liveHelpers) || !id) {
         return state
       }
 
@@ -627,7 +633,7 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
         items = revealLastReply(items, state.routineFrom)
       }
 
-      return withItems(state, items, { running: false, phase: 'idle', statusLine: null, lastTurn: status, usage: usage ?? state.usage, chatterFrom: null, routineFrom: null })
+      return withItems(state, items, { running: false, phase: 'idle', statusLine: null, lastTurn: status, usage: usage ?? state.usage, chatterFrom: null, routineFrom: null, wake: false })
     }
 
     case 'session.info': {
@@ -637,7 +643,7 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
         return state
       }
 
-      return running ? { ...state, running: true } : { ...state, running: false, phase: 'idle', statusLine: null }
+      return running ? { ...state, running: true } : { ...state, running: false, phase: 'idle', statusLine: null, wake: false }
     }
 
     case 'session.title':
@@ -669,7 +675,7 @@ export function reduceEvent(state: TranscriptState, event: HermesEvent, now: num
 export function appendUser(state: TranscriptState, text: string, now: number = Date.now(), attachments: AttachmentChip[] = []): TranscriptState {
   const [id, nextId] = newId(state, 'u-')
 
-  return withItems(state, [...settleChatter(closeStreaming(state.items), state.chatterFrom), { kind: 'user', id, text, pending: true, ts: now, ...(attachments.length ? { attachments } : {}) }], { nextId, running: true, phase: 'thinking', lastTurn: null, chatterFrom: null, routineFrom: null })
+  return withItems(state, [...settleChatter(closeStreaming(state.items), state.chatterFrom), { kind: 'user', id, text, pending: true, ts: now, ...(attachments.length ? { attachments } : {}) }], { nextId, running: true, phase: 'thinking', lastTurn: null, chatterFrom: null, routineFrom: null, wake: false })
 }
 
 /** A command is running on the server and has not answered yet: a quiet "Running…" line under its name. */
