@@ -36,6 +36,7 @@ import type {
   SessionInfo,
   SessionResumeResult,
   SubagentListRow,
+  DelegationStatusRow,
 } from './protocol.ts'
 
 /** The slice of the gateway client that `call` needs. */
@@ -169,6 +170,8 @@ export interface RpcMethods {
   'process.list': { params: { session_id: string }; result: { processes: ProcessListRow[] } }
   /** Helpers (subagents) the session sent off that are still running. */
   'subagent.list': { params: { session_id: string }; result: { subagents: SubagentListRow[]; delegations?: unknown[] } }
+  /** Every helper running on the server, each with the chat whose bot sent it off (Hermes 0.21.5+). */
+  'delegation.status': { params: Record<never, never>; result: { active?: DelegationStatusRow[] } }
   'tools.configure': {
     params: { profile?: string; action: 'enable' | 'disable'; names: string[]; session_id?: string }
     result: Record<string, unknown>

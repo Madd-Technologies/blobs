@@ -596,8 +596,11 @@ that **outlives** the step that started it, and the app follows that (`features/
 
 The upstream contract is `tui_gateway/contracts/events.py` (events) and `contracts/tools_commands.py`,
 `contracts/profiles_vault_complete_foreign_subagents.py` (RPCs). Read from source, 0.21.6 already has the same events, RPCs and
-background behaviour (not exercised there). The app turns this on only for a server whose `/api/status` `version` is 0.22.0 or
-later (`LIVE_WORK_SINCE` in `lib/hermes/capabilities.ts`), so a 0.21 server's lines are exactly as before.
+background behaviour (not exercised there). The app follows background commands only for a server whose `/api/status`
+`version` is 0.22.0 or later (`LIVE_WORK_SINCE` in `lib/hermes/capabilities.ts`). It follows helpers from 0.21.5
+(`LIVE_HELPERS_SINCE`; upstream tag `v2026.9.24`): its top-level `delegate_task` already always runs in the background and
+returns `dispatched`, and its generated gateway contract has the same `subagent.*` payloads, `subagent.list` and
+`delegation.status` as 0.22.2. On a 0.21.5 server a background command's line is exactly as before.
 
 **Background commands.** A `terminal` call leaves a process running and returns at once when it asked for `background: true`,
 when its `timeout` is over the foreground cap (`TERMINAL_MAX_FOREGROUND_TIMEOUT`, default 600 s; 0.22.0 runs it in the
@@ -647,6 +650,17 @@ started_at, status, tool_count, last_tool, accepting_steer}], delegations: [fail
 finished one drops out), so after a reopen the app knows who is still working but not how many there were until the next frame
 brings `task_count`. Finished-of-`task_count` is the only fraction the server gives, and the only thing the app draws as a bar.
 
+`delegation.status {}` → `{active: [{subagent_id, parent_id, depth, goal, delegation_id, model, started_at, status, tool_count,
+owner_agent_session_id}], paused, max_spawn_depth, max_concurrent_children}` lists **every** running helper on the server, with
+the stored session id of the chat whose bot sent it off (`owner_agent_session_id`). The inbox poll reads it (0.21.5+), so Home
+can say "Background · <goal>" for a bot whose chat is not open. The results' title (`async_delegation_display_text`) says
+"Incomplete" for a helper that hit its step limit (`max_iterations`); the app reads it as "stopped at its step limit".
+
+**Kanban news.** A kanban task a chat queued wakes that chat with one line per event (`tui_gateway/session_notifications.py`,
+the same in 0.21.5 and 0.22.2): a mark (✔ done, ⏸ blocked, ✖ gave up or crashed, ⏱ timed out, 🔄 status), maybe `[board]`
+and `@assignee`, then `Kanban t_… <what happened>`. It comes as `status.update {kind: "process"}` and then as the stored user
+row of the turn it wakes; the app shows the row as a quiet note without the mark and the names.
+
 **Other progress frames, not tied to a step:** `moa.progress {label, refs_done, refs_total}` (mixture-of-agents is a model
 mode in 0.22, not a tool), `browser.progress {message, level}` (connecting the browser), `session.resume_progress`,
 `preview.restart.progress`, `pet.*.progress`. 0.22.1's "managed tool progress" is `tool.start`/`tool.complete` with only
@@ -657,4 +671,54 @@ test:browsers · 14m 2s" with the newest output line under it in mono, or "3 hel
 the spinner's track colours. After the turn, the chat header's quiet line says that something still runs ("In the background ·
 14m", "Helpers · 1 of 3 done", "2 in the background"); it has room for little more next to its buttons. A finished job folds away: the header line goes, and the run reads "Ran 2 steps · 1h
 12m", counting the job's time; its output and exit code are in the expanded step. A step still running in the foreground keeps
-the line as it always did.
+the line as it always did. When the helpers' results wake the bot (the `Subagent Task…` status), the header and Home say
+"Reading the result…" for that turn instead of "Working…". Home previews a bot that is idle while its helpers work as
+"Background · <goal>".
+
+## Where a bot runs ("Runs on") (Hermes 0.21.6 and 0.22.2, verified on local copies; hermes-bot-mobile 0.1.4)
+
+**What Hermes reads.** A bot's terminal comes from its own scope (`build_profile_terminal_scope`): defaults ← that bot's
+`.env` (`TERMINAL_*`) ← its `config.yaml` `terminal:` section, the last one winning, bound per turn. The keys are `backend`
+(`local`, `docker`, `ssh`, or a cloud sandbox: `modal`, `daytona`, `vercel_sandbox`, `singularity`), `ssh_host`, `ssh_user`,
+`ssh_port`, `ssh_key` (a full path: Hermes hands it to `ssh -i` without expanding `~`) and `cwd`. Its SSH backend always
+connects with `-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10`, `-p` only when the port is not 22,
+and `-i <ssh_key>` when one is set (`tools/environments/ssh.py`).
+
+**What the app writes.** `GET`/`PUT /api/config?profile=<bot>` (the PUT deep-merges), as for approvals: `{terminal: {backend}}`
+for this computer or a container, `{terminal: {backend: "ssh", ssh_host, ssh_user, ssh_port, ssh_key}}` for another computer.
+A blank `ssh_key` is never written, since it would hide a key named in `.env`. Moving onto SSH also sets `cwd: "~"` when the
+folder was a path on the server (anything but `~…`, `.`, `auto` or `cwd`); moving back does not restore it. Cloud sandboxes
+need keys on the server, so the app only shows them.
+
+**When it takes effect.** The terminal environment is cached per chat (`session:<key>`) and reused until it has been idle for
+`TERMINAL_LIFETIME_SECONDS` (300 s; a cleanup thread checks every 60 s). A new chat runs in the new place at once; a chat that
+already ran a command stays where it was until 5 quiet minutes have passed (verified on 0.22.2: an open chat kept running
+locally, then moved). `session.info`'s `terminal_backend` is not reliable for named bots (it reports the launch profile's
+backend), so the app never uses it for this.
+
+**SSH set up by Hermes's own wizard** keeps the address in the bot's `.env` (`TERMINAL_SSH_HOST`, `_USER`, `_PORT`, `_KEY`), so
+`config.yaml` can say `backend: ssh` with no host. `GET /api/env` only returns redacted values, but
+`GET /api/tools/terminal/backends?profile=<bot>` (0.21.6+) has an `ssh` row whose `detail` is `user@host` (it reads `terminal.*`,
+then `TERMINAL_SSH_*`). The app shows that read-only and writes nothing unless the person enters another computer.
+
+**What SSH copies.** When it connects, Hermes uploads the bot's skills, cache files and credential files
+(`get_credential_file_mounts`) to `~/.hermes` on the other computer, as one tar stream over SSH, and syncs back only those
+files. The bot's home, `.env` and `.ssh` are not copied (verified: the bot's key was not on the other computer).
+
+**hermes-bot-mobile 0.1.4** adds what a phone cannot do, under `/api/plugins/hermes-bot-mobile/runs-on/`:
+
+- `GET /key?profile=` → `{public: "ssh-ed25519 … blobs-<profile>" | null, path}`; `POST /key {profile}` → `{public, path,
+  created}`, idempotent (503 without `ssh-keygen`). The key is `<profile home>/.ssh/runs_on_ed25519` (ed25519, no passphrase,
+  0600 in a 0700 folder). Hermes counts a profile's `.ssh` as a credential store, so exports leave it out, and deleting the bot
+  deletes its key (verified on 0.21.6 and 0.22.2). Only the public line and the path reach the phone.
+- `POST /check {profile, backend: "ssh"|"docker", host, user, port, key}` → `{ok: true, system}` (`uname -srm` over SSH with
+  Hermes's options, or Docker's server version) or `{ok: false, reason, detail}`. `reason` is one of `auth`, `too_many_keys`,
+  `host_key`, `unknown_host`, `refused`, `timeout`, `unreachable`, `key_missing`, `no_ssh`, `no_docker`, `docker_down` or
+  `other`. An unknown bot is 404 `"No bot called <name> on this server."`, and a host or user that ssh could read as an option
+  is 422.
+- An older plugin answers these routes with a plain 404 `Not Found`; the app then asks for a key file on the server instead.
+- `too_many_keys`: ssh offers the server's agent keys before `-i`, so a server whose agent holds many keys reaches the other
+  computer's `MaxAuthTries` ("Too many authentication failures") before the bot's key, even when that key is trusted.
+- Hermes's plugin install scan (0.21.6 and 0.22.2) reads the name of SSH's trusted-keys file in a plugin's README prose as a
+  critical `ssh_backdoor` and blocks the install, even with `--force`. The plugin's docs leave the name out; the app's own
+  words are not scanned.

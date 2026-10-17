@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { APPROVAL_MODES, approvalModeOf, BOT_NAME, changeModel, disabledSkills, modelSections, uniqueSkills, withSkill, createBot, isProtectedProfile, mergeBotMeta, MetaConflictError, slugifyName, updateBotMeta, chatModelDiffers } from './profiles.ts'
+import { APPROVAL_MODES, approvalModeOf, BOT_NAME, browserHeadedOf, changeModel, disabledSkills, modelSections, uniqueSkills, withSkill, createBot, isProtectedProfile, mergeBotMeta, MetaConflictError, slugifyName, updateBotMeta, chatModelDiffers } from './profiles.ts'
 import type { ModelOptions, ProfileRow } from './protocol.ts'
 import type { RpcClient } from './rpc.ts'
 
@@ -277,6 +277,15 @@ describe('approvals', () => {
     assert.equal(approvalModeOf({ approvals: false }), 'manual')
     assert.equal(approvalModeOf({}), 'manual')
     assert.equal(approvalModeOf(null), 'manual')
+  })
+
+  it('reads whether the browser runs in a visible window, headless when unset', () => {
+    assert.equal(browserHeadedOf({ browser: { headed: true } }), true)
+    assert.equal(browserHeadedOf({ browser: { headed: 'true' } }), true)
+    assert.equal(browserHeadedOf({ browser: { headed: false } }), false)
+    assert.equal(browserHeadedOf({ browser: {} }), false)
+    assert.equal(browserHeadedOf({}), false)
+    assert.equal(browserHeadedOf(null), false)
   })
 
   it('offers the three modes the server knows', () => {

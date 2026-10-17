@@ -1,23 +1,34 @@
+import Feather from '@expo/vector-icons/Feather'
 import { useRouter } from 'expo-router'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { KeyboardAvoidingView, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 
 import { BotFace } from '@/components/bots/BotFace'
+import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
 import { T } from '@/components/ui/T'
 import { BOT_NAME, slugifyName } from '@/lib/hermes/profiles'
-import { makeBot } from '@/stores/profiles'
+import { RUNS_ON_CHOICES, runsOnChange, runsOnLabel, runsOnOf, type RunsOnKind } from '@/lib/hermes/runsOn'
+import { useConnection } from '@/stores/connection'
+import { makeBot, saveRunsOn, useRunsOn } from '@/stores/profiles'
 import { useRoster } from '@/stores/roster'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
-/** Makes a new bot: a copy of your default one (same skills, same sign-ins) with its own name and instructions. */
+/**
+ * Makes a new bot: a copy of your default one (same skills, same sign-ins, and where it runs unless another is picked) with
+ * its own name and instructions. Another computer is set up on the Runs on screen right after, which opens the chat.
+ */
 export default function NewBot() {
   const router = useRouter()
   const { c } = useTheme()
+  const online = useConnection(state => state.status === 'online')
+  // The new bot starts where the default one runs (it is a copy of it), until another place is picked.
+  const inherited = useRunsOn(state => state.byBot.default)
+  const [where, setWhere] = useState<Exclude<RunsOnKind, 'other'> | 'inherit'>('inherit')
   // Select the stable list, not a fresh array: a selector that returns a new value each time re-renders forever.
   const rows = useRoster(state => state.rows)
   const taken = useMemo(() => rows.map(row => row.name), [rows])
@@ -28,6 +39,13 @@ export default function NewBot() {
   const [custom, setCustom] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
 
+  useEffect(() => {
+    if (online) {
+      void useRunsOn.getState().load('default')
+    }
+  }, [online])
+
+  const shown: RunsOnKind = where === 'inherit' ? (inherited?.kind ?? 'local') : where
   const name = custom ?? slugifyName(title)
   const found = !name ? null : !BOT_NAME.test(name) ? 'Use lowercase letters, numbers, - and _, starting with a letter or number.' : taken.includes(name) ? `There is already a bot called ${name}.` : null
   // Once Create is pressed the new bot is in the roster, which must not read as a clash with itself.
@@ -43,6 +61,21 @@ export default function NewBot() {
       toast(error)
 
       return
+    }
+
+    // Another computer needs its address and key: set up next, and the chat opens after saving.
+    if (where === 'ssh') {
+      router.replace({ pathname: '/bot/[profile]/runs-on', params: { profile: name, kind: 'ssh', then: 'chat' } })
+
+      return
+    }
+
+    if (where !== 'inherit' && where !== inherited?.kind) {
+      const moved = await saveRunsOn(name, runsOnChange(inherited ?? runsOnOf(null), where))
+
+      if (moved) {
+        toast(moved)
+      }
     }
 
     // Replace, so Back from the new bot's chat returns to the list rather than to this form.
@@ -103,6 +136,29 @@ export default function NewBot() {
               accessibilityLabel="Instructions"
               style={[field, styles.multi, styles.tall]}
             />
+          </View>
+
+          <View style={styles.group}>
+            <T variant="label" color="text2">
+              Runs on
+            </T>
+            <GroupedList radius={20}>
+              {inherited?.kind === 'other' ? (
+                <Row label={`${runsOnLabel(inherited)}, like your default bot`} right={shown === 'other' ? <Feather name="check" size={18} color={c.text} /> : undefined} chevron={false} onPress={() => setWhere('inherit')} />
+              ) : null}
+              {RUNS_ON_CHOICES.map(choice => (
+                <Row
+                  key={choice.kind}
+                  label={choice.label}
+                  right={shown === choice.kind ? <Feather name="check" size={18} color={c.text} accessibilityLabel="Selected" /> : undefined}
+                  chevron={false}
+                  onPress={() => setWhere(choice.kind)}
+                />
+              ))}
+            </GroupedList>
+            <T variant="label" color="text2">
+              {where === 'ssh' ? 'Next you’ll add the computer and the key it should trust.' : 'Where its commands and files are. Its chats stay on your server.'}
+            </T>
           </View>
 
           <View style={styles.group}>

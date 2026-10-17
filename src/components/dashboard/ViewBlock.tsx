@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native'
 import Svg, { Polyline, Rect } from 'react-native-svg'
 
 import { AttentionDot } from '@/components/bots/AttentionDot'
@@ -9,7 +9,7 @@ import { Raised } from '@/components/ui/Raised'
 import { T } from '@/components/ui/T'
 import { openAction } from '@/components/dashboard/openAction'
 import { actionFor, changeLine, chartEnds, formatTyped, isPast, mutedShort, staleNote } from '@/features/dashboard/view'
-import type { Typed, View as DashboardView, ViewRow } from '@/lib/hermes/dashboard'
+import type { RowSignal, Typed, View as DashboardView, ViewRow } from '@/lib/hermes/dashboard'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 
@@ -89,7 +89,30 @@ function Header({ view, note, onMenu, onTitle }: { view: DashboardView; note?: s
   )
 }
 
-/** A record's row: the amber dot when it needs you, title and subtitle, and a meta that turns amber when it is due. */
+/** What a screen reader says for a row's signal. */
+const SIGNAL_WORDS: Record<RowSignal, string> = { good: 'green', warn: 'amber', bad: 'red' }
+
+/** A row signal's dot: green, amber or red. The one narrow exception to color coming only from faces, for rows a bot marks. */
+function SignalDot({ tone, style }: { tone: RowSignal; style?: StyleProp<ViewStyle> }) {
+  const { c } = useTheme()
+
+  return <View style={[styles.signal, { backgroundColor: tone === 'good' ? c.connected : tone === 'warn' ? c.needsYou : c.danger }, style]} />
+}
+
+/** A row's leading mark, one accent per row: its signal when the bot gave it one (a red row that needs you shows red), else the amber dot. */
+function RowMark({ row, style, space }: { row: Pick<ViewRow, 'signal' | 'needs_you'>; style?: StyleProp<ViewStyle>; space?: boolean }) {
+  if (row.signal) {
+    return <SignalDot tone={row.signal} style={style} />
+  }
+
+  if (row.needs_you) {
+    return <AttentionDot size={8} style={style} />
+  }
+
+  return space ? <View style={styles.dotSpace} /> : null
+}
+
+/** A record's row: its signal or the amber dot when it needs you, title and subtitle, and a meta that turns amber when it is due. */
 export function RecordRow({ row, nowS, onPress, fill }: { row: ViewRow; nowS: number; onPress: () => void; /** The panel's paper (rows are solid so a swipe's action never shows through). */ fill?: string }) {
   const { c } = useTheme()
   const paper = fill ?? c.sheet
@@ -105,14 +128,14 @@ export function RecordRow({ row, nowS, onPress, fill }: { row: ViewRow; nowS: nu
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[title, subtitle, row.needs_you ? 'needs you' : '', row.muted_until ? 'muted' : meta].filter(Boolean).join(', ')}
+      accessibilityLabel={[title, subtitle, row.signal ? SIGNAL_WORDS[row.signal] : '', row.needs_you ? 'needs you' : '', row.muted_until ? 'muted' : meta].filter(Boolean).join(', ')}
       onPress={press}
       disabled={live && !link}
       style={({ pressed }) => [styles.row, { backgroundColor: pressed ? c.tone : paper }]}
     >
       {/* Dimmed inside a solid row, so a swipe's action never shows through a muted one. */}
       <View style={[styles.rowInner, row.muted_until ? styles.muted : null]}>
-        {row.needs_you ? <AttentionDot size={8} style={styles.rowDot} /> : <View style={styles.dotSpace} />}
+        <RowMark row={row} style={styles.rowDot} space />
         <View style={styles.text}>
           <T variant="bodyMedium" color={row.done ? 'text2' : 'text'} numberOfLines={1} style={row.done ? styles.struck : undefined}>
             {title}
@@ -126,7 +149,7 @@ export function RecordRow({ row, nowS, onPress, fill }: { row: ViewRow; nowS: nu
         {row.muted_until ? (
           <MutedNote row={row} nowS={nowS} />
         ) : meta ? (
-          <T variant="meta" color={waiting || urgent(row, nowS) ? 'needsYouText' : 'text2'} style={styles.rowMeta}>
+          <T variant="meta" color={!row.signal && (waiting || urgent(row, nowS)) ? 'needsYouText' : 'text2'} style={styles.rowMeta}>
             {meta}
           </T>
         ) : null}
@@ -150,7 +173,7 @@ function CheckRow({ row, nowS, onOpen, onToggle, fill }: { row: ViewRow; nowS: n
             <Feather name="check" size={13} color={c.text2} />
           </View>
         ) : (
-          <View style={[styles.circle, styles.ring, { borderColor: row.needs_you ? c.needsYou : c.text2 }]} />
+          <View style={[styles.circle, styles.ring, { borderColor: row.signal === 'good' ? c.connected : row.signal === 'warn' ? c.needsYou : row.signal === 'bad' ? c.danger : row.needs_you ? c.needsYou : c.text2 }]} />
         )}
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={[title, meta].filter(Boolean).join(', ')} onPress={onOpen} style={styles.checkText}>
@@ -309,7 +332,7 @@ export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFu
                 </T>
                 {column.rows.slice(0, 3).map(row => (
                   <Pressable key={row.id} accessibilityRole="button" accessibilityLabel={row.title ? formatTyped(row.title, nowS) : 'Untitled'} onPress={() => onOpenRecord(row.id)} style={[styles.boardItem, row.muted_until ? styles.muted : null]}>
-                    {row.needs_you ? <AttentionDot size={8} style={styles.boardDot} /> : null}
+                    <RowMark row={row} style={styles.boardDot} />
                     <T variant="secondary" color={row.done ? 'text2' : 'text'} numberOfLines={2} style={styles.flex}>
                       {row.title ? formatTyped(row.title, nowS) : 'Untitled'}
                     </T>
@@ -325,6 +348,7 @@ export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFu
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.table}>
           <View>
             <View style={styles.tableRow}>
+              {view.rows.some(row => row.signal) ? <View style={styles.tableMark} /> : null}
               {view.columns.map(column => (
                 <T key={column.key} variant="label" color="text2" numberOfLines={1} style={styles.tableCell}>
                   {column.label}
@@ -333,8 +357,9 @@ export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFu
             </View>
             {view.rows.map(row => (
               <Pressable key={row.id} accessibilityRole="button" onPress={() => onOpenRecord(row.id)} style={[styles.tableRow, { borderTopColor: c.separator }, styles.tableRule, row.muted_until ? styles.muted : null]}>
+                {view.rows.some(entry => entry.signal) ? <View style={styles.tableMark}>{row.signal ? <SignalDot tone={row.signal} /> : null}</View> : null}
                 {row.cells.map((value, index) => (
-                  <T key={view.columns[index]?.key ?? index} variant="secondary" color={index === 0 && row.needs_you ? 'needsYouText' : 'text'} numberOfLines={1} style={styles.tableCell}>
+                  <T key={view.columns[index]?.key ?? index} variant="secondary" color={index === 0 && row.needs_you && !row.signal ? 'needsYouText' : 'text'} numberOfLines={1} style={styles.tableCell}>
                     {cell(value, nowS)}
                   </T>
                 ))}
@@ -396,6 +421,8 @@ const styles = StyleSheet.create({
   rowDot: { marginTop: 7 },
   rowMeta: { lineHeight: 21 },
   dotSpace: { width: 8 },
+  signal: { width: 8, height: 8, borderRadius: 4 },
+  tableMark: { width: 14, justifyContent: 'center' },
   text: { flex: 1, minWidth: 0 },
   struck: { textDecorationLine: 'line-through' },
   muted: { opacity: 0.45 },

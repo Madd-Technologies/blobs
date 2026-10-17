@@ -44,12 +44,15 @@ function metadataOf(row: StoredMessage): Record<string, unknown> | null {
 
 /**
  * Fixed texts Hermes stores as user turns with no `display_kind` (agent/context_compressor.py in 0.21.5): the request for
- * a summary when a turn runs out of steps, and the marker it leaves after compacting a chat that had no user turn left.
+ * a summary when a turn runs out of steps, the marker it leaves after compacting a chat that had no user turn left, and
+ * your last request copied back in after a compaction (`_reappend_inflight_user_task`). That copy keeps your words and
+ * your row's fields, so without this it reads as a second message from you.
  */
 const SERVER_TEXTS: [prefix: string, line: string][] = [
   ['You’ve reached the maximum number of tool-calling iterations allowed', 'Reached its step limit for one turn'],
   ["You've reached the maximum number of tool-calling iterations allowed", 'Reached its step limit for one turn'],
   ['Continue from the compressed conversation context above.', 'Chat compacted'],
+  ['[STILL IN PROGRESS — this is the active request, restated after the compaction boundary', 'Chat compacted · picked your last request back up'],
 ]
 
 // ── helpers' results ────────────────────────────────────────────────────────────────────────────
@@ -60,11 +63,16 @@ const SERVER_TEXTS: [prefix: string, line: string][] = [
  */
 const HELPERS_TITLE = /^Subagent Tasks? (Completed|Incomplete|Failed|Cancelled|Interrupted|Timed Out|Stalled|Unknown|Finished with Issues)\b/
 
-/** What happened to them, for one helper and for several. */
+/** True for Hermes's title for helpers' results: the `status.update` that announces the turn they wake the bot for. */
+export function isHelpersResult(text: string): boolean {
+  return HELPERS_TITLE.test(text.trim())
+}
+
+/** What happened to them, for one helper and for several. "Incomplete" is a helper that hit its step limit (max_iterations). */
 const HELPERS_OUTCOME: Record<string, [one: string, many: string]> = {
   Completed: ['finished', 'finished'],
   Failed: ['failed', 'failed'],
-  Incomplete: ["didn't finish", "didn't finish"],
+  Incomplete: ['stopped at its step limit', 'stopped at their step limit'],
   Cancelled: ['was cancelled', 'were cancelled'],
   Interrupted: ['was stopped', 'were stopped'],
   'Timed Out': ['timed out', 'timed out'],
@@ -134,6 +142,12 @@ function helpersFromText(text: string): string | null {
 }
 
 /**
+ * A kanban event Hermes wakes the chat that queued the task with (tui_gateway/session_notifications.py): a mark, maybe
+ * `[board]` and `@bot`, then `Kanban t_…` and what happened ("✔ @scribe Kanban t_ab12 done — Write the release notes").
+ */
+const KANBAN = /^[\u2714\u23F8\u2716\u23F1\u{1F504}]\uFE0F?\s+(?:\[[^\]]+\]\s+)?(?:@\S+\s+)?(Kanban\s+t_\S+[\s\S]*)$/u
+
+/**
  * `[IMPORTANT: Background process proc_1 completed normally (exit code 0). Command: ... Output: ...]`: how Hermes wakes
  * a bot for a finished or matching process. Some sessions store it with no `display_kind`, so the wording is the signal.
  */
@@ -148,6 +162,13 @@ function injectedLine(text: string): string | null {
 
   if (helpers) {
     return helpers
+  }
+
+  // A kanban task this chat queued changed state: its first line, without the mark and the names.
+  const kanban = KANBAN.exec(text.trim().split('\n')[0] ?? '')
+
+  if (kanban) {
+    return (kanban[1] as string).replace(/\s+/g, ' ').trim().slice(0, 140)
   }
 
   // A skill you started is also written `[IMPORTANT: The user has invoked …]`, but it is yours: it reads as what you typed.

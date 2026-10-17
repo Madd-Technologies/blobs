@@ -50,10 +50,11 @@ function statusLine(view: BotView | undefined, session: BotSession | undefined, 
     }
 
     if (transcript.running) {
-      return runningLine(transcript.phase, transcript.statusLine)
+      // Its helpers' results woke the bot: it is reading what they did, not starting something new.
+      return transcript.wake ? 'Reading the result…' : runningLine(transcript.phase, transcript.statusLine)
     }
 
-    // Work the bot left running after its turn (Hermes 0.22+): it says so here until it is over.
+    // Work the bot left running after its turn (helpers from Hermes 0.21.5, commands from 0.22): it says so here until it is over.
     const working = jobsLine(transcript.jobs, jobNowMs)
 
     if (working) {

@@ -55,10 +55,78 @@ interface Wording {
   past: string
 }
 
+/** What wording needs of a step; a step from a stored chat or a test may lack its target. */
+type StepLike = Pick<Step, 'name' | 'args'> & { context?: string }
+
+/** The first readable target in a tool's arguments, as the chat line names it. */
+function targetOf(args: Record<string, unknown> | undefined): string {
+  for (const key of ['command', 'path', 'file_path', 'query', 'url', 'name', 'collection']) {
+    const value = args?.[key]
+
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+
+  const urls = args?.urls
+
+  return Array.isArray(urls) && typeof urls[0] === 'string' ? urls[0] : ''
+}
+
+function argsOf(raw: unknown): Record<string, unknown> | undefined {
+  if (typeof raw === 'string') {
+    try {
+      return argsOf(JSON.parse(raw))
+    } catch {
+      return undefined
+    }
+  }
+
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : undefined
+}
+
+/**
+ * Hermes hands deferred and plugin tools to the model through `tool_call` (`tools/tool_labels.py`, 0.21.5), so the step is the
+ * tool it called: `{calls: [{name, arguments}]}`, or one `{name, arguments}`. `more` counts the other calls in the same step.
+ */
+export function calledTool(step: StepLike): StepLike & { more: number } {
+  if (step.name.toLowerCase() !== 'tool_call') {
+    return { ...step, more: 0 }
+  }
+
+  const raw = step.args?.calls
+  const calls = (Array.isArray(raw) ? raw : [step.args]).map(argsOf).filter(call => typeof call?.name === 'string' && call.name !== '')
+  const first = calls[0]
+
+  if (!first) {
+    return { ...step, more: 0 }
+  }
+
+  const args = argsOf(first.arguments)
+
+  return { name: first.name as string, context: targetOf(args), args, more: calls.length - 1 }
+}
+
+/** The app's dashboard plugin's tools (hermes-dashboard), in the words of what they do. */
+const DASHBOARD_WORDS: Record<string, Wording> = {
+  dashboard_query: { present: 'Reading the dashboard', past: 'Read the dashboard' },
+  dashboard_record: { present: 'Updating the dashboard', past: 'Updated the dashboard' },
+  dashboard_view: { present: 'Changing a dashboard panel', past: 'Changed a dashboard panel' },
+  dashboard_collection: { present: 'Setting up the dashboard', past: 'Set up the dashboard' },
+}
+
 /** How a step reads, e.g. `terminal` → "Running <command>" / "Ran <command>". */
-export function wording(step: Pick<Step, 'name' | 'context'>): Wording {
-  const target = step.context
-  const name = step.name.toLowerCase()
+export function wording(step: StepLike): Wording {
+  const called = calledTool(step)
+
+  if (called.more > 0) {
+    const first = wording({ name: called.name, context: called.context, args: called.args })
+
+    return { present: `${first.present} and ${called.more} more`, past: `${first.past} and ${called.more} more` }
+  }
+
+  const target = called.context ?? ''
+  const name = called.name.toLowerCase()
 
   if (name === 'terminal' || name === 'process') {
     const command = clip(target, 60)
@@ -78,14 +146,40 @@ export function wording(step: Pick<Step, 'name' | 'context'>): Wording {
     return { present: `Searching ${clip(target, 40)}`, past: `Searched ${clip(target, 40)}` }
   }
 
-  if (name.startsWith('browser') || name === 'web_search' || name === 'web_extract') {
+  if (name === 'web_search') {
+    const query = clip(target, 50)
+
+    return { present: query ? `Searching the web for ${query}` : 'Searching the web', past: query ? `Searched the web for ${query}` : 'Searched the web' }
+  }
+
+  if (name === 'web_extract') {
+    const page = clip(target.replace(/^https?:\/\/(www\.)?/i, ''), 50)
+
+    return { present: page ? `Reading ${page}` : 'Reading a web page', past: page ? `Read ${page}` : 'Read a web page' }
+  }
+
+  if (name.startsWith('browser')) {
     // A tool that describes its step in words ("Open example.com on the bot screen") is shown as written; a bare
-    // address or a search is something that was browsed.
-    if (/\s/.test(target.trim()) && /^[A-Z]/.test(target.trim()) && name.startsWith('browser')) {
+    // address is something that was browsed.
+    if (/\s/.test(target.trim()) && /^[A-Z]/.test(target.trim())) {
       return { present: clip(target, 56), past: clip(target, 56) }
     }
 
     return { present: target ? `Browsing ${clip(target, 50)}` : 'Browsing', past: target ? `Browsed ${clip(target, 50)}` : 'Browsed' }
+  }
+
+  if (name === 'tool_search') {
+    return { present: 'Looking through its tools', past: 'Looked through its tools' }
+  }
+
+  if (name === 'tool_describe') {
+    return { present: 'Reading how its tools work', past: 'Read how its tools work' }
+  }
+
+  const dashboard = DASHBOARD_WORDS[name]
+
+  if (dashboard) {
+    return dashboard
   }
 
   if (name === 'computer_use') {
@@ -105,11 +199,20 @@ export function wording(step: Pick<Step, 'name' | 'context'>): Wording {
   return { present: `Using ${step.name.replace(/_/g, ' ')}`, past: `Used ${step.name.replace(/_/g, ' ')}` }
 }
 
-/** The tool works on the bot's own screen (it clicks around its desktop or browses on it), so it can be watched. */
-export function usesScreen(step: Pick<Step, 'name'>): boolean {
-  const name = step.name.toLowerCase()
+/**
+ * The step worked on the bot's own screen, so it can be watched there. `computer_use` always does. A browser step does only
+ * when the bot's browser shows on the screen: Hermes runs it headless unless `browser.headed` is on, or it attaches to a Chrome
+ * already open on the running screen (`tools/browser_tool_session.py`, 0.21.5). `browser_cdp` and `browser_dialog` drive
+ * another browser at a configured address.
+ */
+export function usesScreen(step: StepLike, browserShows: boolean): boolean {
+  const name = calledTool(step).name.toLowerCase()
 
-  return name === 'computer_use' || name.startsWith('browser')
+  if (name === 'computer_use') {
+    return true
+  }
+
+  return browserShows && name.startsWith('browser_') && name !== 'browser_cdp' && name !== 'browser_dialog'
 }
 
 /** The step that is waiting on a person to hand the screen back, if the run ended on one. */

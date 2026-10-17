@@ -8,7 +8,8 @@ import type { InboxEntry } from '../inbox/derive.ts'
 import type { BotSession } from '../sessions/store.ts'
 import { displayName, type BotMeta } from '../../lib/hermes/identity.ts'
 import type { FaceMood } from '../../lib/hermes/face.ts'
-import type { ProfileRow } from '../../lib/hermes/protocol.ts'
+import type { DelegationStatusRow, ProfileRow } from '../../lib/hermes/protocol.ts'
+import { runningJobs } from '../transcript/jobs.ts'
 import { ageLabel, isPinned, previewOf, sortRoster, stripPreviewMarkdown } from './derive.ts'
 import { visibleState, type VisibleActivity } from './visible.ts'
 
@@ -62,6 +63,25 @@ export interface BuildInput {
   includeHidden?: boolean
   /** What each chat shows you last, by profile (see visible.ts). Falls back to the server's preview until read. */
   visible?: Record<string, VisibleActivity | undefined>
+  /** Every helper running on the server (`delegation.status`). */
+  background?: readonly DelegationStatusRow[]
+}
+
+/**
+ * What a bot's helpers are still working on after its turn, for its row: the open chat's own helpers first, else the server's
+ * list matched by the chat that sent them off (`owner_agent_session_id`, a stored session id). Null when none runs.
+ */
+export function backgroundGoal(row: ProfileRow, session: BotSession | undefined, background: readonly DelegationStatusRow[] = []): string | null {
+  const own = runningJobs(session?.transcript.jobs).find(job => job.kind === 'helpers')
+
+  if (own) {
+    return own.label || 'Helpers working'
+  }
+
+  const chats = new Set([row.canonical_session?.id, row.canonical_session?.resolved_id, session?.storedId, session?.liveId].filter(Boolean))
+  const task = background.find(entry => !entry.parent_id && entry.owner_agent_session_id && chats.has(entry.owner_agent_session_id) && (!entry.status || entry.status === 'running' || entry.status === 'queued'))
+
+  return task ? task.goal || 'Helpers working' : null
 }
 
 export function buildBotViews(input: BuildInput): BotView[] {
@@ -85,9 +105,12 @@ export function buildBotViews(input: BuildInput): BotView[] {
       preview = 'Waiting for your answer'
       urgent = true
     } else if (attention.state === 'working') {
-      preview = session?.transcript.statusLine || 'Working…'
+      preview = session?.transcript.wake ? 'Reading the result…' : session?.transcript.statusLine || 'Working…'
     } else {
-      preview = last.fromBot ? `${last.fromBot}: ${last.text}` : last.text
+      // The bot is idle, but work it handed off is still going: say so, calmly (no dot, not "Working…").
+      const goal = backgroundGoal(row, session, input.background)
+
+      preview = goal ? `Background · ${goal}` : last.fromBot ? `${last.fromBot}: ${last.text}` : last.text
       urgent = attention.unread
     }
 

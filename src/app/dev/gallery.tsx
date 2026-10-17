@@ -3,9 +3,11 @@ import { useState } from 'react'
 import { ScrollView, StyleSheet, View } from 'react-native'
 
 import { AttentionDot } from '@/components/bots/AttentionDot'
-import { ApprovalCard } from '@/components/chat/ActionCards'
+import { ApprovalCard, QuestionCard } from '@/components/chat/ActionCards'
 import { AssistantBubble, UserBubble } from '@/components/chat/Bubble'
+import { ActivityLine } from '@/components/chat/ActivityLine'
 import { Composer } from '@/components/chat/Composer'
+import { ViewBlock } from '@/components/dashboard/ViewBlock'
 import { BotFace } from '@/components/bots/BotFace'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { Hairline } from '@/components/ui/Hairline'
@@ -16,7 +18,9 @@ import { Screen } from '@/components/ui/Screen'
 import { Sheet } from '@/components/ui/Sheet'
 import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
+import type { Step } from '@/features/transcript/types'
 import { AVATAR_SHAPES } from '@/lib/hermes/identity'
+import type { View as DashboardView } from '@/lib/hermes/dashboard'
 import { usePrefs, type ThemePref } from '@/stores/prefs'
 import { BotTint, useTheme } from '@/theme/ThemeProvider'
 import { radius, typeScale, type TypeVariant } from '@/theme/tokens'
@@ -38,6 +42,15 @@ const TYPE_SAMPLES: [TypeVariant, string][] = [
   ['mono', 'docker compose pull'],
 ]
 
+/** Steps as a stored chat holds them: a search, a page read, a headless browser step and a dashboard read through tool search. */
+const SAMPLE_STEPS: Step[] = [
+  { toolId: 's1', name: 'web_search', context: 'site:example.com release schedule', state: 'done', durationS: 2, resultLine: 'Releases ship on Tuesdays; fixes any day.' },
+  { toolId: 's2', name: 'web_extract', context: 'https://www.example.com/changelog', state: 'done', durationS: 3, resultLine: 'Changelog: 4 releases this month, 2 fixes.' },
+  { toolId: 's3', name: 'browser_navigate', context: 'https://example.com/status', state: 'done', durationS: 4, resultLine: 'Opened the status page (headless).' },
+  { toolId: 's4', name: 'tool_call', context: '', args: { calls: [{ name: 'dashboard_query', arguments: { collection: 'orders' } }] }, state: 'done', durationS: 1, resultLine: '{"rows": 8, "needs_you": 1}' },
+  { toolId: 's5', name: 'terminal', context: 'python3 -m unittest discover -s tests', state: 'done', durationS: 2, resultLine: 'OK' },
+]
+
 /** The chat in miniature: your bubble, a reply with no bubble, the raised approval card and the composer tray. */
 function ChatSample() {
   const { c } = useTheme()
@@ -46,6 +59,8 @@ function ChatSample() {
     <View style={[styles.paper, { backgroundColor: c.canvas, paddingHorizontal: 20 }]}>
       <UserBubble text="Update the photo server on my-server to the latest image. Keep my settings." />
       <AssistantBubble text={'Image pulled: 5.1.2 → 5.2.0. Your settings live in the `photos_config` volume, so they survive the recreate.'} />
+      <ActivityLine item={{ kind: 'activity', id: 'g-a1', steps: SAMPLE_STEPS }} botName="Forge" browserShows={false} onOpenScreen={() => undefined} />
+      <ActivityLine item={{ kind: 'activity', id: 'g-a2', steps: [{ toolId: 's6', name: 'computer_use', context: '', state: 'done', durationS: 6 }] }} botName="Forge" onOpenScreen={() => undefined} />
       <View style={{ marginHorizontal: -4 }}>
         <ApprovalCard
           lead={<BotFace name="forge" meta={{ shape: 'hexagon', color: '#F97352' }} size={22} />}
@@ -56,11 +71,43 @@ function ChatSample() {
           onChoose={() => undefined}
         />
       </View>
+      <View style={{ marginHorizontal: -4 }}>
+        <QuestionCard
+          lead={<BotFace name="courier" meta={{ shape: 'blobatar:courier-6j:droplet' }} size={22} />}
+          questions={[
+            {
+              question: 'The release is ready but two customer requests are still open. What goes out today?',
+              choices: ['Ship the release and email the notes to everyone now', 'Ship the release quietly; send the notes next week', 'Neither'],
+            },
+          ]}
+          state="pending"
+          onAnswer={() => undefined}
+        />
+      </View>
       <View style={{ marginHorizontal: -32 }}>
         <Composer botName="Forge" running={false} onSend={() => undefined} onStop={() => undefined} />
       </View>
     </View>
   )
+}
+
+/** The sample panel's clock: its meta lines are fixed text, so any time will do. */
+const SAMPLE_NOW_S = Date.now() / 1000
+
+/** A panel whose rows carry signals (hermes-dashboard 0.4.0): green once an order shipped, amber while not, red when due today. */
+const SIGNAL_PANEL: DashboardView = {
+  id: 'g-orders',
+  title: 'Orders · shipping this week',
+  kind: 'list',
+  collection: 'courier/orders',
+  open: 6,
+  needs_you: 1,
+  rows: [
+    { id: 'r1', done: false, needs_you: true, signal: 'bad', title: { key: 'order', type: 'text', value: 'Order 1081 · Mia' }, subtitle: { key: 'shipping', type: 'text', value: 'Express · Not packed yet' }, meta: { key: 'due', type: 'text', value: 'Today 4 PM' } },
+    { id: 'r2', done: false, needs_you: false, signal: 'good', title: { key: 'order', type: 'text', value: 'Order 1077 · Lena' }, subtitle: { key: 'shipping', type: 'text', value: 'Gift wrap · Shipped Wed' }, meta: { key: 'due', type: 'text', value: 'Sat' } },
+    { id: 'r3', done: false, needs_you: false, signal: 'warn', title: { key: 'order', type: 'text', value: 'Order 1079 · Theo' }, subtitle: { key: 'shipping', type: 'text', value: 'Standard · Not packed yet' }, meta: { key: 'due', type: 'text', value: 'Sun' } },
+    { id: 'r4', done: false, needs_you: false, title: { key: 'order', type: 'text', value: 'Order 1080 · Pickup' }, subtitle: { key: 'shipping', type: 'text', value: 'In store · Nothing to ship' }, meta: { key: 'due', type: 'text', value: 'Wed' } },
+  ],
 }
 
 /** The four levels of paper, then an approval card raised over them: the same in neutral and in a bot's tint. */
@@ -239,6 +286,10 @@ export default function Gallery() {
           <BotTint color="#F97352">
             <ChatSample />
           </BotTint>
+        </Section>
+
+        <Section title="Dashboard rows · signals">
+          <ViewBlock view={SIGNAL_PANEL} nowS={SAMPLE_NOW_S} onOpenRecord={() => undefined} onToggle={() => undefined} onMenu={() => undefined} onOpenFull={() => undefined} />
         </Section>
 
         <Section title="Chat bubbles">

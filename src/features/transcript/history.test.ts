@@ -229,6 +229,22 @@ describe('messages stored as user turns that you did not write', () => {
     assert.deepEqual(itemsFromHistory([row({ id: 5, content: batch })]).map(item => item.kind), ['note'])
   })
 
+  it('says a helper that hit its step limit stopped there ("Incomplete")', () => {
+    const helpers = (meta: Record<string, unknown>) => noteFor(row({ display_kind: 'async_delegation_complete', display_metadata: meta }))
+    assert.equal(helpers({ display_text: 'Subagent Task Incomplete: Write the release notes', task_count: 1, duration_seconds: 372 }), 'A helper stopped at its step limit · 6m 12s')
+    assert.equal(helpers({ display_text: 'Subagent Tasks Incomplete: a; b (2 tasks)', task_count: 2 }), '2 helpers stopped at their step limit')
+  })
+
+  it('shows a kanban task’s news as one quiet line, without the mark and the names', () => {
+    const done = row({ id: 6, content: '✔ @scribe Kanban t_ab12 done — Write the release notes\nThe draft is in docs/releases.md' })
+    assert.equal(noteFor(done), 'Kanban t_ab12 done — Write the release notes')
+    assert.equal(noteFor(row({ content: '⏸ [shop] @forge Kanban t_cd34 blocked: needs the staging address' })), 'Kanban t_cd34 blocked: needs the staging address')
+    assert.equal(noteFor(row({ content: '🔄 Kanban t_ef56 → running' })), 'Kanban t_ef56 → running')
+    assert.deepEqual(itemsFromHistory([done]).map(item => item.kind), ['note'])
+    // Words you typed about a card are yours.
+    assert.equal(noteFor(row({ content: 'Is Kanban t_ab12 done yet?' })), null)
+  })
+
   it('draws another bot’s message from the sender, without the delivery prefix', () => {
     const items = itemsFromHistory([row({ id: 3, content: 'Message from 🤖 juniper (@juniper): Juniper got the ping.\nAll quiet.' })])
     assert.deepEqual(items, [{ kind: 'teammate', id: 'h-3', handle: 'juniper', text: 'Juniper got the ping.\nAll quiet.', ts: 100_000, chatter: true }])
@@ -413,6 +429,14 @@ describe('fixed texts the server stores as user turns', () => {
     const items = itemsFromHistory(rows)
     assert.deepEqual(items.map(item => item.kind), ['user', 'assistant', 'note', 'assistant'])
     assert.equal((items[2] as { text: string }).text, 'Reached its step limit for one turn')
+  })
+
+  it('your request copied back in after a compaction is one quiet line, not a second bubble from you', () => {
+    // As Hermes 0.21.5 stores it: a plain user row, the header and then your words.
+    const asked = 'Write up the release notes for the checkout update'
+    const restated = { id: 7, role: 'user', content: `[STILL IN PROGRESS — this is the active request, restated after the compaction boundary because it was not finished yet. Continue it; do not start over.]\n${asked}` } as StoredMessage
+    assert.equal(noteFor(restated), 'Chat compacted · picked your last request back up')
+    assert.deepEqual(itemsFromHistory([{ id: 6, role: 'user', content: asked } as StoredMessage, restated]).map(item => item.kind), ['user', 'note'])
   })
 })
 

@@ -388,6 +388,30 @@ describe('status line', () => {
   })
 })
 
+describe('the turn helpers’ results wake the bot for', () => {
+  const wake = ev('status.update', { kind: 'process', text: 'Subagent Task Incomplete: Write the release notes' })
+
+  it('is the bot reading the result, until that turn ends', () => {
+    let state = reduceEvent(initialTranscript(), wake)
+    assert.equal(state.wake, true)
+    assert.equal(state.statusLine, null)
+    state = reduceEvent(state, ev('message.start', {}))
+    assert.deepEqual([state.running, state.wake], [true, true])
+    state = reduceEvent(state, ev('message.complete', { text: 'The notes are drafted; one section is left.', status: 'complete' }))
+    assert.deepEqual([state.running, state.wake], [false, false])
+  })
+
+  it('is over when the session goes idle, or when you send', () => {
+    assert.equal(reduceEvent(reduceEvent(initialTranscript(), wake), ev('session.info', { model: 'm', provider: 'p', running: false })).wake, false)
+    assert.equal(appendUser(reduceEvent(initialTranscript(), wake), 'and the changelog?', NOW).wake, false)
+  })
+
+  it('is only Hermes’s title for helpers’ results, not other process news', () => {
+    assert.equal(reduceEvent(initialTranscript(), ev('status.update', { kind: 'process', text: 'Background Process Finished: npm test' })).wake, undefined)
+    assert.equal(reduceEvent(initialTranscript(), ev('status.update', { kind: 'lifecycle', text: 'Subagent Task Completed: x' })).wake, undefined)
+  })
+})
+
 describe('stopping a turn', () => {
   it('before any reply: a quiet stopped line, so the chat does not just end after your message', () => {
     let state = appendUser(initialTranscript(), 'count forever', NOW)

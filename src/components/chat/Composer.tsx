@@ -1,5 +1,5 @@
-import { useRef, useState, type ReactNode } from 'react'
-import { StyleSheet, TextInput, View } from 'react-native'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { findNodeHandle, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { GroupedList, Row } from '@/components/ui/GroupedList'
@@ -12,7 +12,9 @@ import { afterSheetCloses } from '@/lib/afterSheet'
 import { appendTranscript, clock } from '@/lib/hermes/audio'
 import { refusal, type PendingFile } from '@/lib/hermes/attachments'
 import { pickerQuery, rankOptions, type SlashOption } from '@/lib/hermes/slash'
-import { pickFiles, pickPhotos, takePhoto } from '@/lib/pickers'
+import { inserted, looksLikePastedPicture } from '@/lib/paste'
+import { enablePictures, onPastedPicture, type PastedPicture } from '@/lib/pasteReceiver'
+import { clipboardHasPicture, pastePicture, pickFiles, pickPhotos, takePhoto } from '@/lib/pickers'
 import { useKeyboardHeight } from '@/lib/useKeyboardHeight'
 import { useVoiceNote } from '@/lib/useVoiceNote'
 import { toast } from '@/stores/toast'
@@ -67,12 +69,49 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
   const typed = text.trim().length > 0 || attached.length > 0
   const voice = useVoiceNote(voiceProfile)
   const [menu, setMenu] = useState(false)
+  // The clipboard holds a picture: the attach menu offers to paste it (the field itself can't take one).
+  const [clipboardPicture, setClipboardPicture] = useState(false)
+
+  function openMenu() {
+    setMenu(true)
+    void clipboardHasPicture().then(setClipboardPicture)
+  }
   // The picker is open while only the command word is typed (`/`, `/wo`), and shows nothing when nothing matches.
   const typedCommand = commands ? pickerQuery(text) : null
   const matches = commands && typedCommand !== null ? rankOptions(commands, typedCommand) : []
   // A controlled multiline input on iOS keeps its old height after the value is cleared. Giving it a
   // fresh key when a message is sent mounts one at its natural single-row height instead.
   const [generation, setGeneration] = useState(0)
+
+  // Pictures the keyboard hands the field (Samsung's clipboard, Gboard): Android offers them only to a field that says it
+  // takes images, and the keyboard then grants reading them. A remount after a send is a new field to enable.
+  const takesFiles = !!onFilesChange
+  const takePicture = useRef<(picture: PastedPicture) => void>(() => undefined)
+
+  useEffect(() => {
+    takePicture.current = picture => {
+      const { uri, mime, size } = picture
+      const pasted = (): Promise<PendingFile[]> => Promise.resolve(uri ? [{ id: `p-${Date.now().toString(36)}`, kind: 'image', name: `Pasted picture.${mime === 'image/jpeg' ? 'jpg' : (mime?.split('/')[1] ?? 'png')}`, mime: mime ?? 'image/png', uri, size }] : [])
+
+      void attach(uri && !picture.error ? pasted : photosInstead)
+    }
+  })
+
+  useEffect(() => {
+    if (!takesFiles) {
+      return
+    }
+
+    const tag = findNodeHandle(input.current)
+    enablePictures(tag)
+    const subscription = onPastedPicture(picture => {
+      if (picture.viewTag === tag) {
+        takePicture.current(picture)
+      }
+    })
+
+    return () => subscription?.remove()
+  }, [generation, takesFiles])
 
   function send() {
     if (!typed) {
@@ -93,7 +132,47 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
 
     // The picker is another screen: let the sheet finish leaving before it opens.
     await new Promise<void>(resolve => afterSheetCloses(resolve))
+    await attach(pick)
+  }
 
+  /**
+   * The field takes only text, so a picture pasted into it arrives as garbage (its bytes read as text) or its address: put
+   * the field back as it was and attach the clipboard's picture instead, as if picked.
+   */
+  function changeText(next: string) {
+    if (onFilesChange && looksLikePastedPicture(inserted(text, next))) {
+      const before = text
+
+      setText(next)
+      // A second change back is what makes the field drop what the paste put in it.
+      setTimeout(() => setText(before), 0)
+      void attach(clipboardOrPhotos)
+
+      return
+    }
+
+    setText(next)
+  }
+
+  /**
+   * The clipboard's picture, or the photo library when Android won't hand it over: Samsung's clipboard keeps a screenshot as
+   * a link into the gallery that other apps may not read. In the library it is the newest picture.
+   */
+  async function clipboardOrPhotos(): Promise<PendingFile[]> {
+    try {
+      return await pastePicture()
+    } catch {
+      return photosInstead()
+    }
+  }
+
+  function photosInstead(): Promise<PendingFile[]> {
+    toast('Android didn’t hand that picture over, so here are your photos: it’s the newest one.')
+
+    return pickPhotos()
+  }
+
+  async function attach(pick: () => Promise<PendingFile[]>) {
     try {
       const picked = await pick()
       const room = MAX_FILES - attached.length
@@ -158,7 +237,7 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
             {recording ? (
               <IconCircle icon="x" label="Cancel recording" diameter={44} onPress={() => void voice.cancel()} />
             ) : onFilesChange ? (
-              <IconCircle icon="plus" label="Attach" diameter={44} disabled={transcribing} onPress={() => setMenu(true)} />
+              <IconCircle icon="plus" label="Attach" diameter={44} disabled={transcribing} onPress={openMenu} />
             ) : null}
 
             <View style={styles.field}>
@@ -176,7 +255,7 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
                   // After a send the new input takes over, so the keyboard stays up for the next message.
                   autoFocus={generation > 0 || !!initialText}
                   value={text}
-                  onChangeText={setText}
+                  onChangeText={changeText}
                   placeholder={attached.length ? 'Add a message' : `Message ${botName}`}
                   placeholderTextColor={c.text2}
                   accessibilityLabel={`Message ${botName}`}
@@ -207,6 +286,7 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
 
       <Sheet visible={menu} onClose={() => setMenu(false)} label="Attach">
         <GroupedList>
+          {clipboardPicture ? <Row label="Paste picture" chevron={false} onPress={() => void add(clipboardOrPhotos)} /> : null}
           <Row label="Photo library" chevron={false} onPress={() => void add(pickPhotos)} />
           <Row label="Take a photo" chevron={false} onPress={() => void add(takePhoto)} />
           <Row label="Files" chevron={false} onPress={() => void add(pickFiles)} />

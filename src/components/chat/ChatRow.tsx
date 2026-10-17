@@ -7,6 +7,7 @@ import { BotFace } from '@/components/bots/BotFace'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import type { DisplayItem } from '@/features/transcript/display'
+import { useBrowserShows } from '@/stores/display'
 import { useRoster } from '@/stores/roster'
 import { sessions } from '@/stores/sessions'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -75,6 +76,7 @@ function CardFace({ profile }: { profile: string }) {
 const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit<Props, 'list'>) {
   const { c } = useTheme()
   const router = useRouter()
+  const browserShows = useBrowserShows(profile)
 
   if (entry.kind === 'date') {
     return (
@@ -163,7 +165,7 @@ const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit
     case 'activity':
       return (
         <View style={styles.activity}>
-          <ActivityLine item={item} botName={botName} profile={profile} latest={latest} carriedOn={entry.carriedOn} onOpenScreen={() => router.push({ pathname: '/screens/[profile]', params: { profile } })} />
+          <ActivityLine item={item} botName={botName} profile={profile} latest={latest} carriedOn={entry.carriedOn} browserShows={browserShows} onOpenScreen={() => router.push({ pathname: '/screens/[profile]', params: { profile } })} />
           {entry.made?.map(path => (
             <ServerPicture key={path} path={path} name={path.split('/').pop() || 'Picture'} profile={profile} />
           ))}

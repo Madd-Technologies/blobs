@@ -87,12 +87,24 @@ describe('how long a run of steps took', () => {
 })
 
 describe('the bot’s screen in a run of steps', () => {
-  it('computer use and browser tools work on the screen; a plain web search or a command does not', () => {
-    assert.equal(usesScreen({ name: 'computer_use' }), true)
-    assert.equal(usesScreen({ name: 'browser_navigate' }), true)
-    assert.equal(usesScreen({ name: 'Browser_Click' }), true)
-    assert.equal(usesScreen({ name: 'web_search' }), false)
-    assert.equal(usesScreen({ name: 'terminal' }), false)
+  it('computer use works on the screen; browser tools only when the bot’s browser shows there; a web search or a command never', () => {
+    assert.equal(usesScreen({ name: 'computer_use' }, false), true)
+    assert.equal(usesScreen({ name: 'browser_navigate' }, true), true)
+    assert.equal(usesScreen({ name: 'Browser_Click' }, true), true)
+    assert.equal(usesScreen({ name: 'web_search' }, true), false)
+    assert.equal(usesScreen({ name: 'terminal' }, true), false)
+  })
+
+  it('a headless browser (Hermes’s default) leaves nothing to watch, and a browser at a configured address is not the screen', () => {
+    assert.equal(usesScreen({ name: 'browser_navigate' }, false), false)
+    assert.equal(usesScreen({ name: 'browser_snapshot' }, false), false)
+    assert.equal(usesScreen({ name: 'browser_cdp' }, true), false)
+    assert.equal(usesScreen({ name: 'browser_dialog' }, true), false)
+  })
+
+  it('looks through tool_call to the tool it called', () => {
+    assert.equal(usesScreen({ name: 'tool_call', args: { calls: [{ name: 'dashboard_query', arguments: {} }] } }, true), false)
+    assert.equal(usesScreen({ name: 'tool_call', args: { name: 'browser_navigate', arguments: { url: 'https://example.com' } } }, true), true)
   })
 
   it('a run that ends on a refused screen action is waiting on you', () => {
@@ -114,8 +126,33 @@ describe('browser step wording', () => {
   it('shows a step the tool described in words as written, and an address as browsed', () => {
     assert.equal(wording({ name: 'browser_navigate', context: 'Open example.com on the bot screen' }).past, 'Open example.com on the bot screen')
     assert.equal(wording({ name: 'browser_navigate', context: 'https://example.com/a' }).past, 'Browsed https://example.com/a')
-    assert.equal(wording({ name: 'web_search', context: 'Hermes screen viewer feature' }).past, 'Browsed Hermes screen viewer feature')
     assert.equal(wording({ name: 'browser_snapshot', context: '' }).past, 'Browsed')
+  })
+
+  it('a web search is a search and a page read is a read, not browsing (no browser is involved)', () => {
+    assert.equal(wording({ name: 'web_search', context: 'site:example.com release schedule' }).past, 'Searched the web for site:example.com release schedule')
+    assert.equal(wording({ name: 'web_search', context: '' }).present, 'Searching the web')
+    assert.equal(wording({ name: 'web_extract', context: 'https://www.example.com/changelog' }).past, 'Read example.com/changelog')
+    assert.equal(wording({ name: 'web_extract', context: '' }).past, 'Read a web page')
+  })
+})
+
+describe('tools reached through Hermes’s tool search', () => {
+  it('names the tool tool_call called, with its target', () => {
+    const query = { name: 'tool_call', context: '', args: { calls: [{ name: 'dashboard_query', arguments: { collection: 'orders' } }] } }
+    assert.equal(wording(query).past, 'Read the dashboard')
+    assert.equal(wording({ name: 'tool_call', context: '', args: { name: 'read_file', arguments: '{"path": "/srv/notes/today.md"}' } }).past, 'Read today.md')
+  })
+
+  it('says how many more calls the same step made', () => {
+    const two = { name: 'tool_call', context: '', args: { calls: [{ name: 'dashboard_record', arguments: {} }, { name: 'dashboard_view', arguments: {} }] } }
+    assert.equal(wording(two).past, 'Updated the dashboard and 1 more')
+  })
+
+  it('reads the search and lookup steps in plain words, and leaves a tool_call it cannot read as it was', () => {
+    assert.equal(wording({ name: 'tool_search', context: '' }).past, 'Looked through its tools')
+    assert.equal(wording({ name: 'tool_describe', context: '' }).past, 'Read how its tools work')
+    assert.equal(wording({ name: 'tool_call', context: '', args: { calls: [] } }).past, 'Used tool call')
   })
 })
 
