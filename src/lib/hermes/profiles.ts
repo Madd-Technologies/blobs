@@ -267,6 +267,17 @@ export function approvalModeOf(config: Record<string, unknown> | null | undefine
   return mode === 'smart' || mode === 'off' ? mode : 'manual'
 }
 
+/**
+ * Whether the bot's browser tool runs in a visible window (`browser.headed`, default off: Hermes 0.21.5 runs it headless, so
+ * nothing it does shows on the Bot Screen).
+ */
+export function browserHeadedOf(config: Record<string, unknown> | null | undefined): boolean {
+  const browser = config?.browser
+  const headed = browser && typeof browser === 'object' ? (browser as Record<string, unknown>).headed : undefined
+
+  return headed === true || headed === 'true'
+}
+
 /** The model id without its provider prefix (`z-ai/glm-5.3-flash` -> `glm-5.3-flash`), for comparing and showing. */
 export const bareModel = (model: string): string => model.trim().split('/').pop() ?? model.trim()
 

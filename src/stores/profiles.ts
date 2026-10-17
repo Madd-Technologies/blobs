@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 import { describeError } from '@/features/sessions/store'
 import type { BotMeta } from '@/lib/hermes/identity'
-import { approvalModeOf, changeModel, configureProfile, createBot, describeProfile, disabledSkills, updateBotMeta, type ApprovalMode, type ModelChange, type NewBot } from '@/lib/hermes/profiles'
+import { approvalModeOf, browserHeadedOf, changeModel, configureProfile, createBot, describeProfile, disabledSkills, updateBotMeta, type ApprovalMode, type ModelChange, type NewBot } from '@/lib/hermes/profiles'
 import type { ModelOptions, ProfileDescription } from '@/lib/hermes/protocol'
 import { deleteProfile, getBotConfig, updateBotConfig } from '@/lib/hermes/rest'
 import { call } from '@/lib/hermes/rpc'
@@ -167,6 +167,30 @@ export const useApprovals = create<ApprovalState>(set => ({
       set(state => ({ byBot: { ...state.byBot, [profile]: mode } }))
     } catch {
       // Left unknown: the row shows nothing rather than a guess.
+    }
+  },
+}))
+
+interface BrowserModeState {
+  byBot: Record<string, boolean | undefined>
+  load: (profile: string) => Promise<void>
+}
+
+/** Whether each bot's browser tool runs in a visible window (`browser.headed`), read from its config. */
+export const useBrowserMode = create<BrowserModeState>(set => ({
+  byBot: {},
+  load: async profile => {
+    const config = useConnection.getState().config
+
+    if (!config) {
+      return
+    }
+
+    try {
+      const headed = browserHeadedOf(await getBotConfig(config, profile))
+      set(state => ({ byBot: { ...state.byBot, [profile]: headed } }))
+    } catch {
+      // Left unknown, which counts as headless: a browser step then offers no screen to open.
     }
   },
 }))

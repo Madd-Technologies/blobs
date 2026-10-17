@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, View } from 'react-native'
 import { AttentionDot } from '@/components/bots/AttentionDot'
 import { ApprovalCard, QuestionCard } from '@/components/chat/ActionCards'
 import { AssistantBubble, UserBubble } from '@/components/chat/Bubble'
+import { ActivityLine } from '@/components/chat/ActivityLine'
 import { Composer } from '@/components/chat/Composer'
 import { BotFace } from '@/components/bots/BotFace'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
@@ -16,6 +17,7 @@ import { Screen } from '@/components/ui/Screen'
 import { Sheet } from '@/components/ui/Sheet'
 import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
+import type { Step } from '@/features/transcript/types'
 import { AVATAR_SHAPES } from '@/lib/hermes/identity'
 import { usePrefs, type ThemePref } from '@/stores/prefs'
 import { BotTint, useTheme } from '@/theme/ThemeProvider'
@@ -38,6 +40,15 @@ const TYPE_SAMPLES: [TypeVariant, string][] = [
   ['mono', 'docker compose pull'],
 ]
 
+/** Steps as a stored chat holds them: a search, a page read, a headless browser step and a dashboard read through tool search. */
+const SAMPLE_STEPS: Step[] = [
+  { toolId: 's1', name: 'web_search', context: 'site:example.com release schedule', state: 'done', durationS: 2, resultLine: 'Releases ship on Tuesdays; fixes any day.' },
+  { toolId: 's2', name: 'web_extract', context: 'https://www.example.com/changelog', state: 'done', durationS: 3, resultLine: 'Changelog: 4 releases this month, 2 fixes.' },
+  { toolId: 's3', name: 'browser_navigate', context: 'https://example.com/status', state: 'done', durationS: 4, resultLine: 'Opened the status page (headless).' },
+  { toolId: 's4', name: 'tool_call', context: '', args: { calls: [{ name: 'dashboard_query', arguments: { collection: 'orders' } }] }, state: 'done', durationS: 1, resultLine: '{"rows": 8, "needs_you": 1}' },
+  { toolId: 's5', name: 'terminal', context: 'python3 -m unittest discover -s tests', state: 'done', durationS: 2, resultLine: 'OK' },
+]
+
 /** The chat in miniature: your bubble, a reply with no bubble, the raised approval card and the composer tray. */
 function ChatSample() {
   const { c } = useTheme()
@@ -46,6 +57,8 @@ function ChatSample() {
     <View style={[styles.paper, { backgroundColor: c.canvas, paddingHorizontal: 20 }]}>
       <UserBubble text="Update the photo server on my-server to the latest image. Keep my settings." />
       <AssistantBubble text={'Image pulled: 5.1.2 → 5.2.0. Your settings live in the `photos_config` volume, so they survive the recreate.'} />
+      <ActivityLine item={{ kind: 'activity', id: 'g-a1', steps: SAMPLE_STEPS }} botName="Forge" browserShows={false} onOpenScreen={() => undefined} />
+      <ActivityLine item={{ kind: 'activity', id: 'g-a2', steps: [{ toolId: 's6', name: 'computer_use', context: '', state: 'done', durationS: 6 }] }} botName="Forge" onOpenScreen={() => undefined} />
       <View style={{ marginHorizontal: -4 }}>
         <ApprovalCard
           lead={<BotFace name="forge" meta={{ shape: 'hexagon', color: '#F97352' }} size={22} />}

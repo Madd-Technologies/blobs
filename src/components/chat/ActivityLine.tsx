@@ -108,6 +108,7 @@ export const ActivityLine = memo(function ActivityLine({
   profile,
   latest,
   carriedOn = false,
+  browserShows = false,
   onOpenScreen,
 }: {
   item: Activity
@@ -118,6 +119,8 @@ export const ActivityLine = memo(function ActivityLine({
   latest?: boolean
   /** The bot did more after this run in the same turn, so a failure it ended on was handled. */
   carriedOn?: boolean
+  /** This bot's browser shows on its screen (headed, or the screen is running), so browser steps can be watched there. */
+  browserShows?: boolean
   onOpenScreen?: () => void
 }) {
   const { c } = useTheme()
@@ -131,7 +134,7 @@ export const ActivityLine = memo(function ActivityLine({
   const live = summary.kind !== 'running' ? undefined : summary.job ? summary.job.detail : summary.current?.resultLine
   const fraction = summary.job?.fraction
   const expandable = summary.kind !== 'running' || finished.length > 0
-  const onScreen = item.steps.some(usesScreen)
+  const onScreen = item.steps.some(step => usesScreen(step, browserShows))
   // The bot is stuck on the screen because you hold it: the one moment in a run that needs you.
   const waiting = latest && waitingOnYou(item.steps) !== undefined
 
