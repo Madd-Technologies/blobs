@@ -43,10 +43,15 @@ export interface Typed {
   currency?: string
 }
 
+/** A row's signal from its view's `signals` rules (hermes-dashboard 0.4.0): a small green, amber or red dot. */
+export type RowSignal = 'good' | 'warn' | 'bad'
+
 export interface ViewRow {
   id: string
   done: boolean
   needs_you: boolean
+  /** The first of the view's signal rules this row matches; absent when none does, or it is done or muted. */
+  signal?: RowSignal
   /** Set while you have it muted: when it speaks up again (server seconds). */
   muted_until?: number
   /** A url the row opens (a live panel's `show.link`). */
@@ -83,7 +88,7 @@ interface ViewBase {
 
 export type View =
   | (ViewBase & { kind: 'list' | 'checklist'; rows: ViewRow[] })
-  | (ViewBase & { kind: 'table'; columns: { key: string; label: string; type: FieldType }[]; rows: { id: string; done: boolean; needs_you: boolean; muted_until?: number; cells: (Typed | null)[] }[] })
+  | (ViewBase & { kind: 'table'; columns: { key: string; label: string; type: FieldType }[]; rows: { id: string; done: boolean; needs_you: boolean; signal?: RowSignal; muted_until?: number; cells: (Typed | null)[] }[] })
   | (ViewBase & { kind: 'board'; columns: { name: string; count: number; rows: ViewRow[] }[] })
   | (ViewBase & { kind: 'number'; value: number | null; previous?: number | null; period?: 'day' | 'week' | 'month' })
   | (ViewBase & { kind: 'chart'; bucket: 'day' | 'week' | 'month'; style: 'bar' | 'line'; points: { start: string; value: number }[] })

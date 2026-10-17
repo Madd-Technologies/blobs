@@ -7,6 +7,7 @@ import { ApprovalCard, QuestionCard } from '@/components/chat/ActionCards'
 import { AssistantBubble, UserBubble } from '@/components/chat/Bubble'
 import { ActivityLine } from '@/components/chat/ActivityLine'
 import { Composer } from '@/components/chat/Composer'
+import { ViewBlock } from '@/components/dashboard/ViewBlock'
 import { BotFace } from '@/components/bots/BotFace'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { Hairline } from '@/components/ui/Hairline'
@@ -19,6 +20,7 @@ import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
 import type { Step } from '@/features/transcript/types'
 import { AVATAR_SHAPES } from '@/lib/hermes/identity'
+import type { View as DashboardView } from '@/lib/hermes/dashboard'
 import { usePrefs, type ThemePref } from '@/stores/prefs'
 import { BotTint, useTheme } from '@/theme/ThemeProvider'
 import { radius, typeScale, type TypeVariant } from '@/theme/tokens'
@@ -87,6 +89,25 @@ function ChatSample() {
       </View>
     </View>
   )
+}
+
+/** The sample panel's clock: its meta lines are fixed text, so any time will do. */
+const SAMPLE_NOW_S = Date.now() / 1000
+
+/** A panel whose rows carry signals (hermes-dashboard 0.4.0): green once an order shipped, amber while not, red when due today. */
+const SIGNAL_PANEL: DashboardView = {
+  id: 'g-orders',
+  title: 'Orders · shipping this week',
+  kind: 'list',
+  collection: 'courier/orders',
+  open: 6,
+  needs_you: 1,
+  rows: [
+    { id: 'r1', done: false, needs_you: true, signal: 'bad', title: { key: 'order', type: 'text', value: 'Order 1081 · Mia' }, subtitle: { key: 'shipping', type: 'text', value: 'Express · Not packed yet' }, meta: { key: 'due', type: 'text', value: 'Today 4 PM' } },
+    { id: 'r2', done: false, needs_you: false, signal: 'good', title: { key: 'order', type: 'text', value: 'Order 1077 · Lena' }, subtitle: { key: 'shipping', type: 'text', value: 'Gift wrap · Shipped Wed' }, meta: { key: 'due', type: 'text', value: 'Sat' } },
+    { id: 'r3', done: false, needs_you: false, signal: 'warn', title: { key: 'order', type: 'text', value: 'Order 1079 · Theo' }, subtitle: { key: 'shipping', type: 'text', value: 'Standard · Not packed yet' }, meta: { key: 'due', type: 'text', value: 'Sun' } },
+    { id: 'r4', done: false, needs_you: false, title: { key: 'order', type: 'text', value: 'Order 1080 · Pickup' }, subtitle: { key: 'shipping', type: 'text', value: 'In store · Nothing to ship' }, meta: { key: 'due', type: 'text', value: 'Wed' } },
+  ],
 }
 
 /** The four levels of paper, then an approval card raised over them: the same in neutral and in a bot's tint. */
@@ -265,6 +286,10 @@ export default function Gallery() {
           <BotTint color="#F97352">
             <ChatSample />
           </BotTint>
+        </Section>
+
+        <Section title="Dashboard rows · signals">
+          <ViewBlock view={SIGNAL_PANEL} nowS={SAMPLE_NOW_S} onOpenRecord={() => undefined} onToggle={() => undefined} onMenu={() => undefined} onOpenFull={() => undefined} />
         </Section>
 
         <Section title="Chat bubbles">
