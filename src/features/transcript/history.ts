@@ -4,7 +4,7 @@
  */
 
 import type { StoredMessage } from '../../lib/hermes/rest.ts'
-import { deliveryTarget, messageAgentTarget, noteFor, routineDelivery, routineNote, teammateMessage } from './injected.ts'
+import { deliveryTarget, noteFor, routineDelivery, routineNote, teammateMessage } from './injected.ts'
 import { splitUserContent } from './userContent.ts'
 import { jobIdOfResult } from './jobs.ts'
 import { commandOf, isRealFailure, readResult, revealLastReply } from './reduce.ts'
@@ -49,10 +49,11 @@ function parseArgs(raw: string | undefined): Record<string, unknown> | undefined
  * `rows` oldest first, as the REST page returns them.
  *
  * Hermes stores everything a bot does in the person's one chat with it, including its conversations with other bots.
- * A message from a bot starts a turn whose answer goes back to that bot, not to the person, and a bot that messaged
- * another bot on its own (while answering a bot) hears back the same way. Those items come back marked `chatter`, so
- * the chat can leave them out. A bot that messaged another for the person keeps the turn where it hears back: that is
- * where it reports to them.
+ * A message from a bot starts a turn whose answer goes back to that bot, not to the person: that turn comes back marked
+ * `chatter`, so the chat can leave it out. When a bot hears back from a bot it messaged (the wake-up), what it says next
+ * reaches no one but the person (Hermes's `bot_mode_dm.py` hands the sender only the reply of the turn its message
+ * started), so that turn is theirs, whichever turn the message was sent from. Carrying `chatter` over to it once hid hours
+ * of a bot's work for the person, its questions to them included, after a single message from another bot.
  *
  * A routine's output handed to the bot (`[Cronjob "…" output …]`) starts a turn of the bot working on it for the person: the
  * raw output becomes one quiet line, and of the turn only the last reply (the bot's summary) is for the person; the rest is
@@ -65,8 +66,6 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
   const issuedAt = new Map<string, number>()
   /** Whether the turn being read is between bots. A turn runs from a user-role row up to the next one. */
   let chatter = false
-  /** Messages this bot sent to other bots whose answer has not come back yet, oldest first. */
-  const outgoing: { target: string | null; chatter: boolean }[] = []
   /** Where the routine turn being read starts in `items`, or null when the turn being read is not one. */
   let routineFrom: number | null = null
 
@@ -84,7 +83,6 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
     if (row.role === 'user') {
       const raw = String(row.display_content ?? row.content ?? '')
       const teammate = teammateMessage(raw.trim())
-      const target = deliveryTarget(raw)
       const routine = routineDelivery(raw)
 
       // A user-role row ends the turn before it: a routine's turn ends with its summary shown.
@@ -110,11 +108,10 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
         continue
       }
 
-      if (target !== null) {
-        // The answer to a message this bot sent. It is between bots when that message was sent while answering a bot.
-        const at = outgoing.findIndex(entry => target === undefined || entry.target === null || entry.target === target)
-        const sent = at >= 0 ? outgoing.splice(at, 1)[0] : undefined
-        chatter = sent?.chatter ?? false
+      if (deliveryTarget(raw) !== null) {
+        // The answer to a message this bot sent: what it says now is for the person, even when it sent that message while
+        // answering a bot.
+        chatter = false
         // The plumbing line itself is never for the person.
         items.push({ kind: 'note', id, text: noteFor(row) ?? 'Background process finished', ts: stamp(row.timestamp), chatter: true })
 
@@ -152,10 +149,6 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
         const args = parseArgs(call.function.arguments)
         const step: Step = { toolId: call.id, name: call.function.name, context: contextOf(args), state: 'running', args, ...(row.timestamp !== undefined ? { startedAt: row.timestamp * 1000 } : {}) }
         const last = items.at(-1)
-
-        if (call.function.name === 'message_agent') {
-          outgoing.push({ target: messageAgentTarget(args), chatter })
-        }
 
         if (row.timestamp !== undefined) {
           issuedAt.set(call.id, row.timestamp)
