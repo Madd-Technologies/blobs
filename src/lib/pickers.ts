@@ -1,4 +1,6 @@
+import * as Clipboard from 'expo-clipboard'
 import * as DocumentPicker from 'expo-document-picker'
+import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy'
 import * as ImagePicker from 'expo-image-picker'
 
 import { cleanName, kindOf, photoName, type PendingFile } from '@/lib/hermes/attachments'
@@ -50,4 +52,27 @@ export async function pickFiles(): Promise<PendingFile[]> {
 
         return { id: nextId(), kind: kindOf(name, asset.mimeType), name, mime: asset.mimeType ?? 'application/octet-stream', uri: asset.uri, size: asset.size }
       })
+}
+
+/** Whether the clipboard holds a picture right now (for the attach menu's Paste picture). */
+export async function clipboardHasPicture(): Promise<boolean> {
+  return Clipboard.hasImageAsync().catch(() => false)
+}
+
+/**
+ * The picture on the clipboard, written to the cache as a JPEG so it uploads like a picked photo. Says why when there is
+ * none (the clipboard held something else, or the phone would not hand it over), instead of failing silently.
+ */
+export async function pastePicture(): Promise<PendingFile[]> {
+  const image = (await Clipboard.hasImageAsync()) ? await Clipboard.getImageAsync({ format: 'jpeg', jpegQuality: 0.85 }) : null
+  const base64 = image?.data.replace(/^data:[^,]*,/, '') ?? ''
+
+  if (!base64 || !cacheDirectory) {
+    throw new Error('Couldn’t read a picture from the clipboard. Use + → Photo library instead.')
+  }
+
+  const uri = `${cacheDirectory}pasted-${Date.now().toString(36)}.jpg`
+  await writeAsStringAsync(uri, base64, { encoding: 'base64' })
+
+  return [{ id: nextId(), kind: 'image', name: 'Pasted picture.jpg', mime: 'image/jpeg', uri, size: Math.round((base64.length * 3) / 4) }]
 }
