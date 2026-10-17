@@ -1,0 +1,6 @@
+{
+  "name": "paste-receiver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lets the composer's text field take pictures from the keyboard on Android (rich content)."
+}

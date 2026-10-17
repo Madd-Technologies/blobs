@@ -1,5 +1,5 @@
-import { useRef, useState, type ReactNode } from 'react'
-import { StyleSheet, TextInput, View } from 'react-native'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { findNodeHandle, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { GroupedList, Row } from '@/components/ui/GroupedList'
@@ -13,6 +13,7 @@ import { appendTranscript, clock } from '@/lib/hermes/audio'
 import { refusal, type PendingFile } from '@/lib/hermes/attachments'
 import { pickerQuery, rankOptions, type SlashOption } from '@/lib/hermes/slash'
 import { inserted, looksLikePastedPicture } from '@/lib/paste'
+import { enablePictures, onPastedPicture, type PastedPicture } from '@/lib/pasteReceiver'
 import { clipboardHasPicture, pastePicture, pickFiles, pickPhotos, takePhoto } from '@/lib/pickers'
 import { useKeyboardHeight } from '@/lib/useKeyboardHeight'
 import { useVoiceNote } from '@/lib/useVoiceNote'
@@ -82,6 +83,36 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
   // fresh key when a message is sent mounts one at its natural single-row height instead.
   const [generation, setGeneration] = useState(0)
 
+  // Pictures the keyboard hands the field (Samsung's clipboard, Gboard): Android offers them only to a field that says it
+  // takes images, and the keyboard then grants reading them. A remount after a send is a new field to enable.
+  const takesFiles = !!onFilesChange
+  const takePicture = useRef<(picture: PastedPicture) => void>(() => undefined)
+
+  useEffect(() => {
+    takePicture.current = picture => {
+      const { uri, mime, size } = picture
+      const pasted = (): Promise<PendingFile[]> => Promise.resolve(uri ? [{ id: `p-${Date.now().toString(36)}`, kind: 'image', name: `Pasted picture.${mime === 'image/jpeg' ? 'jpg' : (mime?.split('/')[1] ?? 'png')}`, mime: mime ?? 'image/png', uri, size }] : [])
+
+      void attach(uri && !picture.error ? pasted : photosInstead)
+    }
+  })
+
+  useEffect(() => {
+    if (!takesFiles) {
+      return
+    }
+
+    const tag = findNodeHandle(input.current)
+    enablePictures(tag)
+    const subscription = onPastedPicture(picture => {
+      if (picture.viewTag === tag) {
+        takePicture.current(picture)
+      }
+    })
+
+    return () => subscription?.remove()
+  }, [generation, takesFiles])
+
   function send() {
     if (!typed) {
       return
@@ -115,12 +146,30 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
       setText(next)
       // A second change back is what makes the field drop what the paste put in it.
       setTimeout(() => setText(before), 0)
-      void attach(pastePicture)
+      void attach(clipboardOrPhotos)
 
       return
     }
 
     setText(next)
+  }
+
+  /**
+   * The clipboard's picture, or the photo library when Android won't hand it over: Samsung's clipboard keeps a screenshot as
+   * a link into the gallery that other apps may not read. In the library it is the newest picture.
+   */
+  async function clipboardOrPhotos(): Promise<PendingFile[]> {
+    try {
+      return await pastePicture()
+    } catch {
+      return photosInstead()
+    }
+  }
+
+  function photosInstead(): Promise<PendingFile[]> {
+    toast('Android didn’t hand that picture over, so here are your photos: it’s the newest one.')
+
+    return pickPhotos()
   }
 
   async function attach(pick: () => Promise<PendingFile[]>) {
@@ -237,7 +286,7 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
 
       <Sheet visible={menu} onClose={() => setMenu(false)} label="Attach">
         <GroupedList>
-          {clipboardPicture ? <Row label="Paste picture" chevron={false} onPress={() => void add(pastePicture)} /> : null}
+          {clipboardPicture ? <Row label="Paste picture" chevron={false} onPress={() => void add(clipboardOrPhotos)} /> : null}
           <Row label="Photo library" chevron={false} onPress={() => void add(pickPhotos)} />
           <Row label="Take a photo" chevron={false} onPress={() => void add(takePhoto)} />
           <Row label="Files" chevron={false} onPress={() => void add(pickFiles)} />

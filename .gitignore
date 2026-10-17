@@ -39,6 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+# local Expo modules' Gradle output
+modules/*/android/build/
+modules/*/android/.gradle/
 
 # Python caches
 __pycache__/
