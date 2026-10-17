@@ -414,6 +414,14 @@ describe('fixed texts the server stores as user turns', () => {
     assert.deepEqual(items.map(item => item.kind), ['user', 'assistant', 'note', 'assistant'])
     assert.equal((items[2] as { text: string }).text, 'Reached its step limit for one turn')
   })
+
+  it('your request copied back in after a compaction is one quiet line, not a second bubble from you', () => {
+    // As Hermes 0.21.5 stores it: a plain user row, the header and then your words.
+    const asked = 'Write up the release notes for the checkout update'
+    const restated = { id: 7, role: 'user', content: `[STILL IN PROGRESS — this is the active request, restated after the compaction boundary because it was not finished yet. Continue it; do not start over.]\n${asked}` } as StoredMessage
+    assert.equal(noteFor(restated), 'Chat compacted · picked your last request back up')
+    assert.deepEqual(itemsFromHistory([{ id: 6, role: 'user', content: asked } as StoredMessage, restated]).map(item => item.kind), ['user', 'note'])
+  })
 })
 
 describe('reading bot-to-bot plumbing', () => {

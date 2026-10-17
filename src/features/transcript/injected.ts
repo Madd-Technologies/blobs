@@ -44,12 +44,15 @@ function metadataOf(row: StoredMessage): Record<string, unknown> | null {
 
 /**
  * Fixed texts Hermes stores as user turns with no `display_kind` (agent/context_compressor.py in 0.21.5): the request for
- * a summary when a turn runs out of steps, and the marker it leaves after compacting a chat that had no user turn left.
+ * a summary when a turn runs out of steps, the marker it leaves after compacting a chat that had no user turn left, and
+ * your last request copied back in after a compaction (`_reappend_inflight_user_task`). That copy keeps your words and
+ * your row's fields, so without this it reads as a second message from you.
  */
 const SERVER_TEXTS: [prefix: string, line: string][] = [
   ['You’ve reached the maximum number of tool-calling iterations allowed', 'Reached its step limit for one turn'],
   ["You've reached the maximum number of tool-calling iterations allowed", 'Reached its step limit for one turn'],
   ['Continue from the compressed conversation context above.', 'Chat compacted'],
+  ['[STILL IN PROGRESS — this is the active request, restated after the compaction boundary', 'Chat compacted · picked your last request back up'],
 ]
 
 // ── helpers' results ────────────────────────────────────────────────────────────────────────────
