@@ -4,7 +4,7 @@
  */
 
 import { describeSchedule, jobState, type CronJob } from '../../lib/hermes/cron.ts'
-import type { Field, HistoryEntry, RecordDetail, Typed, View } from '../../lib/hermes/dashboard.ts'
+import type { Field, HistoryEntry, RecordDetail, Typed, ValueUnit, View } from '../../lib/hermes/dashboard.ts'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -369,8 +369,22 @@ export function parseDraft(field: Field, text: string): { value: string | number
   return { value: trimmed }
 }
 
-/** "3 more" / "2 fewer" / "same as last week" against the previous period. */
-export function changeLine(value: number | null, previous: number | null | undefined, period?: string): string {
+/** An amount (money) or a share (percent) reads like its cell; counts and other sums stay plain. */
+const unitOf = (unit: ValueUnit | undefined) => (unit?.type === 'money' || unit?.type === 'percent' ? unit : undefined)
+
+/** A number panel's figure: "1,240", "$1,240", "96%", or "–" when there is nothing to add up. */
+export function figure(value: number | null | undefined, unit?: ValueUnit): string {
+  if (value === null || value === undefined) {
+    return '–'
+  }
+
+  const typed = unitOf(unit)
+
+  return typed ? formatTyped({ type: typed.type, value, currency: typed.currency }, 0) : plain(value)
+}
+
+/** "3 more" / "2 fewer" / "$40 less" / "same as last week" against the previous period. */
+export function changeLine(value: number | null, previous: number | null | undefined, period?: string, unit?: ValueUnit): string {
   if (value === null || previous === null || previous === undefined) {
     return ''
   }
@@ -381,7 +395,10 @@ export function changeLine(value: number | null, previous: number | null | undef
     return `same as last ${period ?? 'time'}`
   }
 
-  return difference > 0 ? `${plain(difference)} more` : `${plain(-difference)} fewer`
+  // Money and shares aren't counted things: "$40 less", not "$40 fewer".
+  const fewer = unitOf(unit) ? 'less' : 'fewer'
+
+  return difference > 0 ? `${figure(difference, unit)} more` : `${figure(-difference, unit)} ${fewer}`
 }
 
 /** Consecutive number panels share one row on the dashboard, the way the design draws them. */
@@ -526,7 +543,10 @@ export function keptLine(view: Pick<View, 'kept' | 'live' | 'open'>, botName: st
   const join = (...parts: string[]) => parts.filter(Boolean).join(' · ')
 
   if (kept?.how === 'live') {
-    const read = view.live?.as_of ? `read ${timeLabel(view.live.as_of, nowS)}` : ''
+    const asOf = view.live?.as_of ? timeLabel(view.live.as_of, nowS) : ''
+    const error = view.live?.error ? readError(view.live.error) : ''
+    // A failed read keeps the last good rows, so the time it names is the last read that worked.
+    const read = error ? (asOf ? `couldn’t read it since ${asOf}: ${error}` : `couldn’t read it: ${error}`) : asOf ? `read ${asOf}` : ''
 
     return join(`Updates itself from ${SOURCE_WORDS[kept.kind] ?? 'its source'}`, read)
   }
@@ -547,9 +567,31 @@ export function keptLine(view: Pick<View, 'kept' | 'live' | 'open'>, botName: st
   return join(open, feed.note ? `${how}; ${feed.note}` : how)
 }
 
-/** A live panel whose latest read failed says when its rows are from ("as of 9:42 AM"). */
+/**
+ * A live source's error in a few words. The plugin hands over a script's last 300 characters of stderr, so a traceback
+ * keeps its lead ("the script failed:") and its last line, the exception itself.
+ */
+export function readError(error: string): string {
+  const lines = error.split('\n').map(line => line.trim()).filter(Boolean)
+  const first = lines[0] ?? ''
+  const last = lines.at(-1) ?? ''
+
+  if (lines.length < 2) {
+    return first
+  }
+
+  const lead = /^[^:]{1,40}:/.exec(first)?.[0]
+
+  return lead ? `${lead} ${last}` : last
+}
+
+/** A live panel whose latest read failed says so quietly, and when its rows are from: "Couldn’t read · as of 9:42 AM". */
 export function staleNote(view: Pick<View, 'live'>, nowS: number): string {
-  return view.live?.error && view.live.as_of ? `as of ${timeLabel(view.live.as_of, nowS)}` : ''
+  if (!view.live?.error) {
+    return ''
+  }
+
+  return view.live.as_of ? `Couldn’t read · as of ${timeLabel(view.live.as_of, nowS)}` : 'Couldn’t read'
 }
 
 /** The panel menu's "kept by “Feed watch”, every 15 minutes". Empty when no routine keeps the dashboard. */

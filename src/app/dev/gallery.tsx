@@ -7,7 +7,8 @@ import { ApprovalCard, QuestionCard } from '@/components/chat/ActionCards'
 import { AssistantBubble, UserBubble } from '@/components/chat/Bubble'
 import { ActivityLine } from '@/components/chat/ActivityLine'
 import { Composer } from '@/components/chat/Composer'
-import { ViewBlock } from '@/components/dashboard/ViewBlock'
+import { PanelMenu } from '@/components/dashboard/PanelMenu'
+import { NumbersBlock, ViewBlock } from '@/components/dashboard/ViewBlock'
 import { BotFace } from '@/components/bots/BotFace'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { Hairline } from '@/components/ui/Hairline'
@@ -110,6 +111,63 @@ const SIGNAL_PANEL: DashboardView = {
   ],
 }
 
+/** Number tiles over a money field, a percent field and a count: the plugin names the unit (hermes-dashboard 0.5.1). */
+const NUMBER_PANELS: DashboardView[] = [
+  { id: 'g-spend', title: 'Spend', kind: 'number', collection: 'courier/purchases', value: 1240, previous: 1200, period: 'week', unit: { type: 'money', currency: 'USD' } },
+  { id: 'g-disk', title: 'Disk used', kind: 'number', collection: 'courier/disks', value: 96, previous: 91, period: 'month', unit: { type: 'percent' } },
+  { id: 'g-orders-n', title: 'Orders', kind: 'number', collection: 'courier/orders', value: 9 },
+]
+
+/** A checklist whose rows carry a subtitle, and one a link (show.subtitle, show.link). */
+const CHECKLIST_PANEL: DashboardView = {
+  id: 'g-chores',
+  title: 'This week',
+  kind: 'checklist',
+  collection: 'courier/chores',
+  open: 3,
+  needs_you: 1,
+  rows: [
+    { id: 'c1', done: false, needs_you: true, title: { key: 'task', type: 'text', value: 'Restock the printer' }, subtitle: { key: 'note', type: 'text', value: 'Black toner and a ream of paper' }, meta: { key: 'due', type: 'text', value: '11 AM' } },
+    { id: 'c2', done: false, needs_you: false, title: { key: 'task', type: 'text', value: 'Check the backup log' }, subtitle: { key: 'note', type: 'text', value: 'Last night\'s run on home-server' }, link: { key: 'log', type: 'url', value: 'https://example.com/backups' } },
+    { id: 'c3', done: false, needs_you: false, title: { key: 'task', type: 'text', value: 'Replace the smoke detector battery' }, meta: { key: 'due', type: 'text', value: 'Sun' } },
+    { id: 'c4', done: true, needs_you: false, title: { key: 'task', type: 'text', value: 'Clear old Docker images' }, subtitle: { key: 'note', type: 'text', value: 'Freed 12 GB' }, meta: { key: 'due', type: 'text', value: '10 AM' } },
+  ],
+}
+
+/** A live panel whose latest read failed (its rows are from the last good read), and one that never read. */
+const STALE_PANEL: DashboardView = {
+  id: 'g-downloads',
+  title: 'Downloads',
+  kind: 'list',
+  collection: null,
+  kept: { how: 'live', kind: 'script', ttl: 60 },
+  live: { as_of: SAMPLE_NOW_S - 17 * 60, error: 'the script failed: Traceback (most recent call last):\n  File "scripts/downloads.py", line 9, in <module>\nConnectionRefusedError: [Errno 111] Connection refused' },
+  open: 1,
+  rows: [{ id: 'live:0', done: false, needs_you: false, title: { key: 'name', type: 'text', value: 'Ubuntu 26.04 desktop' }, subtitle: { key: 'progress', type: 'text', value: '84% · 3 min left' } }],
+}
+
+const NEVER_READ_PANEL: DashboardView = { id: 'g-sensors', title: 'Sensors', kind: 'list', collection: null, kept: { how: 'live', kind: 'sqlite', ttl: 60 }, live: { as_of: null, error: 'no file at data/sensors.db' }, open: 0, rows: [] }
+
+/** A live table: its rows are `live:N`, not records, so a tap opens nothing. */
+const LIVE_TABLE: DashboardView = {
+  id: 'g-disks',
+  title: 'Disks',
+  kind: 'table',
+  collection: null,
+  kept: { how: 'live', kind: 'json', ttl: 300 },
+  live: { as_of: SAMPLE_NOW_S - 60 },
+  open: 2,
+  columns: [
+    { key: 'mount', label: 'Mount', type: 'text' },
+    { key: 'used', label: 'Used', type: 'percent' },
+    { key: 'free', label: 'Free', type: 'text' },
+  ],
+  rows: [
+    { id: 'live:0', done: false, needs_you: false, cells: [{ key: 'mount', type: 'text', value: '/' }, { key: 'used', type: 'percent', value: 71 }, { key: 'free', type: 'text', value: '58 GB' }] },
+    { id: 'live:1', done: false, needs_you: false, cells: [{ key: 'mount', type: 'text', value: '/mnt/media' }, { key: 'used', type: 'percent', value: 96 }, { key: 'free', type: 'text', value: '160 GB' }] },
+  ],
+}
+
 /** The four levels of paper, then an approval card raised over them: the same in neutral and in a bot's tint. */
 function Paper() {
   const { c } = useTheme()
@@ -164,6 +222,8 @@ export default function Gallery() {
   const setTheme = usePrefs(s => s.setTheme)
   const [toggle, setToggle] = useState(true)
   const [sheet, setSheet] = useState(false)
+  const [panelMenu, setPanelMenu] = useState<DashboardView | null>(null)
+  const [tapped, setTapped] = useState('')
 
   if (!__DEV__) {
     return <Redirect href="/" />
@@ -292,6 +352,17 @@ export default function Gallery() {
           <ViewBlock view={SIGNAL_PANEL} nowS={SAMPLE_NOW_S} onOpenRecord={() => undefined} onToggle={() => undefined} onMenu={() => undefined} onOpenFull={() => undefined} />
         </Section>
 
+        <Section title="Dashboard panels · units, checklists, live reads">
+          <NumbersBlock views={NUMBER_PANELS} onMenu={() => undefined} />
+          <ViewBlock view={CHECKLIST_PANEL} nowS={SAMPLE_NOW_S} onOpenRecord={id => setTapped(`record ${id}`)} onToggle={() => undefined} onMenu={() => undefined} onOpenFull={() => undefined} />
+          <ViewBlock view={STALE_PANEL} nowS={SAMPLE_NOW_S} onOpenRecord={id => setTapped(`record ${id}`)} onToggle={() => undefined} onMenu={() => setPanelMenu(STALE_PANEL)} onOpenFull={() => undefined} />
+          <ViewBlock view={NEVER_READ_PANEL} nowS={SAMPLE_NOW_S} onOpenRecord={id => setTapped(`record ${id}`)} onToggle={() => undefined} onMenu={() => setPanelMenu(NEVER_READ_PANEL)} onOpenFull={() => undefined} />
+          <ViewBlock view={LIVE_TABLE} nowS={SAMPLE_NOW_S} onOpenRecord={id => setTapped(`record ${id}`)} onToggle={() => undefined} onMenu={() => setPanelMenu(LIVE_TABLE)} onOpenFull={() => undefined} />
+          <T variant="label" color="text2">
+            {tapped ? `Last tap opened ${tapped}` : 'Nothing opened yet'}
+          </T>
+        </Section>
+
         <Section title="Chat bubbles">
           <UserBubble text="Give me a markdown summary" />
           <UserBubble text="What colour is this?" attachments={[{ kind: 'image', name: 'IMG_4821.jpg', uri: PHOTO_A }]} />
@@ -314,6 +385,8 @@ export default function Gallery() {
           <Hairline />
         </Section>
       </ScrollView>
+
+      <PanelMenu view={panelMenu} profile="forge" botName="Forge" onClose={() => setPanelMenu(null)} onAsk={() => setPanelMenu(null)} onCheck={() => setPanelMenu(null)} />
 
       <Sheet visible={sheet} onClose={() => setSheet(false)} label="Approval options">
         <GroupedList>

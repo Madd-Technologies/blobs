@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import type { CronJob } from '../../lib/hermes/cron.ts'
 import type { Field, RecordDetail, View } from '../../lib/hermes/dashboard.ts'
-import { actionFor, calendarLabel, changeLine, everyWords, fileCard, keptLine, staleNote, MUTE_FOREVER, mutedShort, mutePicks, untilLabel, chartEnds, dashboardRoutines, dateLabel, datePicks, feedsDashboard, formatTyped, groupNumbers, historyLine, isPast, keptBy, longLabel, nextStage, parseDraft, recordDrafts, recordHeading, refreshedSince, safeActionUrl, timeLabel, updatedLine } from './view.ts'
+import { actionFor, calendarLabel, changeLine, everyWords, figure, fileCard, keptLine, readError, staleNote, MUTE_FOREVER, mutedShort, mutePicks, untilLabel, chartEnds, dashboardRoutines, dateLabel, datePicks, feedsDashboard, formatTyped, groupNumbers, historyLine, isPast, keptBy, longLabel, nextStage, parseDraft, recordDrafts, recordHeading, refreshedSince, safeActionUrl, timeLabel, updatedLine } from './view.ts'
 
 /** Local-time epoch seconds, so the labels read the same in any time zone. */
 const at = (y: number, m: number, d: number, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime() / 1000
@@ -175,6 +175,22 @@ describe('panels', () => {
     assert.equal(changeLine(4, 6, 'week'), '2 fewer')
     assert.equal(changeLine(6, 6, 'week'), 'same as last week')
     assert.equal(changeLine(6, undefined), '')
+    assert.equal(changeLine(1240, 1200, 'week', { type: 'money' }), '$40 more')
+    assert.equal(changeLine(1200, 1240.5, 'week', { type: 'money', currency: 'EUR' }), '€40.50 less')
+    assert.equal(changeLine(91, 96, 'month', { type: 'percent' }), '5% less')
+    assert.equal(changeLine(4, 6, 'week', { type: 'rating' }), '2 fewer', 'an average rating is no amount')
+  })
+
+  it('a number panel’s figure reads like its cell', () => {
+    assert.equal(figure(1240), '1,240')
+    assert.equal(figure(3.14159), '3.14')
+    assert.equal(figure(null), '–')
+    assert.equal(figure(undefined, { type: 'money' }), '–')
+    assert.equal(figure(1240, { type: 'money' }), '$1,240')
+    assert.equal(figure(89.5, { type: 'money', currency: 'EUR' }), '€89.50')
+    assert.equal(figure(1240, { type: 'money', currency: 'CHF' }), '1,240 CHF')
+    assert.equal(figure(96, { type: 'percent' }), '96%')
+    assert.equal(figure(4.25, { type: 'rating' }), '4.25', 'only money and percent change the figure')
   })
 
   it('a chart’s ends and the updated line', () => {
@@ -196,8 +212,21 @@ describe('panels', () => {
     assert.equal(keptLine({ kept: { how: 'computed' }, open: 3 }, 'Orion', now, 'kept by “Feed watch”, every 15 minutes'), '3 open · kept by “Feed watch”, every 15 minutes')
     assert.equal(everyWords('15m'), '15 min')
     assert.equal(everyWords('2h'), '2 hours')
-    assert.equal(staleNote({ live: { as_of: at(2026, 10, 13, 9, 42), error: 'timeout' } }, now), 'as of 9:42 AM')
+    assert.equal(staleNote({ live: { as_of: at(2026, 10, 13, 9, 42), error: 'timeout' } }, now), 'Couldn’t read · as of 9:42 AM')
+    assert.equal(staleNote({ live: { as_of: null, error: 'no file at data/sensors.db' } }, now), 'Couldn’t read', 'never read: no rows to date')
     assert.equal(staleNote({ live: { as_of: at(2026, 10, 13, 9, 42) } }, now), '')
+    assert.equal(staleNote({}, now), '')
+  })
+
+  it('a live panel’s menu says why it couldn’t read', () => {
+    const script = { how: 'live', kind: 'script', ttl: 60 } as const
+    const traceback = 'the script failed: Traceback (most recent call last):\n  File "scripts/disk.py", line 4, in <module>\n    print(json.dumps(rows))\nKeyError: \'used\''
+
+    assert.equal(readError(traceback), 'the script failed: KeyError: \'used\'')
+    assert.equal(readError('the url didn’t answer JSON: timed out'), 'the url didn’t answer JSON: timed out')
+    assert.equal(readError('Traceback (most recent call last)\nValueError: bad'), 'ValueError: bad', 'no short lead: just the last line')
+    assert.equal(keptLine({ kept: script, live: { as_of: at(2026, 10, 13, 9, 42), error: traceback } }, 'Orion', now), 'Updates itself from a script · couldn’t read it since 9:42 AM: the script failed: KeyError: \'used\'')
+    assert.equal(keptLine({ kept: script, live: { as_of: null, error: 'no script disk.py in scripts' } }, 'Orion', now), 'Updates itself from a script · couldn’t read it: no script disk.py in scripts')
   })
 
   it('only safe links open outside the app', () => {

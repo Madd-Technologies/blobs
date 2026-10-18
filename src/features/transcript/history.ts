@@ -4,11 +4,67 @@
  */
 
 import type { StoredMessage } from '../../lib/hermes/rest.ts'
-import { deliveryTarget, messageAgentTarget, noteFor, routineDelivery, routineNote, teammateMessage } from './injected.ts'
+import { deliveryTarget, noteFor, routineDelivery, routineNote, teammateMessage } from './injected.ts'
 import { splitUserContent } from './userContent.ts'
 import { jobIdOfResult } from './jobs.ts'
 import { commandOf, isRealFailure, readResult, revealLastReply } from './reduce.ts'
 import type { Item, Step } from './types.ts'
+
+/**
+ * A Codex/Responses reply kept only in `codex_message_items`, with `content` stored empty: the text of its assistant message
+ * items. `analysis` is scratchpad, and raw `commentary` reaches the app only as the backend vetted it (`display_commentary`).
+ */
+function codexReply(raw: unknown): string {
+  let items = raw
+
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items)
+    } catch {
+      return ''
+    }
+  }
+
+  if (!Array.isArray(items)) {
+    return ''
+  }
+
+  return items
+    .map(item => {
+      const record = item && typeof item === 'object' ? (item as Record<string, unknown>) : null
+      const phase = typeof record?.phase === 'string' ? record.phase.trim().toLowerCase() : ''
+
+      if (record?.type !== 'message' || record.role !== 'assistant' || phase === 'analysis' || phase === 'commentary' || !Array.isArray(record.content)) {
+        return ''
+      }
+
+      return (record.content as unknown[])
+        .map(part => {
+          const piece = part && typeof part === 'object' ? (part as Record<string, unknown>) : null
+
+          return (piece?.type === 'output_text' || piece?.type === 'text') && typeof piece.text === 'string' ? piece.text : ''
+        })
+        .join('')
+    })
+    .join('')
+    .trim()
+}
+
+/**
+ * What an assistant row says, in order, read the way Hermes Desktop reads it (apps/desktop/src/lib/chat-messages/hydration.ts,
+ * 0.21.5): the public commentary the history backend vetted (`display_commentary`), unless it is the reply itself, then the
+ * reply: `display_content`, else `content`, else a Codex reply kept only in `codex_message_items`. Codex models put what the
+ * bot says beside its tool calls in that commentary and leave `content` empty, so reading `content` alone dropped it from
+ * every chat read back from the server (a reopen, a reconnect), though it had shown while streaming.
+ */
+export function assistantTexts(row: StoredMessage): string[] {
+  const commentary = Array.isArray(row.display_commentary) ? row.display_commentary.filter((part): part is string => typeof part === 'string' && part.trim() !== '').map(part => part.trim()) : []
+  const reply = typeof row.display_content === 'string' ? row.display_content.trim() : (row.content ?? '').trim() || codexReply(row.codex_message_items)
+  const squash = (text: string) => text.replace(/\s+/g, ' ').trim()
+  const sameAsReply = reply !== '' && commentary.length > 0 && squash(commentary.join('\n\n')) === squash(reply)
+
+  return [...(sameAsReply ? [] : commentary), ...(reply ? [reply] : [])]
+}
 
 function parseJson(text: string | null | undefined): unknown {
   if (!text) {
@@ -49,10 +105,11 @@ function parseArgs(raw: string | undefined): Record<string, unknown> | undefined
  * `rows` oldest first, as the REST page returns them.
  *
  * Hermes stores everything a bot does in the person's one chat with it, including its conversations with other bots.
- * A message from a bot starts a turn whose answer goes back to that bot, not to the person, and a bot that messaged
- * another bot on its own (while answering a bot) hears back the same way. Those items come back marked `chatter`, so
- * the chat can leave them out. A bot that messaged another for the person keeps the turn where it hears back: that is
- * where it reports to them.
+ * A message from a bot starts a turn whose answer goes back to that bot, not to the person: that turn comes back marked
+ * `chatter`, so the chat can leave it out. When a bot hears back from a bot it messaged (the wake-up), what it says next
+ * reaches no one but the person (Hermes's `bot_mode_dm.py` hands the sender only the reply of the turn its message
+ * started), so that turn is theirs, whichever turn the message was sent from. Carrying `chatter` over to it once hid hours
+ * of a bot's work for the person, its questions to them included, after a single message from another bot.
  *
  * A routine's output handed to the bot (`[Cronjob "…" output …]`) starts a turn of the bot working on it for the person: the
  * raw output becomes one quiet line, and of the turn only the last reply (the bot's summary) is for the person; the rest is
@@ -65,8 +122,6 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
   const issuedAt = new Map<string, number>()
   /** Whether the turn being read is between bots. A turn runs from a user-role row up to the next one. */
   let chatter = false
-  /** Messages this bot sent to other bots whose answer has not come back yet, oldest first. */
-  const outgoing: { target: string | null; chatter: boolean }[] = []
   /** Where the routine turn being read starts in `items`, or null when the turn being read is not one. */
   let routineFrom: number | null = null
 
@@ -84,7 +139,6 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
     if (row.role === 'user') {
       const raw = String(row.display_content ?? row.content ?? '')
       const teammate = teammateMessage(raw.trim())
-      const target = deliveryTarget(raw)
       const routine = routineDelivery(raw)
 
       // A user-role row ends the turn before it: a routine's turn ends with its summary shown.
@@ -110,11 +164,10 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
         continue
       }
 
-      if (target !== null) {
-        // The answer to a message this bot sent. It is between bots when that message was sent while answering a bot.
-        const at = outgoing.findIndex(entry => target === undefined || entry.target === null || entry.target === target)
-        const sent = at >= 0 ? outgoing.splice(at, 1)[0] : undefined
-        chatter = sent?.chatter ?? false
+      if (deliveryTarget(raw) !== null) {
+        // The answer to a message this bot sent: what it says now is for the person, even when it sent that message while
+        // answering a bot.
+        chatter = false
         // The plumbing line itself is never for the person.
         items.push({ kind: 'note', id, text: noteFor(row) ?? 'Background process finished', ts: stamp(row.timestamp), chatter: true })
 
@@ -138,24 +191,21 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
     }
 
     if (row.role === 'assistant') {
-      const text = (row.content ?? '').trim()
+      const texts = assistantTexts(row)
 
-      if (text) {
+      for (const [index, text] of texts.entries()) {
+        const reply = index === texts.length - 1
         // A reply the server stored with an explicit null finish reason (and no tool calls) never
         // finished: the turn was stopped. Anything else, including a missing field, is left unmarked.
-        const stopped = row.finish_reason === null && !row.tool_calls?.length
+        const stopped = reply && row.finish_reason === null && !row.tool_calls?.length
 
-        push({ kind: 'assistant', id, text, streaming: false, ts: stamp(row.timestamp), ...(stopped ? { status: 'interrupted' as const } : {}) })
+        push({ kind: 'assistant', id: reply ? id : `${id}-c${index}`, text, streaming: false, ts: stamp(row.timestamp), ...(stopped ? { status: 'interrupted' as const } : {}) })
       }
 
       for (const call of row.tool_calls ?? []) {
         const args = parseArgs(call.function.arguments)
         const step: Step = { toolId: call.id, name: call.function.name, context: contextOf(args), state: 'running', args, ...(row.timestamp !== undefined ? { startedAt: row.timestamp * 1000 } : {}) }
         const last = items.at(-1)
-
-        if (call.function.name === 'message_agent') {
-          outgoing.push({ target: messageAgentTarget(args), chatter })
-        }
 
         if (row.timestamp !== undefined) {
           issuedAt.set(call.id, row.timestamp)

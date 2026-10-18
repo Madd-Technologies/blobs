@@ -60,6 +60,7 @@ export default function Chats() {
   const nowS = useNow()
   const list = useChatList(state => state.byBot[profile])
   const listed = list?.listed ?? null
+  const inbox = list?.inbox ?? null
   const failed = list?.error ?? null
   const [pressed, setPressed] = useState<ChatEntry | null>(null)
   const [deleting, setDeleting] = useState<ChatEntry | null>(null)
@@ -83,14 +84,16 @@ export default function Chats() {
           startedAt: canonical?.last_active,
           messageCount: canonical?.message_count,
         },
+        inbox,
         openId: session?.storedId ?? chosen ?? null,
         elsewhere: !!chosen,
       }),
-    [listed, canonical, session?.storedId, chosen],
+    [listed, canonical, inbox, session?.storedId, chosen],
   )
 
   const main = entries.find(entry => entry.main)
-  const side = entries.filter(entry => !entry.main)
+  const between = entries.find(entry => entry.inbox)
+  const side = entries.filter(entry => !entry.main && !entry.inbox)
 
   /** Back to the bot's chat when it is in the stack; reached by a link (Home underneath) the chat takes this screen's place. */
   const toChat = () =>
@@ -192,6 +195,29 @@ export default function Chats() {
                       {main.current ? 'Open' : since(main.startedAt, nowS)}
                     </T>
                   </Pressable>
+                  {between ? (
+                    // What other bots asked this one, and its answers: kept out of the main chat, here to read.
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Between bots, read only"
+                      onPress={() => router.push({ pathname: '/bot/[profile]/past', params: { profile, session: between.id, title: between.title, inbox: '1' } })}
+                      style={({ pressed: down }) => [styles.row, { backgroundColor: down ? c.sheet : 'transparent' }]}
+                    >
+                      <View style={styles.rowText}>
+                        <T variant="body" numberOfLines={1}>
+                          {between.title}
+                        </T>
+                        {between.preview ? (
+                          <T variant="label" color="text2" numberOfLines={1}>
+                            {between.preview}
+                          </T>
+                        ) : null}
+                      </View>
+                      <T variant="meta" color="text2">
+                        {since(between.startedAt, nowS)}
+                      </T>
+                    </Pressable>
+                  ) : null}
                 </GroupedList>
               ) : null}
 
@@ -230,7 +256,7 @@ export default function Chats() {
               ) : null}
 
               <T variant="label" color="text2" style={styles.foot}>
-                {name}’s main chat is its one long conversation. Side chats are scratch space and stay here until you delete them: hold one to delete it.
+                {name}’s main chat is its one long conversation.{between ? ` Messages from other bots go to Between bots instead, to read only.` : ''} Side chats are scratch space and stay here until you delete them: hold one to delete it.
               </T>
             </>
           )}

@@ -10,6 +10,7 @@ import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
+import { isInboxTitle } from '@/features/sessions/chats'
 import { buildDisplay, type DisplayItem } from '@/features/transcript/display'
 import { itemsFromHistory, settleStaleSteps } from '@/features/transcript/history'
 import { useNow } from '@/lib/useNow'
@@ -22,17 +23,22 @@ import { BotTint } from '@/theme/ThemeProvider'
 
 /**
  * A chat from the past, to read: what a search found, or any chat the server will not (or should not) hand back to a phone
- * to write in. "Continue this chat" tries to open it for writing, and says why when the server will not.
+ * to write in. "Continue this chat" tries to open it for writing, and says why when the server will not. A bot's inbox
+ * (Between bots) is only ever read here: everything in it is between bots, so all of it shows, and it is never continued.
  */
 export default function PastChatScreen() {
-  const { profile, session, title } = useLocalSearchParams<{ profile: string; session: string; title?: string }>()
+  const { profile, session, title, inbox: inboxParam } = useLocalSearchParams<{ profile: string; session: string; title?: string; inbox?: string }>()
+  // Also when a search opens it: the result carries the chat's own title.
+  const inbox = inboxParam === '1' || isInboxTitle(title ?? '')
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const view = useBotView(profile)
   const tint = useFaceColor(profile)
   const past = usePast(state => state.byId[session])
   const showThinking = usePrefs(state => state.showThinking)
-  const showChatter = usePrefs(state => state.showBotChatter)
+  const chatterPref = usePrefs(state => state.showBotChatter)
+  // In the inbox every turn is between bots: hiding that would hide the whole chat.
+  const showChatter = inbox || chatterPref
   const nowS = useNow(60)
   const [continuing, setContinuing] = useState(false)
   // Why the server would not open this chat for writing, kept on screen: it is a sentence to read, not a blip.
@@ -80,10 +86,10 @@ export default function PastChatScreen() {
           <BotFace name={profile} meta={view?.meta} size={30} />
           <View style={styles.title}>
             <T variant="heading" numberOfLines={1}>
-              {title?.trim() || 'Earlier chat'}
+              {inbox ? 'Between bots' : title?.trim() || 'Earlier chat'}
             </T>
             <T variant="label" color="text2" numberOfLines={1}>
-              {name} · read only
+              {inbox ? `What other bots asked ${name} · read only` : `${name} · read only`}
             </T>
           </View>
         </View>
@@ -102,7 +108,7 @@ export default function PastChatScreen() {
         ) : !data.length ? (
           <View style={styles.center}>
             <T variant="secondary" color="text2" style={styles.centered}>
-              Nothing was said in this chat.
+              {inbox ? `No bot has messaged ${name} yet.` : 'Nothing was said in this chat.'}
             </T>
           </View>
         ) : (
@@ -119,14 +125,19 @@ export default function PastChatScreen() {
           />
         )}
 
-        <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-          {refusal ? (
-            <T variant="label" color="text2" style={styles.refusal} selectable>
-              {refusal}
-            </T>
-          ) : null}
-          <Pill label="Continue this chat" variant="secondary" loading={continuing} onPress={() => void carryOn()} />
-        </View>
+        {inbox ? (
+          // Writing here would hold the inbox open, and the next bot's message would be turned away as busy.
+          <View style={{ height: Math.max(insets.bottom, 12) }} />
+        ) : (
+          <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            {refusal ? (
+              <T variant="label" color="text2" style={styles.refusal} selectable>
+                {refusal}
+              </T>
+            ) : null}
+            <Pill label="Continue this chat" variant="secondary" loading={continuing} onPress={() => void carryOn()} />
+          </View>
+        )}
       </Screen>
     </BotTint>
   )

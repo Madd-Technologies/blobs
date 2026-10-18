@@ -13,6 +13,10 @@ export interface StoredMessage {
   content: string | null
   /** What to show when it differs from `content` (e.g. a slash command's visible form). */
   display_content?: string | null
+  /** An assistant row's public commentary (what the bot says beside its tool calls), vetted by the history backend (0.21.5). */
+  display_commentary?: string[] | null
+  /** A Codex/Responses assistant row's message items; REST hands the column back as JSON text. */
+  codex_message_items?: unknown
   /** `hidden` rows (injected context, markers) are never drawn. */
   display_kind?: string | null
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] | null

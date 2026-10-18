@@ -66,7 +66,8 @@ export function PanelMenu({ view, profile, botName, onClose, onAsk, onCheck, onO
             <View style={styles.titles}>
               <T variant="sheetTitle">{view.title}</T>
               {line ? (
-                <T variant="label" color="text2">
+                // A live read's error can be a script's stderr: four lines say enough, and Ask can go further.
+                <T variant="label" color="text2" numberOfLines={4}>
                   {line}
                 </T>
               ) : null}

@@ -4,8 +4,8 @@ import { describe, it } from 'node:test'
 
 import type { MessagesPage, StoredMessage } from '../../lib/hermes/rest.ts'
 import { summarizeActivity } from './activity.ts'
-import { historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter } from './history.ts'
-import { dashboardButton, deliveryTarget, messageAgentTarget, noteFor, profileOfHandle, routineDelivery, routineNote, teammateMessage } from './injected.ts'
+import { assistantTexts, historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter } from './history.ts'
+import { dashboardButton, deliveryTarget, noteFor, profileOfHandle, routineDelivery, routineNote, teammateMessage } from './injected.ts'
 import type { Item } from './types.ts'
 
 const page = JSON.parse(readFileSync(new URL('../../../docs/protocol-captures/messages.json', import.meta.url), 'utf8')) as MessagesPage
@@ -290,7 +290,7 @@ describe('conversations between bots (rows as stored on Hermes 0.21.6)', () => {
     typed(`[IMPORTANT: Background process proc_1 completed normally (exit code 0).\nCommand: /usr/bin/python3 /h/tools/bot_mode_dm.py --run-delivery --author '{"id":"bot:x"}' query-file /tmp/dm.txt --profile-home /h/profiles/${profile} /h/bin/hermes -p ${profile} chat --in '~' -c 'Bot Chat' --create-if-missing -Q\nOutput:\nok\n]`)
   const shown = (rows: StoredMessage[]) => itemsFromHistory(rows).filter(item => !item.chatter).map(item => (item.kind === 'assistant' || item.kind === 'user' ? `${item.kind}:${item.text}` : item.kind))
 
-  it('hides the whole turn another bot started in the bot that received it (Juniper’s chat)', () => {
+  it('hides the turn another bot started, but not what the bot says when it hears back (Juniper’s chat)', () => {
     const rows = [
       typed('Another'),
       said('Sent. test-note'),
@@ -301,7 +301,52 @@ describe('conversations between bots (rows as stored on Hermes 0.21.6)', () => {
       wake('default'),
       said('Orion (@hermes): Juniper got the ping.'),
     ]
-    assert.deepEqual(shown(rows), ['user:Another', 'assistant:Sent. test-note'])
+    // Only Orion reads "Ping received…". Nobody but the person reads what Juniper says after the wake-up.
+    assert.deepEqual(shown(rows), ['user:Another', 'assistant:Sent. test-note', 'assistant:Orion (@hermes): Juniper got the ping.'])
+  })
+
+  it('keeps hours of work for the person after one message from a bot (Orion running a migration across bots)', () => {
+    const asked = (question: string): StoredMessage =>
+      ({ ...base, id: ++n, role: 'assistant', content: '', tool_calls: [{ id: `c${n}`, function: { name: 'clarify', arguments: JSON.stringify({ question }) } }] }) as StoredMessage
+    const rows = [
+      typed('Move every bot to its own container'),
+      send('scout'),
+      sent('c2'),
+      said('Scout is moving.'),
+      wake('scout'),
+      said('Scout moved.'),
+      dm('Juniper', 'My terminal fails before every command.'),
+      send('juniper'),
+      sent('c8'),
+      said('Docker is healthy; retry now.'),
+      wake('juniper'),
+      asked('Every bot, or only the three that moved?'),
+      said('I took “every bot” as the three that moved. Checking each one.'),
+      send('scout'),
+      sent('c14'),
+      wake('scout'),
+      said('Results so far: Scout passed. Juniper is next.'),
+    ]
+    const all = shown(rows)
+
+    assert.deepEqual(all, [
+      'user:Move every bot to its own container',
+      'activity',
+      'assistant:Scout is moving.',
+      'assistant:Scout moved.',
+      'activity',
+      'assistant:I took “every bot” as the three that moved. Checking each one.',
+      'activity',
+      'assistant:Results so far: Scout passed. Juniper is next.',
+    ])
+
+    // The same whichever turn the page that was read starts on: where it began used to decide how much was hidden.
+    for (const [from, row] of rows.entries()) {
+      if (row.role === 'user') {
+        const part = shown(rows.slice(from))
+        assert.deepEqual(part, all.slice(all.length - part.length), `reading from row ${from}`)
+      }
+    }
   })
 
   it('keeps what a bot says to the person after it messaged another bot for them (Orion’s chat)', () => {
@@ -314,7 +359,7 @@ describe('conversations between bots (rows as stored on Hermes 0.21.6)', () => {
     assert.deepEqual(shown(rows), ['user:Ask juniper for the disk space', 'activity', 'assistant:Asked Juniper.', 'assistant:Juniper says the disk is 80% full.'])
   })
 
-  it('pairs each wake-up with the message it answers, even when two are out at once', () => {
+  it('shows each report when two messages are out at once', () => {
     const rows = [typed('Ask juniper and scout'), send('juniper'), sent('c2'), send('scout'), sent('c4'), said('Asked both.'), wake('scout'), said('Scout is done.'), wake('juniper'), said('Juniper is done.')]
     assert.deepEqual(shown(rows).filter(entry => entry.startsWith('assistant')), ['assistant:Asked both.', 'assistant:Scout is done.', 'assistant:Juniper is done.'])
   })
@@ -329,13 +374,8 @@ describe('conversations between bots (rows as stored on Hermes 0.21.6)', () => {
     assert.deepEqual(shown(rows), ['user:build it', 'assistant:Started the build.', 'note', 'assistant:The build finished.'])
   })
 
-  it('shows a turn when it cannot tell (the message it answers is older than the page that was read)', () => {
+  it('shows a turn whose message is older than the page that was read', () => {
     assert.deepEqual(shown([said('earlier'), wake('juniper'), said('Juniper replied.')]), ['assistant:earlier', 'assistant:Juniper replied.'])
-  })
-
-  it('does not let a peer or relay message be mistaken for a local one', () => {
-    const rows = [typed('ask the cloud one'), { ...send('peer/researcher') }, sent('c3'), said('Asked.'), wake('juniper'), said('Done.')]
-    assert.deepEqual(shown(rows).filter(entry => entry.startsWith('assistant')), ['assistant:Asked.', 'assistant:Done.'])
   })
 })
 
@@ -446,14 +486,6 @@ describe('reading bot-to-bot plumbing', () => {
     assert.equal(deliveryTarget('Command: x/bot_mode_dm.py --run-delivery stdin /t hermes -p default peer dm cloudbox'), undefined)
     assert.equal(deliveryTarget('Command: make all'), null)
   })
-
-  it('reads a message_agent target, with the default profile as hermes', () => {
-    assert.equal(messageAgentTarget({ target: 'hermes' }), 'default')
-    assert.equal(messageAgentTarget({ target: '@Juniper' }), 'juniper')
-    assert.equal(messageAgentTarget({ target: 'peer/researcher' }), null)
-    assert.equal(messageAgentTarget({ target: 'scout@cloud' }), null)
-    assert.equal(messageAgentTarget(undefined), null)
-  })
 })
 
 describe('a turn that is running now', () => {
@@ -471,5 +503,45 @@ describe('a turn that is running now', () => {
     assert.equal(turnIsChatter([row('user', 'hi')], 'hi'), false)
     assert.equal(turnIsChatter([row('user', 'hi'), row('assistant', 'hello')], 'do the thing'), false)
     assert.equal(turnIsChatter([], undefined), false)
+  })
+
+  it('is yours when it hears back from a bot, even one it messaged while answering a bot', () => {
+    const dm = row('user', 'Message from 🤖 Orion (@hermes): ping')
+    const send = { ...row('assistant', ''), tool_calls: [{ id: 'c-s', function: { name: 'message_agent', arguments: '{"target":"scout","message":"hi"}' } }] } as StoredMessage
+    const wake = "[IMPORTANT: Background process proc_1 completed normally (exit code 0).\nCommand: /h/tools/bot_mode_dm.py --run-delivery query-file /tmp/dm.txt /h/bin/hermes -p scout chat -c 'Bot Chat'\nOutput:\nok\n]"
+    assert.equal(turnIsChatter([dm, send, row('assistant', 'Asked Scout.')], wake), false)
+    assert.equal(turnIsChatter([dm, send, row('assistant', 'Asked Scout.'), row('user', wake)], wake), false)
+  })
+})
+
+describe('what a bot says beside its tool calls (Codex models, Hermes 0.21.5)', () => {
+  const call = { id: 'c1', function: { name: 'terminal', arguments: '{"command":"df -h"}' } }
+  const said = (patch: Partial<StoredMessage>): StoredMessage => ({ id: 41, role: 'assistant', content: '', timestamp: 100, ...patch }) as StoredMessage
+
+  it('shows the commentary the history backend vetted, before the steps, though content is empty', () => {
+    const items = itemsFromHistory([said({ display_commentary: ['Checking the disk on this machine first.'], tool_calls: [call] })])
+
+    assert.deepEqual(items.map(item => (item.kind === 'assistant' ? item.text : item.kind)), ['Checking the disk on this machine first.', 'activity'])
+  })
+
+  it('reads a reply kept only in codex_message_items, never its analysis or raw commentary', () => {
+    const items = JSON.stringify([
+      { type: 'message', role: 'assistant', phase: 'analysis', content: [{ type: 'output_text', text: 'scratch' }] },
+      { type: 'message', role: 'assistant', phase: 'commentary', content: [{ type: 'output_text', text: 'raw commentary' }] },
+      { type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: 'Sent it to your phone.' }] },
+    ])
+
+    assert.deepEqual(assistantTexts(said({ codex_message_items: items })), ['Sent it to your phone.'])
+  })
+
+  it('shows commentary once when the reply repeats it, and keeps both when they differ', () => {
+    assert.deepEqual(assistantTexts(said({ content: 'On it.', display_commentary: ['On it.'] })), ['On it.'])
+    assert.deepEqual(assistantTexts(said({ content: 'Done.', display_commentary: ['Looking now.'] })), ['Looking now.', 'Done.'])
+  })
+
+  it('prefers display_content, and reads plain rows as before', () => {
+    assert.deepEqual(assistantTexts(said({ content: 'raw', display_content: 'shown' })), ['shown'])
+    assert.deepEqual(assistantTexts(said({ content: 'Hi Alex.' })), ['Hi Alex.'])
+    assert.deepEqual(assistantTexts(said({ content: null })), [])
   })
 })

@@ -309,17 +309,6 @@ export function deliveryTarget(text: string): string | null | undefined {
   return target ? (target[1] as string).toLowerCase() : undefined
 }
 
-/** The profile a `message_agent` call is addressed to (`hermes` is the default profile), or null for a peer. */
-export function messageAgentTarget(args: Record<string, unknown> | undefined): string | null {
-  const raw = typeof args?.target === 'string' ? args.target.trim().replace(/^@/, '').toLowerCase() : ''
-
-  if (!raw || raw.includes('/') || raw.includes('@')) {
-    return null
-  }
-
-  return profileOfHandle(raw)
-}
-
 /**
  * `[Dashboard button "Send reply" · Late delivery, Order 4]` and then the job: the message a dashboard record's button sends
  * its bot in a fresh side chat (hermes-dashboard 0.2, `action_message`). The chat shows it as a compact bubble: the button,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildChatEntries } from './chats.ts'
+import { buildChatEntries, isInboxTitle } from './chats.ts'
 import type { ChatSummary } from './store.ts'
 
 const chat = (id: string, startedAt: number, extra: Partial<ChatSummary> = {}): ChatSummary => ({ id, title: '', preview: '', startedAt, messageCount: 4, source: 'tui', ...extra })
@@ -89,5 +89,57 @@ describe('chat list', () => {
   it('still lists a main chat the roster does not know yet', () => {
     const entries = buildChatEntries({ listed: [], main: { id: null }, openId: null, elsewhere: false })
     assert.deepEqual(entries.map(entry => [entry.id, entry.main, entry.current]), [['main', true, true]])
+  })
+
+  describe('the inbox', () => {
+    const inbox = chat('inbox-tip', 60, { title: 'Bot Inbox', preview: 'Scout asked for the build log\nmore' })
+
+    it('lists it as Between bots right under the main chat, never open and never main', () => {
+      const entries = buildChatEntries({ listed: [chat('a', 70, { title: 'A' })], main, inbox, openId: 'bot-chat', elsewhere: false })
+      assert.deepEqual(
+        entries.map(entry => [entry.id, entry.title, entry.main, entry.inbox, entry.current]),
+        [
+          ['bot-chat', 'Main chat', true, false, true],
+          ['inbox-tip', 'Between bots', false, true, false],
+          ['a', 'A', false, false, false],
+        ],
+      )
+      assert.equal(entries[1]?.preview, 'Scout asked for the build log')
+    })
+
+    it('never lists it, or a continuation of it, as a side chat', () => {
+      const entries = buildChatEntries({
+        listed: [chat('inbox-root', 5, { title: 'Bot Inbox' }), chat('inbox-tip', 60, { title: 'Bot Inbox #2' }), chat('keep', 1, { title: 'Keep' })],
+        main,
+        inbox: null,
+        openId: 'bot-chat',
+        elsewhere: false,
+      })
+      assert.deepEqual(
+        entries.map(entry => entry.id),
+        ['bot-chat', 'keep'],
+      )
+    })
+
+    it('puts a brand new side chat after it', () => {
+      const entries = buildChatEntries({ listed: [], main, inbox, openId: 'fresh', elsewhere: true })
+      assert.deepEqual(
+        entries.map(entry => [entry.id, entry.current]),
+        [
+          ['bot-chat', false],
+          ['inbox-tip', false],
+          ['fresh', true],
+        ],
+      )
+    })
+
+    it('knows its title, and only its title', () => {
+      assert.ok(isInboxTitle('Bot Inbox'))
+      assert.ok(isInboxTitle(' Bot Inbox #12 '))
+      assert.ok(!isInboxTitle('Bot Inbox notes'))
+      assert.ok(!isInboxTitle('Bot Inbox #'))
+      assert.ok(!isInboxTitle('Bot Chat'))
+      assert.ok(!isInboxTitle(''))
+    })
   })
 })

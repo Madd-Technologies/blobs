@@ -4,7 +4,7 @@
  */
 
 import type { BotDashboard } from '../../lib/hermes/dashboard.ts'
-import { updatedLine } from './view.ts'
+import { figure, updatedLine } from './view.ts'
 
 export interface Headline {
   /** The big figure ("2", "10.83"); empty when the dashboard has none to give. */
@@ -26,7 +26,7 @@ export function dashboardHeadline(dashboard: BotDashboard | null | undefined, ne
 
   for (const view of views) {
     if (view.kind === 'number' && view.value !== null && view.value !== undefined) {
-      return { figure: view.value.toLocaleString('en-US'), caption: view.title, needsYou: false }
+      return { figure: figure(view.value, view.unit), caption: view.title, needsYou: false }
     }
 
     if (view.kind === 'stat' && view.metrics[0]) {
