@@ -43,6 +43,13 @@ export interface Typed {
   currency?: string
 }
 
+/** What a number or chart adds up, when its aggregate has a field: money and percent figures read like their cells. Sent by
+ * hermes-dashboard 0.5.1 and later; absent before then and for a count. */
+export interface ValueUnit {
+  type: FieldType
+  currency?: string
+}
+
 /** A row's signal from its view's `signals` rules (hermes-dashboard 0.4.0): a small green, amber or red dot. */
 export type RowSignal = 'good' | 'warn' | 'bad'
 
@@ -90,8 +97,8 @@ export type View =
   | (ViewBase & { kind: 'list' | 'checklist'; rows: ViewRow[] })
   | (ViewBase & { kind: 'table'; columns: { key: string; label: string; type: FieldType }[]; rows: { id: string; done: boolean; needs_you: boolean; signal?: RowSignal; muted_until?: number; cells: (Typed | null)[] }[] })
   | (ViewBase & { kind: 'board'; columns: { name: string; count: number; rows: ViewRow[] }[] })
-  | (ViewBase & { kind: 'number'; value: number | null; previous?: number | null; period?: 'day' | 'week' | 'month' })
-  | (ViewBase & { kind: 'chart'; bucket: 'day' | 'week' | 'month'; style: 'bar' | 'line'; points: { start: string; value: number }[] })
+  | (ViewBase & { kind: 'number'; value: number | null; previous?: number | null; period?: 'day' | 'week' | 'month'; unit?: ValueUnit })
+  | (ViewBase & { kind: 'chart'; bucket: 'day' | 'week' | 'month'; style: 'bar' | 'line'; points: { start: string; value: number }[]; unit?: ValueUnit })
   | (ViewBase & { kind: 'summary'; text: string })
   | (ViewBase & { kind: 'stat'; metrics: { label: string; value: string; change?: string }[] })
 

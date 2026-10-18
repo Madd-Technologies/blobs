@@ -8,7 +8,7 @@ import { SwipeRow } from '@/components/dashboard/SwipeRow'
 import { Raised } from '@/components/ui/Raised'
 import { T } from '@/components/ui/T'
 import { openAction } from '@/components/dashboard/openAction'
-import { actionFor, changeLine, chartEnds, formatTyped, isPast, mutedShort, staleNote } from '@/features/dashboard/view'
+import { actionFor, changeLine, chartEnds, figure, formatTyped, isPast, mutedShort, staleNote } from '@/features/dashboard/view'
 import type { RowSignal, Typed, View as DashboardView, ViewRow } from '@/lib/hermes/dashboard'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
@@ -159,10 +159,14 @@ export function RecordRow({ row, nowS, onPress, fill }: { row: ViewRow; nowS: nu
   )
 }
 
+/** A checklist row: the ring closes it; the words open its record, or its link the way a list row's does. */
 function CheckRow({ row, nowS, onOpen, onToggle, fill }: { row: ViewRow; nowS: number; onOpen: () => void; onToggle: () => void; fill?: string }) {
   const { c } = useTheme()
   const meta = row.meta ? formatTyped(row.meta, nowS) : ''
   const title = row.title ? formatTyped(row.title, nowS) : 'Untitled'
+  const subtitle = row.subtitle ? formatTyped(row.subtitle, nowS) : ''
+  const link = row.link ? actionFor(row.link) : null
+  const waiting = row.needs_you && !row.muted_until && !row.done
 
   return (
     <View style={[styles.checkRow, { backgroundColor: fill ?? c.sheet }]}>
@@ -176,10 +180,17 @@ function CheckRow({ row, nowS, onOpen, onToggle, fill }: { row: ViewRow; nowS: n
           <View style={[styles.circle, styles.ring, { borderColor: row.signal === 'good' ? c.connected : row.signal === 'warn' ? c.needsYou : row.signal === 'bad' ? c.danger : row.needs_you ? c.needsYou : c.text2 }]} />
         )}
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={[title, meta].filter(Boolean).join(', ')} onPress={onOpen} style={styles.checkText}>
-        <T variant="body" color={row.done ? 'text2' : 'text'} numberOfLines={2} style={[styles.flex, row.done && styles.struck]}>
-          {title}
-        </T>
+      <Pressable accessibilityRole="button" accessibilityLabel={[title, subtitle, meta].filter(Boolean).join(', ')} onPress={link ? () => openAction(link, '', title) : onOpen} style={styles.checkText}>
+        <View style={[styles.text, subtitle ? styles.checkWords : null]}>
+          <T variant="body" color={row.done ? 'text2' : 'text'} numberOfLines={2} style={row.done ? styles.struck : undefined}>
+            {title}
+          </T>
+          {subtitle ? (
+            <T variant="secondary" color={waiting ? 'text' : 'text2'} numberOfLines={1}>
+              {subtitle}
+            </T>
+          ) : null}
+        </View>
         {row.muted_until && !row.done ? (
           <MutedNote row={row} nowS={nowS} />
         ) : meta ? (
@@ -187,6 +198,7 @@ function CheckRow({ row, nowS, onOpen, onToggle, fill }: { row: ViewRow; nowS: n
             {row.done ? 'Done' : meta}
           </T>
         ) : null}
+        {link ? <Feather name="external-link" size={13} color={c.text2} /> : null}
       </Pressable>
       </View>
     </View>
@@ -233,8 +245,8 @@ export function NumbersBlock({ views, onMenu }: { views: DashboardView[]; onMenu
           return null
         }
 
-        const change = changeLine(view.value, view.previous, view.period)
-        const value = view.value === null || view.value === undefined ? '–' : view.value.toLocaleString('en-US')
+        const change = changeLine(view.value, view.previous, view.period, view.unit)
+        const value = figure(view.value, view.unit)
 
         return (
           <Pressable
@@ -266,7 +278,7 @@ function Chart({ view }: { view: Extract<DashboardView, { kind: 'chart' }> }) {
   const gap = view.points.length > 12 ? 4 : 12
   const bar = Math.max(4, (width - gap * (view.points.length - 1)) / view.points.length)
   const [first, last] = chartEnds(view.points, view.bucket)
-  const label = `${view.title}: ${view.points.map(point => point.value).join(', ')}`
+  const label = `${view.title}: ${view.points.map(point => figure(point.value, view.unit)).join(', ')}`
 
   return (
     <View style={styles.chart}>
@@ -311,7 +323,7 @@ export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFu
     return <NumbersBlock views={[view]} onMenu={() => onMenu()} />
   }
 
-  // A live panel's header says nothing while it is fresh and "as of 9:42 AM" when its latest read failed.
+  // A live panel's header says nothing while it is fresh and "Couldn’t read · as of 9:42 AM" when its latest read failed.
   const note = view.kept?.how === 'live' ? staleNote(view, nowS) : view.kind === 'chart' ? '' : view.kind === 'summary' || view.kind === 'stat' ? '' : `${view.open ?? 0} open`
 
   const lift = raised && !bare
@@ -356,7 +368,8 @@ export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFu
               ))}
             </View>
             {view.rows.map(row => (
-              <Pressable key={row.id} accessibilityRole="button" onPress={() => onOpenRecord(row.id)} style={[styles.tableRow, { borderTopColor: c.separator }, styles.tableRule, row.muted_until ? styles.muted : null]}>
+              // A live panel's row isn't a record (and a table has no link slot), so it opens nothing, like a live list row without a link.
+              <Pressable key={row.id} accessibilityRole={row.id.startsWith('live:') ? undefined : 'button'} disabled={row.id.startsWith('live:')} onPress={() => onOpenRecord(row.id)} style={[styles.tableRow, { borderTopColor: c.separator }, styles.tableRule, row.muted_until ? styles.muted : null]}>
                 {view.rows.some(entry => entry.signal) ? <View style={styles.tableMark}>{row.signal ? <SignalDot tone={row.signal} /> : null}</View> : null}
                 {row.cells.map((value, index) => (
                   <T key={view.columns[index]?.key ?? index} variant="secondary" color={index === 0 && row.needs_you && !row.signal ? 'needsYouText' : 'text'} numberOfLines={1} style={styles.tableCell}>
@@ -434,6 +447,7 @@ const styles = StyleSheet.create({
   circle: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   ring: { borderWidth: 1.8 },
   checkText: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 },
+  checkWords: { paddingVertical: 8 },
   empty: { paddingHorizontal: 16, paddingVertical: 10 },
   numbers: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   tile: { flexGrow: 1, flexBasis: '30%', minWidth: 0, borderRadius: radius.chip, paddingVertical: 12, paddingHorizontal: 14, gap: 2 },

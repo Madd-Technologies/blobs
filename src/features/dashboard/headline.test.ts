@@ -16,6 +16,7 @@ describe('dashboard headline on a Home tile', () => {
 
   it('otherwise shows its first figure', () => {
     assert.deepEqual(dashboardHeadline(board([list('Updates', 3), number('Containers up', 9)]), 0, 1_000), { figure: '9', caption: 'Containers up', needsYou: false })
+    assert.equal(dashboardHeadline(board([{ id: 'r', kind: 'number', title: 'Revenue', collection: 'c', value: 1240, unit: { type: 'money' } }]), 0, 1_000).figure, '$1,240')
     assert.deepEqual(dashboardHeadline(board([{ id: 's', kind: 'stat', title: 'Today', collection: null, metrics: [{ label: 'Spent', value: '$4.20' }] }]), 0, 1_000).figure, '$4.20')
   })
 
