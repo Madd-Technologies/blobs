@@ -326,6 +326,19 @@ temporary: they are scratch space, never what Home previews or what tapping the 
   (a freshly built agent) is how it picks up changes; `.env` edits need `reload.env`, and credential or provider changes a fresh
   agent (`/new`).
 
+### The inbox ("Between bots")
+
+With hermes-bot-fixes 0.5 on the server, a message from another bot runs in the bot's **inbox**, a session titled "Bot Inbox",
+instead of its Bot Chat, so the main chat is never busy with other bots and never shows what they said to each other.
+
+- **Find it:** `session.list {profile, title: "Bot Inbox", include_hidden: true}`, an exact lookup outside the newest-80 window.
+  Open the row's `resolved_id` (the chat Hermes continued it into after compressing it, titled "Bot Inbox #2" and so on).
+  A server without the plugin answers no rows, and the app shows no inbox row.
+- **Chats list:** "Between bots", right under Main chat. Inbox rows, continued ones too, are never listed as side chats.
+- **Read only:** it opens in the past-chat view with every turn shown (all of it is between bots, so the "show bot chatter"
+  preference does not apply) and no "Continue this chat". Writing in it would hold it live, and the next bot's message would be
+  turned away as busy.
+
 ## Routines (cron jobs), verified on Hermes 0.21.6 (home-server)
 
 A bot's routines live in its own profile, so every REST call names the bot with `?profile=` (omitting it lists every

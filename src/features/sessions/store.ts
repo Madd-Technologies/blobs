@@ -9,7 +9,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 import { JsonRpcGatewayError, type GatewayEvent } from '../../lib/hermes/gateway-client.ts'
 import { asHermesEvent, RpcCode, type HermesEvent, type ProfileRow, type SessionInfo, type SessionResumeResult } from '../../lib/hermes/protocol.ts'
 import { listSessionMessages, type StoredMessage } from '../../lib/hermes/rest.ts'
-import { call, isRpcCode, type RpcClient } from '../../lib/hermes/rpc.ts'
+import { call, isRpcCode, type RpcClient, type RpcMethods } from '../../lib/hermes/rpc.ts'
 import type { RequestBridge } from '../../lib/hermes/server-requests.ts'
 import { HermesHttpError, type ServerConfig } from '../../lib/hermes/server.ts'
 import { historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter, turnIsStored } from '../transcript/history.ts'
@@ -20,6 +20,7 @@ import { answerPrompt, appendError, appendOutput, appendUser, dropPendingUser, e
 import { skillInvocation } from '../transcript/userContent.ts'
 import { dispatchOf, parseSlash, REWRITES_CHAT, stripAnsi } from '../../lib/hermes/slash.ts'
 import type { Item, TranscriptState } from '../transcript/types.ts'
+import { INBOX_TITLE } from './chats.ts'
 import { createEventQueue, realTimers, type EventQueue, type QueueTimers } from './queue.ts'
 
 /** Rows fetched per page; the chat opens on the newest page and pages back from there. */
@@ -61,6 +62,18 @@ export interface ChatSummary {
   messageCount: number
   /** Where it was started: `tui`, `cron`, a chat platform... */
   source: string
+}
+
+/** A `session.list` row as the history list shows it. */
+function summaryOf(entry: RpcMethods['session.list']['result']['sessions'][number]): ChatSummary {
+  return {
+    id: entry.id,
+    title: entry.title ?? '',
+    preview: entry.preview ?? '',
+    startedAt: entry.started_at ?? 0,
+    messageCount: entry.message_count ?? 0,
+    source: entry.source ?? '',
+  }
 }
 
 export interface SessionsDeps {
@@ -617,14 +630,18 @@ export function createSessions(deps: SessionsDeps) {
   async function listChats(profile: string): Promise<ChatSummary[]> {
     const { sessions } = await call(deps.client, 'session.list', { profile, limit: 80 })
 
-    return sessions.map(entry => ({
-      id: entry.id,
-      title: entry.title ?? '',
-      preview: entry.preview ?? '',
-      startedAt: entry.started_at ?? 0,
-      messageCount: entry.message_count ?? 0,
-      source: entry.source ?? '',
-    }))
+    return sessions.map(summaryOf)
+  }
+
+  /**
+   * The bot's inbox (see `INBOX_TITLE`), or null when it has none. Found by its exact title, which the server looks up
+   * outside the newest-80 window: a bot that runs routines all day would push it out of `listChats`.
+   */
+  async function findInbox(profile: string): Promise<ChatSummary | null> {
+    const { sessions } = await call(deps.client, 'session.list', { profile, title: INBOX_TITLE, include_hidden: true })
+    const entry = sessions[0]
+
+    return entry ? { ...summaryOf(entry), id: entry.resolved_id || entry.id } : null
   }
 
   /** Deletes a stored chat. The main chat cannot be deleted. Returns an error to show, or null. */
@@ -1102,7 +1119,7 @@ export function createSessions(deps: SessionsDeps) {
     queues.clear()
   }
 
-  return { store, open, openChat, openLinked, newChat, leaveSide, forget, listChats, deleteChat, loadOlder, send, runCommand, showOutput, stop, respondApproval, respondClarify, respondSecret, respondSudo, reattachAll, knownLiveIds, refreshJobs, dispose }
+  return { store, open, openChat, openLinked, newChat, leaveSide, forget, listChats, findInbox, deleteChat, loadOlder, send, runCommand, showOutput, stop, respondApproval, respondClarify, respondSecret, respondSudo, reattachAll, knownLiveIds, refreshJobs, dispose }
 }
 
 export type Sessions = ReturnType<typeof createSessions>

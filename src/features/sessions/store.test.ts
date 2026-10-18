@@ -1028,6 +1028,21 @@ describe('choosing a chat', () => {
       assert.deepEqual(h.calls[0], { method: 'session.list', params: { profile: 'bot', limit: 80 } })
       assert.deepEqual(chats[0], { id: 'stored-2', title: 'Deploy', preview: 'Deploying', startedAt: 20, messageCount: 6, source: 'tui' })
     })
+
+    it('finds the bot’s inbox by its title, at the chat it was continued into', async () => {
+      const h = withChats()
+      h.handlers['session.list'] = params =>
+        params.title === 'Bot Inbox' ? { sessions: [{ id: 'inbox-root', resolved_id: 'inbox-tip', title: 'Bot Inbox #2', preview: 'Scout asked', started_at: 50, message_count: 12, source: 'cli' }] } : { sessions: [] }
+      const inbox = await h.sessions.findInbox('bot')
+      assert.deepEqual(h.calls[0], { method: 'session.list', params: { profile: 'bot', title: 'Bot Inbox', include_hidden: true } })
+      assert.deepEqual(inbox, { id: 'inbox-tip', title: 'Bot Inbox #2', preview: 'Scout asked', startedAt: 50, messageCount: 12, source: 'cli' })
+    })
+
+    it('has no inbox when the server has none', async () => {
+      const h = withChats()
+      h.handlers['session.list'] = () => ({ sessions: [] })
+      assert.equal(await h.sessions.findInbox('bot'), null)
+    })
   })
 
   describe('deleting a chat', () => {
