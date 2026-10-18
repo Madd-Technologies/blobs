@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 
 import type { MessagesPage, StoredMessage } from '../../lib/hermes/rest.ts'
 import { summarizeActivity } from './activity.ts'
-import { historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter } from './history.ts'
+import { assistantTexts, historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter } from './history.ts'
 import { dashboardButton, deliveryTarget, noteFor, profileOfHandle, routineDelivery, routineNote, teammateMessage } from './injected.ts'
 import type { Item } from './types.ts'
 
@@ -511,5 +511,37 @@ describe('a turn that is running now', () => {
     const wake = "[IMPORTANT: Background process proc_1 completed normally (exit code 0).\nCommand: /h/tools/bot_mode_dm.py --run-delivery query-file /tmp/dm.txt /h/bin/hermes -p scout chat -c 'Bot Chat'\nOutput:\nok\n]"
     assert.equal(turnIsChatter([dm, send, row('assistant', 'Asked Scout.')], wake), false)
     assert.equal(turnIsChatter([dm, send, row('assistant', 'Asked Scout.'), row('user', wake)], wake), false)
+  })
+})
+
+describe('what a bot says beside its tool calls (Codex models, Hermes 0.21.5)', () => {
+  const call = { id: 'c1', function: { name: 'terminal', arguments: '{"command":"df -h"}' } }
+  const said = (patch: Partial<StoredMessage>): StoredMessage => ({ id: 41, role: 'assistant', content: '', timestamp: 100, ...patch }) as StoredMessage
+
+  it('shows the commentary the history backend vetted, before the steps, though content is empty', () => {
+    const items = itemsFromHistory([said({ display_commentary: ['Checking the disk on this machine first.'], tool_calls: [call] })])
+
+    assert.deepEqual(items.map(item => (item.kind === 'assistant' ? item.text : item.kind)), ['Checking the disk on this machine first.', 'activity'])
+  })
+
+  it('reads a reply kept only in codex_message_items, never its analysis or raw commentary', () => {
+    const items = JSON.stringify([
+      { type: 'message', role: 'assistant', phase: 'analysis', content: [{ type: 'output_text', text: 'scratch' }] },
+      { type: 'message', role: 'assistant', phase: 'commentary', content: [{ type: 'output_text', text: 'raw commentary' }] },
+      { type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: 'Sent it to your phone.' }] },
+    ])
+
+    assert.deepEqual(assistantTexts(said({ codex_message_items: items })), ['Sent it to your phone.'])
+  })
+
+  it('shows commentary once when the reply repeats it, and keeps both when they differ', () => {
+    assert.deepEqual(assistantTexts(said({ content: 'On it.', display_commentary: ['On it.'] })), ['On it.'])
+    assert.deepEqual(assistantTexts(said({ content: 'Done.', display_commentary: ['Looking now.'] })), ['Looking now.', 'Done.'])
+  })
+
+  it('prefers display_content, and reads plain rows as before', () => {
+    assert.deepEqual(assistantTexts(said({ content: 'raw', display_content: 'shown' })), ['shown'])
+    assert.deepEqual(assistantTexts(said({ content: 'Hi Alex.' })), ['Hi Alex.'])
+    assert.deepEqual(assistantTexts(said({ content: null })), [])
   })
 })

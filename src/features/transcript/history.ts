@@ -10,6 +10,62 @@ import { jobIdOfResult } from './jobs.ts'
 import { commandOf, isRealFailure, readResult, revealLastReply } from './reduce.ts'
 import type { Item, Step } from './types.ts'
 
+/**
+ * A Codex/Responses reply kept only in `codex_message_items`, with `content` stored empty: the text of its assistant message
+ * items. `analysis` is scratchpad, and raw `commentary` reaches the app only as the backend vetted it (`display_commentary`).
+ */
+function codexReply(raw: unknown): string {
+  let items = raw
+
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items)
+    } catch {
+      return ''
+    }
+  }
+
+  if (!Array.isArray(items)) {
+    return ''
+  }
+
+  return items
+    .map(item => {
+      const record = item && typeof item === 'object' ? (item as Record<string, unknown>) : null
+      const phase = typeof record?.phase === 'string' ? record.phase.trim().toLowerCase() : ''
+
+      if (record?.type !== 'message' || record.role !== 'assistant' || phase === 'analysis' || phase === 'commentary' || !Array.isArray(record.content)) {
+        return ''
+      }
+
+      return (record.content as unknown[])
+        .map(part => {
+          const piece = part && typeof part === 'object' ? (part as Record<string, unknown>) : null
+
+          return (piece?.type === 'output_text' || piece?.type === 'text') && typeof piece.text === 'string' ? piece.text : ''
+        })
+        .join('')
+    })
+    .join('')
+    .trim()
+}
+
+/**
+ * What an assistant row says, in order, read the way Hermes Desktop reads it (apps/desktop/src/lib/chat-messages/hydration.ts,
+ * 0.21.5): the public commentary the history backend vetted (`display_commentary`), unless it is the reply itself, then the
+ * reply: `display_content`, else `content`, else a Codex reply kept only in `codex_message_items`. Codex models put what the
+ * bot says beside its tool calls in that commentary and leave `content` empty, so reading `content` alone dropped it from
+ * every chat read back from the server (a reopen, a reconnect), though it had shown while streaming.
+ */
+export function assistantTexts(row: StoredMessage): string[] {
+  const commentary = Array.isArray(row.display_commentary) ? row.display_commentary.filter((part): part is string => typeof part === 'string' && part.trim() !== '').map(part => part.trim()) : []
+  const reply = typeof row.display_content === 'string' ? row.display_content.trim() : (row.content ?? '').trim() || codexReply(row.codex_message_items)
+  const squash = (text: string) => text.replace(/\s+/g, ' ').trim()
+  const sameAsReply = reply !== '' && commentary.length > 0 && squash(commentary.join('\n\n')) === squash(reply)
+
+  return [...(sameAsReply ? [] : commentary), ...(reply ? [reply] : [])]
+}
+
 function parseJson(text: string | null | undefined): unknown {
   if (!text) {
     return undefined
@@ -135,14 +191,15 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
     }
 
     if (row.role === 'assistant') {
-      const text = (row.content ?? '').trim()
+      const texts = assistantTexts(row)
 
-      if (text) {
+      for (const [index, text] of texts.entries()) {
+        const reply = index === texts.length - 1
         // A reply the server stored with an explicit null finish reason (and no tool calls) never
         // finished: the turn was stopped. Anything else, including a missing field, is left unmarked.
-        const stopped = row.finish_reason === null && !row.tool_calls?.length
+        const stopped = reply && row.finish_reason === null && !row.tool_calls?.length
 
-        push({ kind: 'assistant', id, text, streaming: false, ts: stamp(row.timestamp), ...(stopped ? { status: 'interrupted' as const } : {}) })
+        push({ kind: 'assistant', id: reply ? id : `${id}-c${index}`, text, streaming: false, ts: stamp(row.timestamp), ...(stopped ? { status: 'interrupted' as const } : {}) })
       }
 
       for (const call of row.tool_calls ?? []) {
