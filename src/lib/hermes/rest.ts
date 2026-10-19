@@ -56,6 +56,23 @@ function qs(params: Record<string, string | number | boolean | undefined>): stri
   return parts.length ? `?${parts.join('&')}` : ''
 }
 
+/** A page of a bot's stored chats from `GET /api/sessions`, newest started first. */
+export interface SessionsPage {
+  sessions: { id: string; title?: string | null; preview?: string | null; started_at?: number | null; message_count?: number | null; source?: string | null }[]
+  /** Every chat the same filter matches, for knowing whether there is more. */
+  total: number
+}
+
+/**
+ * A page of a bot's stored chats, newest started first. `order=created` is a plain `ORDER BY started_at LIMIT/OFFSET` on an
+ * index, so a page costs the same however many chats the bot has; `session.list` works through every one of them first
+ * (Hermes 0.21.5, hermes_state_sessions.list_sessions_rich). Hidden chats (the main chat, room sessions), sub-agents and
+ * archived chats are left out by the server, routines by `excludeSources`.
+ */
+export function listSessionsPage(config: ServerConfig, query: { profile: string; limit: number; offset: number; excludeSources?: string[] }): Promise<SessionsPage> {
+  return restJson<SessionsPage>(config, `/api/sessions${qs({ profile: query.profile, limit: query.limit, offset: query.offset, order: 'created', exclude_sources: query.excludeSources?.join(',') })}`)
+}
+
 /** Transcript of a stored session. Open Bot Chat with `order: 'latest'`, then page back with `offset`. */
 export function listSessionMessages(
   config: ServerConfig,

@@ -72,7 +72,8 @@ export interface RpcMethods {
     result: SessionCreateResult
   }
   'session.resume': {
-    params: { session_id: string; profile?: string; omit_messages?: boolean }
+    /** `defer_history`: answer at once and restore the model's history in the background (Hermes 0.21.5; older servers ignore it). */
+    params: { session_id: string; profile?: string; omit_messages?: boolean; defer_history?: boolean }
     result: SessionResumeResult
   }
   'session.list': {

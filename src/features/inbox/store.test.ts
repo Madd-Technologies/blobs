@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import type { ActiveSessionRow, ApprovalRequestPayload, DelegationStatusRow } from '../../lib/hermes/protocol.ts'
-import { createInbox } from './store.ts'
+import { approvalsFrom, createInbox } from './store.ts'
 
-function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string, ApprovalRequestPayload[]>; open?: string[]; fail?: string; helpers?: DelegationStatusRow[] } = {}) {
+function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string, ApprovalRequestPayload[]>; open?: string[]; fail?: string; helpers?: DelegationStatusRow[]; needsYou?: () => Promise<unknown> } = {}) {
   const calls: { method: string; params: Record<string, unknown>; timeoutMs?: number }[] = []
   const state = { active: options.active ?? [], approvals: options.approvals ?? {} }
   const client = {
@@ -19,8 +19,11 @@ function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string
         return { sessions: state.active } as T
       }
 
-      if (method === 'approval.pending') {
-        return { approvals: state.approvals[params.session_id as string] ?? [] } as T
+      if (method === 'session.events.since') {
+        // As Hermes 0.21.5 replays them: each waiting approval is an open server request, its params the approval as sent.
+        const open = (state.approvals[params.session_id as string] ?? []).map(entry => ({ id: `srq-${entry.request_id}`, method: 'approval', params: { session_id: params.session_id, ...entry } }))
+
+        return { events: [], open_requests: open } as T
       }
 
       if (method === 'approval.respond') {
@@ -34,7 +37,7 @@ function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string
       throw new Error(`unscripted ${method}`)
     },
   }
-  const inbox = createInbox({ client, openLiveIds: () => new Set(options.open ?? []), liveHelpers: () => options.helpers !== undefined, now: () => 42 })
+  const inbox = createInbox({ client, openLiveIds: () => new Set(options.open ?? []), liveHelpers: () => options.helpers !== undefined, readNeedsYou: options.needsYou, now: () => 42 })
 
   return { inbox, calls, state }
 }
@@ -43,14 +46,15 @@ const row = (id: string, status: ActiveSessionRow['status']): ActiveSessionRow =
 const approval = (id: string): ApprovalRequestPayload => ({ command: 'cmd', description: 'desc', request_id: id })
 
 describe('inbox refresh', () => {
-  it('asks approval.pending for working and waiting sessions the app has not opened', async () => {
+  it('reads the open requests of working and waiting sessions the app has not opened', async () => {
     const { inbox, calls } = setup({
       active: [row('a', 'working'), row('b', 'idle'), row('c', 'waiting'), row('d', 'working'), row('e', 'waiting')],
       open: ['d', 'e'],
       approvals: { a: [approval('r1')] },
     })
     await inbox.refresh()
-    assert.deepEqual(calls.filter(call => call.method === 'approval.pending').map(call => call.params.session_id), ['a', 'c'])
+    assert.deepEqual(calls.filter(call => call.method === 'session.events.since').map(call => call.params.session_id), ['a', 'c'])
+    assert.equal(calls.some(call => call.method === 'approval.pending'), false, 'never approval.pending: it can hold the socket for 30 s')
     assert.deepEqual(Object.keys(inbox.store.getState().polled), ['a'])
     assert.equal(inbox.store.getState().loadedAt, 42)
   })
@@ -61,10 +65,10 @@ describe('inbox refresh', () => {
     assert.deepEqual(inbox.store.getState().polled.courier?.map(entry => entry.request_id), ['r1'])
   })
 
-  it('does not hold a refresh for the 30 s approval.pending can block', async () => {
+  it('does not hold a refresh for a slow reply', async () => {
     const { inbox, calls } = setup({ active: [row('a', 'working')] })
     await inbox.refresh()
-    assert.equal(calls.find(call => call.method === 'approval.pending')?.timeoutMs, 8_000)
+    assert.equal(calls.find(call => call.method === 'session.events.since')?.timeoutMs, 5_000)
   })
 
   it('drops sessions that no longer hold an approval', async () => {
@@ -134,5 +138,83 @@ describe('helpers still running after their bot’s turn', () => {
     assert.deepEqual(inbox.store.getState().background, [])
     assert.equal(inbox.store.getState().error, null)
     assert.equal(inbox.store.getState().active.length, 1)
+  })
+})
+
+describe('approvals among a session\'s open requests', () => {
+  it('reads an approval as the server sent it, and nothing else', () => {
+    const open = [
+      { id: 'srq-1', method: 'approval', params: { session_id: 's', request_id: 'r1', command: 'docker compose pull', description: 'Pulls images', choices: ['once', 'deny'], allow_session: true, allow_permanent: false } },
+      { id: 'srq-2', method: 'clarify', params: { session_id: 's', question: 'A or B?' } },
+      { id: 'srq-3', method: 'approval', params: { session_id: 's', command: 'rm -r /tmp/x', description: '' } },
+    ]
+
+    assert.deepEqual(approvalsFrom(open), [
+      { request_id: 'r1', command: 'docker compose pull', description: 'Pulls images', choices: ['once', 'deny'], allow_session: true, allow_permanent: false },
+      { request_id: 'srq-3', command: 'rm -r /tmp/x', description: '' },
+    ])
+    assert.deepEqual(approvalsFrom(undefined), [])
+  })
+})
+
+const pushedBody = (requests: Record<string, unknown>[]) => ({ live: true, version: 3, requests })
+const pushedApproval = { id: 'srq-1', method: 'approval', session_id: 'a', session_key: 'k-a', profile: 'scout', title: 'Bot Chat', created_at: 5, params: { request_id: 'r1', description: 'delete files' } }
+
+describe('what the server pushes', () => {
+  it('reads the list when the app connects, and then never asks the busy chats', async () => {
+    const { inbox, calls } = setup({ active: [row('a', 'working'), row('c', 'waiting')], approvals: { a: [approval('r1')] }, needsYou: async () => pushedBody([pushedApproval]) })
+    await inbox.loadPushed()
+    assert.deepEqual(inbox.store.getState().pushed?.map(request => [request.id, request.profile, request.sessionId]), [['srq-1', 'scout', 'a']])
+    await inbox.refresh()
+    assert.deepEqual(calls.map(call => call.method), ['session.active_list'], 'status only: what waits on you is pushed')
+    assert.deepEqual(inbox.store.getState().polled, {})
+  })
+
+  it('takes each pushed list as the whole truth', async () => {
+    const { inbox } = setup({ needsYou: async () => pushedBody([pushedApproval]) })
+    await inbox.loadPushed()
+    inbox.applyPushed(pushedBody([]))
+    assert.deepEqual(inbox.store.getState().pushed, [])
+    inbox.applyPushed({ something: 'else' })
+    assert.deepEqual(inbox.store.getState().pushed, [], 'what is not the list changes nothing')
+  })
+
+  it('keeps checking the busy chats on a server without the push', async () => {
+    for (const body of [null, { live: false, version: 0, requests: [] }]) {
+      const { inbox, calls } = setup({ active: [row('a', 'working')], approvals: { a: [approval('r1')] }, needsYou: async () => body })
+      await inbox.loadPushed()
+      assert.equal(inbox.store.getState().pushed, null)
+      await inbox.refresh()
+      assert.ok(calls.some(call => call.method === 'session.events.since'))
+    }
+  })
+
+  it('goes back to checking at once when the server stops pushing', async () => {
+    let body: unknown = pushedBody([])
+    const { inbox, calls } = setup({ active: [row('a', 'working')], approvals: { a: [approval('r1')] }, needsYou: async () => body })
+    await inbox.loadPushed()
+    body = null
+    await inbox.loadPushed()
+    await inbox.refresh()
+    assert.deepEqual(Object.keys(inbox.store.getState().polled), ['a'])
+    assert.ok(calls.some(call => call.method === 'session.events.since'))
+  })
+
+  it('a failed read keeps the last list', async () => {
+    let fail = false
+    const { inbox } = setup({ needsYou: async () => (fail ? Promise.reject(new Error('offline')) : pushedBody([pushedApproval])) })
+    await inbox.loadPushed()
+    fail = true
+    await inbox.loadPushed()
+    assert.equal(inbox.store.getState().pushed?.length, 1)
+  })
+
+  it('an answered prompt leaves the list before the next push', async () => {
+    const { inbox } = setup({ needsYou: async () => pushedBody([pushedApproval, { ...pushedApproval, id: 'srq-2', method: 'clarify', params: { question: 'Which?' } }]) })
+    await inbox.loadPushed()
+    inbox.dropPushed('srq-2')
+    assert.deepEqual(inbox.store.getState().pushed?.map(request => request.id), ['srq-1'])
+    assert.equal(await inbox.respondApproval('a', 'r1', 'once'), true)
+    assert.deepEqual(inbox.store.getState().pushed, [])
   })
 })

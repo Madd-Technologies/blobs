@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather'
 import { useRouter } from 'expo-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, RefreshControl, StyleSheet, TextInput, View } from 'react-native'
 
 import { BotRow } from '@/components/bots/BotRow'
@@ -19,6 +19,7 @@ import { ageLabel, filterRoster } from '@/features/roster/derive'
 import { homeList } from '@/features/roster/home'
 import type { BotView } from '@/features/roster/view'
 import { isMainChat, type SessionHit } from '@/lib/hermes/search'
+import { holdOrder } from '@/lib/holdOrder'
 import { useNow } from '@/lib/useNow'
 import { useBotMetas, useBotViews } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
@@ -32,6 +33,8 @@ import { fonts, radius } from '@/theme/tokens'
 
 /** At most this many pinned bots get a card on Home. */
 const PINNED_MAX = 12
+/** How long the rows keep their places after a finger leaves the list or it stops scrolling. */
+const HOLD_AFTER_MS = 1200
 
 /** "my-server.ts.net" from "https://my-server.ts.net:9119/". */
 function hostOf(baseUrl: string | undefined): string {
@@ -108,6 +111,42 @@ export default function Home() {
       ...(asking && !messagesSearching && searchError ? [{ kind: 'unsearched', key: 'unsearched' } as Item] : []),
     ]
   }, [views, roomViews, query, asking, hits, hitsFor, trimmed, messagesSearching, searchError])
+
+  // Rows keep their places while a finger is on the list and a moment after it stops, so new activity never moves a row
+  // under a tap; then they take the order activity gives them.
+  const [held, setHeld] = useState<string[] | null>(null)
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const shown = useMemo(() => holdOrder(visible, item => item.key, held), [visible, held])
+
+  function hold() {
+    if (releaseTimer.current) {
+      clearTimeout(releaseTimer.current)
+      releaseTimer.current = null
+    }
+
+    // The order on screen now, unless one is already held.
+    setHeld(current => current ?? visible.map(item => item.key))
+  }
+
+  function letGo() {
+    if (releaseTimer.current) {
+      clearTimeout(releaseTimer.current)
+    }
+
+    releaseTimer.current = setTimeout(() => {
+      releaseTimer.current = null
+      setHeld(null)
+    }, HOLD_AFTER_MS)
+  }
+
+  useEffect(
+    () => () => {
+      if (releaseTimer.current) {
+        clearTimeout(releaseTimer.current)
+      }
+    },
+    [],
+  )
 
   const pinned = useMemo(() => views.filter(view => view.pinned).slice(0, PINNED_MAX), [views])
   const deckContext = useMemo(() => ({ views, metas, nowS }), [views, metas, nowS])
@@ -230,8 +269,15 @@ export default function Home() {
       )}
 
       <FlatList
-        data={visible}
+        data={shown}
         keyExtractor={item => item.key}
+        onTouchStart={hold}
+        onTouchEnd={letGo}
+        onTouchCancel={letGo}
+        onScrollBeginDrag={hold}
+        onScrollEndDrag={letGo}
+        onMomentumScrollBegin={hold}
+        onMomentumScrollEnd={letGo}
         renderItem={({ item }: { item: Item }) => <View style={{ backgroundColor: c.sheet }}>{renderRow(item)}</View>}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => void onPull()} tintColor={c.text2} />}

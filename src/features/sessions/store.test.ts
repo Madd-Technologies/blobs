@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 
 import { JsonRpcGatewayError, type GatewayEvent } from '../../lib/hermes/gateway-client.ts'
 import type { ProfileRow, SessionResumeResult } from '../../lib/hermes/protocol.ts'
-import type { MessagesPage, StoredMessage } from '../../lib/hermes/rest.ts'
+import type { MessagesPage, SessionsPage, StoredMessage } from '../../lib/hermes/rest.ts'
 import type { RequestBridge } from '../../lib/hermes/server-requests.ts'
 import { HermesHttpError, type ServerConfig } from '../../lib/hermes/server.ts'
 import { pendingPrompts } from '../transcript/reduce.ts'
@@ -59,6 +59,9 @@ interface Harness {
   timers: ReturnType<typeof manualTimers>
   setRoster: (rows: ProfileRow[]) => void
   setPage: (pages: (offset: number) => StoredMessage[]) => void
+  /** What the server's paged list of stored chats answers (REST, so not in `calls`). */
+  setChats: (page: (query: { offset: number; limit: number; excludeSources?: string[] }) => SessionsPage) => void
+  chatQueries: { offset: number; limit: number; excludeSources?: string[] }[]
   nextLive: { value: number }
 }
 
@@ -68,6 +71,8 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
   const timers = manualTimers()
   let roster: ProfileRow[] = [row('bot', 'stored-1')]
   let pages: (offset: number) => StoredMessage[] = () => history.messages
+  let chats: (query: { offset: number; limit: number; excludeSources?: string[] }) => SessionsPage = () => ({ sessions: [], total: 0 })
+  const chatQueries: Harness['chatQueries'] = []
   const nextLive = { value: 1 }
 
   const handlers: Harness['handlers'] = {
@@ -104,6 +109,10 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
       const messages = pages(query?.offset ?? 0)
       return { session_id: 'stored-1', messages, pagination: { limit: PAGE_SIZE, offset: query?.offset ?? 0, order: 'latest', returned: messages.length } }
     },
+    listSessions: async (_config, { offset, limit, excludeSources }) => {
+      chatQueries.push({ offset, limit, excludeSources })
+      return chats({ offset, limit, excludeSources })
+    },
     requests,
     readBase64: async uri => (uri.includes('missing') ? Promise.reject(new Error('Could not read that file.')) : Buffer.from(uri).toString('base64')),
     now: () => 1_000,
@@ -121,6 +130,8 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
     timers,
     setRoster: rows => void (roster = rows),
     setPage: fn => void (pages = fn),
+    setChats: fn => void (chats = fn),
+    chatQueries,
     nextLive,
   }
 }
@@ -129,12 +140,30 @@ const bot = (h: Harness, profile = 'bot') => h.sessions.store.getState().bots[pr
 const methods = (h: Harness) => h.calls.map(call => call.method)
 
 describe('open', () => {
+  it('reads the history while the server resumes the chat, not after it', async () => {
+    const h = harness()
+    let readBeforeResumed = false
+    let release: () => void = () => undefined
+    const resumed = h.handlers['session.resume'] as (params: Record<string, unknown>) => unknown
+    h.handlers['session.resume'] = params => new Promise(resolve => (release = () => resolve(resumed(params))))
+    h.setPage(() => {
+      readBeforeResumed = true
+      return []
+    })
+    const opening = h.sessions.open('bot')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.equal(readBeforeResumed, true, 'the history read started before session.resume answered')
+    release()
+    await opening
+    assert.equal(bot(h)?.phase, 'ready')
+  })
+
   it('resumes the canonical Bot Chat, loads history and registers the live id', async () => {
     const h = harness()
     await h.sessions.open('bot')
 
     assert.deepEqual(methods(h), ['session.resume'])
-    assert.deepEqual(h.calls[0]?.params, { session_id: 'stored-1', profile: 'bot', omit_messages: true })
+    assert.deepEqual(h.calls[0]?.params, { session_id: 'stored-1', profile: 'bot', omit_messages: true, defer_history: true })
     assert.equal(bot(h)?.phase, 'ready')
     assert.equal(bot(h)?.liveId, 'live-1')
     assert.equal(bot(h)?.storedId, 'stored-1')
@@ -1022,11 +1051,33 @@ describe('choosing a chat', () => {
   })
 
   describe('the history', () => {
-    it('lists the bot’s stored chats', async () => {
+    it('lists the bot’s stored chats a page at a time, without routines', async () => {
       const h = withChats()
-      const chats = await h.sessions.listChats('bot')
-      assert.deepEqual(h.calls[0], { method: 'session.list', params: { profile: 'bot', limit: 80 } })
-      assert.deepEqual(chats[0], { id: 'stored-2', title: 'Deploy', preview: 'Deploying', startedAt: 20, messageCount: 6, source: 'tui' })
+      h.setChats(({ offset }) => ({ sessions: offset ? [] : [{ id: 'stored-2', title: 'Deploy', preview: 'Deploying', started_at: 20, message_count: 6, source: 'tui' }], total: 31 }))
+      const first = await h.sessions.listChats('bot')
+      assert.deepEqual(h.chatQueries[0], { offset: 0, limit: 30, excludeSources: ['cron'] })
+      assert.deepEqual(first, { chats: [{ id: 'stored-2', title: 'Deploy', preview: 'Deploying', startedAt: 20, messageCount: 6, source: 'tui' }], total: 31, next: 30 })
+      await h.sessions.listChats('bot', 30)
+      assert.equal(h.chatQueries[1]?.offset, 30)
+      assert.equal(h.calls.length, 0, 'the paged list is REST, not session.list')
+    })
+
+    it('leaves out the pinned chats the server adds after a page, so each comes on its own page in date order', async () => {
+      const h = withChats()
+      const row = (n: number, pinned = false) => ({ id: `c${n}`, title: `Chat ${n}`, preview: '', started_at: 1000 - n, message_count: 1, source: 'tui', pinned })
+      h.setChats(({ offset }) => ({ sessions: [...Array.from({ length: 30 }, (_, i) => row(offset + i)), row(90, true)], total: 100 }))
+      const page = await h.sessions.listChats('bot', 30)
+      assert.equal(page.chats.length, 30)
+      assert.equal(page.chats.at(-1)?.id, 'c59')
+      assert.ok(!page.chats.some(chat => chat.id === 'c90'))
+      assert.equal(page.next, 60, 'the next page starts after this one, however many rows came back')
+    })
+
+    it('fills in what a stored chat leaves out', async () => {
+      const h = withChats()
+      h.setChats(() => ({ sessions: [{ id: 'bare', title: null, preview: null, started_at: null, message_count: null, source: null }], total: 1 }))
+      const { chats } = await h.sessions.listChats('bot')
+      assert.deepEqual(chats, [{ id: 'bare', title: '', preview: '', startedAt: 0, messageCount: 0, source: '' }])
     })
 
     it('finds the bot’s inbox by its title, at the chat it was continued into', async () => {
@@ -1034,7 +1085,7 @@ describe('choosing a chat', () => {
       h.handlers['session.list'] = params =>
         params.title === 'Bot Inbox' ? { sessions: [{ id: 'inbox-root', resolved_id: 'inbox-tip', title: 'Bot Inbox #2', preview: 'Scout asked', started_at: 50, message_count: 12, source: 'cli' }] } : { sessions: [] }
       const inbox = await h.sessions.findInbox('bot')
-      assert.deepEqual(h.calls[0], { method: 'session.list', params: { profile: 'bot', title: 'Bot Inbox', include_hidden: true } })
+      assert.deepEqual(h.calls[0], { method: 'session.list', params: { profile: 'bot', title: 'Bot Inbox', include_hidden: true, limit: 1 } })
       assert.deepEqual(inbox, { id: 'inbox-tip', title: 'Bot Inbox #2', preview: 'Scout asked', startedAt: 50, messageCount: 12, source: 'cli' })
     })
 
