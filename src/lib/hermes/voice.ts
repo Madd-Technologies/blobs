@@ -98,6 +98,21 @@ export async function getBotVoice(config: ServerConfig, profile: string): Promis
   }
 }
 
+/** The plugin's own status route: whether it is loaded, and its version. Null when it is not there. */
+export async function getVoiceStatus(config: ServerConfig): Promise<{ version: string; provider: string; model: string } | null> {
+  try {
+    const status = await restJson<{ version: string; provider: string; model: string }>(config, `${BASE}/status`, {}, { timeoutMs: 8000 })
+
+    return typeof status?.version === 'string' ? status : null
+  } catch (error) {
+    if (isAbsent(error)) {
+      return null
+    }
+
+    throw error
+  }
+}
+
 /** Changes a bot's call settings; answers them as they are now. */
 export async function setBotVoice(config: ServerConfig, profile: string, change: VoiceChange): Promise<BotVoice> {
   try {
