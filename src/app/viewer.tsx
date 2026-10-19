@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Image, StyleSheet, View } from 'react-native'
 
 import { DiffView } from '@/components/viewer/DiffView'
+import { TaildropSheet, useShareHeader } from '@/components/viewer/ShareControls'
 import { HtmlView } from '@/components/viewer/HtmlView'
 import { PdfView, type PdfEvent } from '@/components/viewer/PdfView'
 import { TextView } from '@/components/viewer/TextView'
@@ -103,7 +104,10 @@ function sizeLabel(bytes?: number): string {
   return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-/** A file, plugin document or change, read from the server while you look at it. Nothing is saved to the phone. */
+/**
+ * A file, plugin document or change, read from the server while you look at it. Nothing is saved to the phone, except a copy
+ * in the app's cache while you share it.
+ */
 export default function ViewerScreen() {
   const { key } = useLocalSearchParams<{ key?: string }>()
   const doc = useDocument(state => (key ? state.docs[key] : undefined) ?? null)
@@ -153,9 +157,14 @@ export default function ViewerScreen() {
           ? `The first 512 KB of ${sizeLabel(shown.size)}`
           : undefined
 
+  // Taildrop from the server and share from this phone, or the line that takes their place while one is under way.
+  const share = useShareHeader(key, doc)
+  const size = shown.phase === 'text' || shown.phase === 'binary' ? shown.size : undefined
+
   return (
     <Screen edges={['top']}>
-      <ScreenHeader compact title={doc?.name ?? 'File'} subtitle={subtitle} />
+      <ScreenHeader compact title={doc?.name ?? 'File'} subtitle={subtitle} right={share.right} line={share.line} sideWidth={share.sideWidth} />
+      <TaildropSheet docKey={key} doc={doc} size={size} />
       <View style={styles.fill}>
         {!doc || !config ? (
           <Centered text="Nothing to show." />

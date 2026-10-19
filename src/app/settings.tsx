@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import { Platform, ScrollView, StyleSheet, View } from 'react-native'
 
+import { RestartRow } from '@/components/restart/RestartRow'
 import { ConfirmSheet } from '@/components/ui/ConfirmSheet'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { Screen } from '@/components/ui/Screen'
@@ -12,6 +13,7 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
 import { useConnection } from '@/stores/connection'
+import { useRestart } from '@/stores/restart'
 import { usePrefs, type ThemePref } from '@/stores/prefs'
 import { useTheme } from '@/theme/ThemeProvider'
 
@@ -29,6 +31,8 @@ export default function Settings() {
   // Signed in with a password (rather than a session token): who, so the way out can say so.
   const user = useConnection(state => (state.config?.auth.kind === 'oauth' ? (state.config.auth.user ?? 'you') : null))
   const status = useConnection(state => state.status)
+  // The restart row stays while a restart this app asked for is under way, though the connection is down.
+  const restartPhase = useRestart(state => state.phase.kind)
   const lastError = useConnection(state => state.lastError)
   const forget = useConnection(state => state.forget)
   const theme = usePrefs(state => state.theme)
@@ -64,6 +68,7 @@ export default function Settings() {
             </View>
           </View>
           <Row label="Server plugins" onPress={() => router.push('/plugins')} />
+          {status === 'online' || restartPhase === 'restarting' ? <RestartRow /> : null}
         </GroupedList>
         {status === 'offline' && lastError ? (
           <T variant="label" color="text2" style={styles.error}>

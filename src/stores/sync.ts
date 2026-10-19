@@ -2,6 +2,7 @@ import { startDashboardsSync } from '@/stores/dashboards'
 import { inbox, startInboxSync } from '@/stores/inbox'
 import { startPresenceSync } from '@/stores/presence'
 import { startPushSync } from '@/stores/push'
+import { startRestartSync } from '@/stores/restart'
 import { startRoomsSync } from '@/stores/rooms'
 import { startRosterSync, useRoster } from '@/stores/roster'
 import { useSeen } from '@/stores/seen'
@@ -23,6 +24,7 @@ export function startSessionSync(): () => void {
   const stopPush = startPushSync()
   const stopPresence = startPresenceSync()
   const stopLastChat = startLastChatSync()
+  const stopRestart = startRestartSync()
   let generation = useConnection.getState().generation
 
   const stopConnection = useConnection.subscribe(state => {
@@ -51,6 +53,7 @@ export function startSessionSync(): () => void {
     stopPush()
     stopPresence()
     stopLastChat()
+    stopRestart()
     stopConnection()
     stopSeed()
     stopHydration()

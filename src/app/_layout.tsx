@@ -18,6 +18,8 @@ import { startSessionSync } from '@/stores/sync'
 import { BootSplash } from '@/components/boot/BootSplash'
 import { DiagramViewer } from '@/components/chat/DiagramViewer'
 import { ImageViewer } from '@/components/chat/ImageViewer'
+import { RestartingScreen } from '@/components/restart/RestartingScreen'
+import { RestartSheet } from '@/components/restart/RestartSheet'
 import { ToastHost } from '@/components/ui/ToastHost'
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider'
 
@@ -86,6 +88,8 @@ function RootStack() {
       </Stack>
       <ImageViewer />
       <DiagramViewer />
+      <RestartingScreen />
+      <RestartSheet />
       <ToastHost />
     </>
   )
