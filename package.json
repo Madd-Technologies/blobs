@@ -83,6 +83,7 @@
     "postinstall": "patch-package",
     "build:pdfjs": "node scripts/build-pdfjs.mjs",
     "build:site": "node scripts/build-site.mjs",
+    "build:splash": "node scripts/build-splash.mjs",
     "demo:start": "scripts/demo/demo.sh start",
     "demo:stop": "scripts/demo/demo.sh stop",
     "demo:reset": "scripts/demo/demo.sh reset",

@@ -49,4 +49,13 @@ describe('plugin install messages', () => {
     assert.match(message, /Drive check/)
     assert.ok(message.length < 4000, `short enough to paste anywhere (${message.length})`)
   })
+
+  it('hermes-voice goes in the default profile only and checks for the sign-in without showing it', () => {
+    const message = installMessage(['hermes-voice'], PLUGINS_COMMIT, ['default', 'concierge'])
+    assert.match(message, new RegExp(`hermes-voice ${RELEASES['hermes-voice']}`))
+    assert.match(message, new RegExp(`   hermes plugins install Madd-Technologies/blobs-hermes-bot-plugins/hermes-voice --ref ${PLUGINS_COMMIT} --force --enable`))
+    assert.doesNotMatch(message, /-p concierge/)
+    assert.match(message, /Voice check, without showing any token/)
+    assert.doesNotMatch(message, /Drive check|Dashboard check/)
+  })
 })

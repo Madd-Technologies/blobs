@@ -6,6 +6,7 @@ import { matchActiveToBots } from '../attention/derive.ts'
 import { blankSession, type BotSession } from '../sessions/store.ts'
 import { appendUser, initialTranscript, reduceEvent } from '../transcript/reduce.ts'
 import { attentionFor, deriveInbox, type InboxEntry } from './derive.ts'
+import type { PushedRequest } from './pushed.ts'
 
 const NOW = 2_000_000
 
@@ -92,6 +93,65 @@ describe('deriveInbox', () => {
     const sessions = { forge: openChat('forge', 'live-f', [{ type: 'approval.request', payload: approval('r1') }]) }
     sessions.forge.transcript = reduceEvent(sessions.forge.transcript, { type: 'message.complete', payload: { text: '', status: 'interrupted' } })
     assert.deepEqual(deriveInbox(input({ sessions })).entries, [])
+  })
+})
+
+const pushedRow = (partial: Partial<PushedRequest> & Pick<PushedRequest, 'id' | 'method'>): PushedRequest => ({ sessionId: 'live-s', profile: 'scout', title: 'Bot Chat', createdAt: 1, params: {}, ...partial })
+
+describe('deriveInbox with what the server pushes', () => {
+  it('lists every pushed prompt on its bot, answerable right there, without asking the status list', () => {
+    const pushed = [
+      pushedRow({ id: 'srq-1', method: 'approval', params: { request_id: 'r9', command: 'rm -r <redacted>', description: 'delete files', choices: ['once', 'deny'] } }),
+      pushedRow({ id: 'srq-2', method: 'clarify', profile: 'scribe', sessionId: 'live-b', params: { questions: [{ qid: 'q0', question: 'A or B?', choices: ['A', 'B'] }] } }),
+      pushedRow({ id: 'srq-3', method: 'secret', profile: 'scribe', sessionId: 'live-b', params: { prompt: 'API key', env_var: 'K' } }),
+    ]
+    const { entries } = deriveInbox(input({ pushed }))
+    assert.deepEqual(
+      entries.map(entry => [entry.profile, entry.kind, entry.requestId, entry.liveId, entry.inline, entry.frame?.id]),
+      [
+        ['scout', 'approval', 'r9', 'live-s', true, 'srq-1'],
+        ['scribe', 'question', 'srq-2', 'live-b', true, 'srq-2'],
+        ['scribe', 'secret', 'srq-3', 'live-b', true, 'srq-3'],
+      ],
+    )
+    assert.deepEqual(entries[0]?.choices, ['once', 'deny'])
+    assert.equal(entries[1]?.summary, 'A or B?')
+    assert.equal(entries[2]?.envVar, 'K')
+  })
+
+  it('stops using the polled approvals and the bare waiting status', () => {
+    const rows = [active({ id: 'live-b', session_key: 'stored-scribe', status: 'waiting' }), active({ id: 'live-s', session_key: 'stored-scout', status: 'working' })]
+    const { entries } = deriveInbox(input({ active: rows, polled: { 'live-s': [approval('r2')] }, pushed: [] }))
+    assert.deepEqual(entries, [])
+  })
+
+  it('leaves the open chat’s own prompts to the chat, and still lists the bot’s other chats', () => {
+    const sessions = { forge: openChat('forge', 'live-f', [{ type: 'approval.request', payload: approval('r1') }]) }
+    const pushed = [
+      pushedRow({ id: 'srq-1', method: 'approval', profile: 'forge', sessionId: 'live-f', params: { request_id: 'r1', description: 'delete files' } }),
+      pushedRow({ id: 'srq-4', method: 'clarify', profile: 'forge', sessionId: 'live-side', title: 'Scratch', params: { question: 'Which?' } }),
+    ]
+    const { entries } = deriveInbox(input({ sessions, pushed }))
+    assert.deepEqual(entries.map(entry => [entry.kind, entry.requestId, entry.liveId]), [
+      ['question', 'srq-4', 'live-side'],
+      ['approval', 'r1', 'live-f'],
+    ])
+  })
+
+  it('leaves a group room member’s prompts to the room', () => {
+    const { entries } = deriveInbox(input({ pushed: [pushedRow({ id: 'srq-5', method: 'clarify', title: 'Group: r-1', params: { question: 'Which?' } })] }))
+    assert.deepEqual(entries, [])
+  })
+
+  it('finds the bot by its session when the server could not name it, and drops what belongs to no bot', () => {
+    const pushed = [pushedRow({ id: 'srq-6', method: 'sudo', profile: '', sessionId: 'live-x' }), pushedRow({ id: 'srq-7', method: 'sudo', profile: 'stranger', sessionId: 'live-y' })]
+    const { entries } = deriveInbox(input({ pushed, knownLiveIds: { scribe: ['live-x'] } }))
+    assert.deepEqual(entries.map(entry => [entry.profile, entry.kind, entry.inline]), [['scribe', 'sudo', true]])
+  })
+
+  it('a vault prompt is a link to the chat', () => {
+    const { entries } = deriveInbox(input({ pushed: [pushedRow({ id: 'srq-8', method: 'vault.unlock_prompt' })] }))
+    assert.deepEqual(entries.map(entry => [entry.kind, entry.inline]), [['waiting', false]])
   })
 })
 

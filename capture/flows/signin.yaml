@@ -1,4 +1,5 @@
-# Signs the app in to the demo Hermes when it shows its Connect screen; does nothing when it is already signed in.
+# Signs the app in to the demo Hermes when it shows its Connect screen; does nothing when it is already signed in. A fresh
+# install opens the tutorial before Connect: the flow skips it.
 # Nothing ever prints the demo password. On iOS, capture.ts puts it on the simulator's pasteboard just before this runs
 # and clears it straight after, so the flow pastes it. Android has no pasteboard to fill from outside: the flow only
 # focuses the field, and capture.ts, seeing a password field focused, types it in and presses Go while this waits.
@@ -8,8 +9,16 @@ name: Sign in to the demo
 - launchApp:
     stopApp: true
 - extendedWaitUntil:
-    visible: "Connect to Hermes|Scout.*"
+    visible: "Connect to Hermes|Scout.*|Meet your blobs"
     timeout: 30000
+- runFlow:
+    when:
+      visible: "Meet your blobs"
+    commands:
+      - tapOn: "Skip"
+      - extendedWaitUntil:
+          visible: "Connect to Hermes"
+          timeout: 10000
 - runFlow:
     when:
       visible: "Connect to Hermes"

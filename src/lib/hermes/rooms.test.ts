@@ -18,6 +18,10 @@ import {
   readLog,
   replyingFromLog,
   replyingFromSessions,
+  roomQuestionsFrom,
+  currentActivity,
+  memberTurns,
+  waitingFromSessions,
   replyingLine,
   roomAttention,
   roomLastActive,
@@ -349,5 +353,75 @@ describe('who is replying in a room', () => {
     assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('approval') }), 'Forge needs your OK')
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('writing') }), 'Hermes and Forge are writing…')
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('tool', 'terminal') }), 'Hermes and Forge are working…')
+  })
+})
+
+describe('a question a room member asks you (Hermes 0.21.5 sends it to no one)', () => {
+  const sessions = { 'm-hermes': ['s-hermes'], 'm-forge': ['s-forge'] }
+
+  it('finds the members whose room session waits on you, with the live session to read it from', () => {
+    const live = [
+      { id: 'live-1', session_key: 's-forge', status: 'waiting' as const },
+      { id: 'live-2', session_key: 's-hermes', status: 'working' as const },
+    ]
+
+    assert.deepEqual(waitingFromSessions(room, sessions, live), [{ memberId: 'm-forge', sessionId: 'live-1' }])
+    assert.deepEqual(waitingFromSessions(room, { 'm-forge': ['live-1'] }, live), [{ memberId: 'm-forge', sessionId: 'live-1' }], 'by the live id too')
+    assert.deepEqual(waitingFromSessions(room, sessions, [{ id: 'live-3', session_key: 's-other', status: 'waiting' as const }]), [], 'not a member of this room')
+  })
+
+  it('reads the question from the open requests, single or several at once', () => {
+    const open = [
+      { id: 'req-1', method: 'clarify', params: { session_id: 'live-1', question: 'Ship it today?', choices: ['Yes', 'No'] } },
+      { id: 'req-2', method: 'clarify', params: { session_id: 'live-1', questions: [{ qid: 'q0', question: 'Which branch?', choices: ['main', 'beta'], multi_select: false }] } },
+    ]
+
+    assert.deepEqual(roomQuestionsFrom('m-forge', 'live-1', open), [
+      { memberId: 'm-forge', sessionId: 'live-1', requestId: 'req-1', questions: [{ question: 'Ship it today?', choices: ['Yes', 'No'] }] },
+      { memberId: 'm-forge', sessionId: 'live-1', requestId: 'req-2', questions: [{ qid: 'q0', question: 'Which branch?', choices: ['main', 'beta'], multi_select: false }] },
+    ])
+  })
+
+  it('leaves secrets, sudo and anything malformed alone', () => {
+    const open = [
+      { id: 'req-3', method: 'secret', params: { prompt: 'API key' } },
+      { id: 'req-4', method: 'sudo', params: {} },
+      { method: 'clarify', params: { question: 'no id' } },
+      { id: 'req-5', method: 'clarify', params: {} },
+    ]
+
+    assert.deepEqual(roomQuestionsFrom('m-forge', 'live-1', open), [])
+    assert.deepEqual(roomQuestionsFrom('m-forge', 'live-1', null), [])
+  })
+})
+
+describe('when a member has finished replying', () => {
+  const working = { running: true, working: true, blocked: false, counts: { running: 1 }, pending_actions: [] }
+  const sessions = { 'm-hermes': ['s-hermes'], 'm-forge': ['s-forge'] }
+  const asked = event('message.user', { text: 'Status?' }, { kind: 'user', id: 'you' }, 100)
+  const started = event('turn.started', { member_id: 'm-hermes' }, { kind: 'gateway', id: 'g' }, 101)
+  const said = event('message.member', { member_id: 'm-hermes', text: 'All green.' }, { kind: 'member', id: 'm-hermes' }, 104)
+  const settled = event('turn.settled', { member_id: 'm-hermes', passed: false }, { kind: 'gateway', id: 'g' }, 105)
+
+  it('reads each member’s newest turn from the log', () => {
+    assert.deepEqual([...memberTurns([asked, started]).entries()], [['m-hermes', { started: 101, ended: false }]])
+    assert.deepEqual(memberTurns([asked, started, said, settled]).get('m-hermes'), { started: 101, ended: true })
+  })
+
+  it('is not replying once its turn has ended, even while its session still says working', () => {
+    const live = [{ id: 'live-1', session_key: 's-hermes', status: 'working' as const }]
+
+    assert.deepEqual(whoIsReplying(room, [asked, started], working, sessions, live), ['m-hermes'])
+    assert.deepEqual(whoIsReplying(room, [asked, started, said, settled], working, sessions, live), ['m-forge'], 'the log then says who is still asked')
+  })
+
+  it('shows only activity recorded during the member’s current turn', () => {
+    const activity = { 'm-hermes': { phase: 'writing', tool: null, since: 102 }, 'm-forge': { phase: 'writing', tool: null, since: 40 } }
+    const forgeStarted = event('turn.started', { member_id: 'm-forge' }, { kind: 'gateway', id: 'g' }, 101)
+
+    assert.deepEqual(currentActivity(activity, ['m-hermes', 'm-forge'], [asked, started, forgeStarted]), { 'm-hermes': { phase: 'writing', tool: null, since: 102 } }, 'Forge’s "writing" is from an earlier turn')
+    assert.deepEqual(currentActivity(activity, ['m-forge'], [asked]), { 'm-forge': { phase: 'writing', tool: null, since: 40 } }, 'no turn in view: kept')
+    assert.deepEqual(currentActivity(activity, [], [asked, started]), {}, 'nobody replying: nothing shown')
+    assert.equal(currentActivity(null, ['m-hermes'], []), null)
   })
 })

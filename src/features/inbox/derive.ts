@@ -1,13 +1,14 @@
 /**
- * The "Needs you" list and each bot's attention state, from three sources: prompts in chats the app
- * has open, approvals polled for sessions it has not opened, and the server's own `waiting` status.
- * Pure.
+ * The "Needs you" list and each bot's attention state. Prompts in chats the app has open come from those chats. The rest
+ * come from what the server pushes (hermes-bot-mobile 0.1.7+), or on a server without it from approvals polled for
+ * sessions the app has not opened and the server's own `waiting` status. Pure.
  */
 
 import type { ActiveSessionRow, ApprovalChoice, ApprovalRequestPayload, ClarifyQuestion, ProfileRow } from '../../lib/hermes/protocol.ts'
 import { botLastActive, deriveAttention, matchActiveToBots, strongestStatus, type Attention, type AttentionContext } from '../attention/derive.ts'
 import type { BotSession } from '../sessions/store.ts'
 import { pendingPrompts } from '../transcript/reduce.ts'
+import { isRoomChat, promptOf, type PushedRequest } from './pushed.ts'
 
 export type InboxKind = 'approval' | 'question' | 'secret' | 'sudo' | 'waiting'
 
@@ -19,6 +20,8 @@ export interface InboxEntry {
   requestId?: string
   /** The live session to answer on (absent for `waiting`, which has no details until the chat is opened). */
   liveId?: string
+  /** The server request to answer through the request bridge, for a pushed prompt in a chat the app has not opened. */
+  frame?: { id: string; method: string; params: Record<string, unknown> }
   /** One line for the list. */
   summary: string
   /** The command to approve. Sensitive: show it, never log or persist it. */
@@ -39,6 +42,8 @@ export interface InboxInput {
   active: ActiveSessionRow[]
   /** `approval.pending` rows for sessions the app has not opened, keyed by live id. */
   polled: Record<string, ApprovalRequestPayload[]>
+  /** What the server pushes as waiting on you, or null when it does not push it (then `polled` and `waiting` stand in). */
+  pushed?: PushedRequest[] | null
   knownLiveIds: Record<string, readonly string[]>
 }
 
@@ -47,12 +52,63 @@ function choicesFor(row: ApprovalRequestPayload): ApprovalChoice[] {
   return row.choices?.length ? row.choices : ['once', ...(row.allow_session === false ? [] : (['session'] as const)), ...(row.allow_permanent === false ? [] : (['always'] as const)), 'deny']
 }
 
+/** The bot a pushed prompt belongs to: the server says, else the session is matched the way the status list is. */
+function ownerOf(request: PushedRequest, input: InboxInput, rosterNames: Set<string>, activeByBot: Map<string, ActiveSessionRow[]>): string | null {
+  if (request.profile && rosterNames.has(request.profile)) {
+    return request.profile
+  }
+
+  for (const [name, ids] of Object.entries(input.knownLiveIds)) {
+    if (ids.includes(request.sessionId)) {
+      return name
+    }
+  }
+
+  for (const [name, rows] of activeByBot) {
+    if (rows.some(row => row.id === request.sessionId)) {
+      return name
+    }
+  }
+
+  return null
+}
+
 export function deriveInbox(input: InboxInput): { entries: InboxEntry[]; byBot: Map<string, InboxEntry[]> } {
   const activeByBot = matchActiveToBots(input.roster, input.active, input.knownLiveIds)
   const entries: InboxEntry[] = []
 
+  const pushed = input.pushed ?? null
+  const rosterNames = new Set(input.roster.map(bot => bot.name))
+
   for (const bot of input.roster) {
     const session = input.sessions[bot.name]
+    const openLiveId = session?.phase === 'ready' ? session.liveId : null
+
+    if (pushed) {
+      // Every chat of the bot but the one open here, which shows its own prompts (below). Room members' chats are the room's.
+      for (const request of pushed) {
+        if (request.sessionId === openLiveId || isRoomChat(request) || ownerOf(request, input, rosterNames, activeByBot) !== bot.name) {
+          continue
+        }
+
+        const prompt = promptOf(request)
+        entries.push({
+          key: `${bot.name}:${prompt.requestId}`,
+          profile: bot.name,
+          kind: prompt.kind,
+          requestId: prompt.requestId,
+          liveId: request.sessionId,
+          frame: { id: request.id, method: request.method, params: request.params },
+          summary: prompt.summary,
+          command: prompt.command,
+          choices: prompt.choices,
+          questions: prompt.questions,
+          prompt: prompt.prompt,
+          envVar: prompt.envVar,
+          inline: prompt.kind !== 'waiting',
+        })
+      }
+    }
 
     if (session?.phase === 'ready') {
       // An open chat knows exactly what it is waiting on.
@@ -73,6 +129,10 @@ export function deriveInbox(input: InboxInput): { entries: InboxEntry[]; byBot: 
         })
       }
 
+      continue
+    }
+
+    if (pushed) {
       continue
     }
 

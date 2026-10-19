@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 
 import type { GatewayEvent } from '../../lib/hermes/gateway-client.ts'
 import { asHermesEvent, type HermesEvent, type ToolResult } from '../../lib/hermes/protocol.ts'
-import { appendError, appendOutput, appendUser, finishOutput, startOutput, answerPrompt, exitSetter, expirePrompt, failUser, initialTranscript, isRealFailure, pendingPrompts, quietStatus, readResult, reduceEvent } from './reduce.ts'
+import { appendError, appendNote, appendOutput, appendUser, finishOutput, startOutput, answerPrompt, exitSetter, expirePrompt, failUser, initialTranscript, isRealFailure, pendingPrompts, quietStatus, readResult, reduceEvent } from './reduce.ts'
 import type { Item, TranscriptState } from './types.ts'
 
 const dir = new URL('../../../docs/protocol-captures/', import.meta.url)
@@ -574,5 +574,17 @@ describe('what an edit step changed', () => {
   it('gives nothing for a failed edit or a relative path', () => {
     assert.equal(readResult({ success: false, error: 'Found 27 matches', diff: 'x' } as never).diff, undefined)
     assert.equal(readResult({ files_modified: ['notes.md'] } as never).file, undefined)
+  })
+})
+
+describe('appendNote', () => {
+  it('adds a quiet line between turns, and never during one', () => {
+    const idle = appendNote(initialTranscript(), 'Call started 10:41', 5)
+
+    assert.deepEqual(idle.items.at(-1), { kind: 'note', id: 'n-1', text: 'Call started 10:41', ts: 5 })
+
+    const running = appendUser(initialTranscript(), 'Check my calendar')
+
+    assert.equal(appendNote(running, 'Call started 10:41'), running)
   })
 })

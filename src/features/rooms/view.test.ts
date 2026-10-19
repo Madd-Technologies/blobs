@@ -71,3 +71,13 @@ describe('searching rooms', () => {
     assert.equal(roomMatches(view, '  '), true)
   })
 })
+
+describe('a room whose member asked you a question', () => {
+  it('needs you, and says it waits for your answer', () => {
+    const asked: RoomData = { ...data(room('r9', 'Launch week')), questions: [{ memberId: 'm-forge', sessionId: 'live-1', requestId: 'req-1', questions: [{ question: 'Ship it today?', choices: ['Yes', 'No'] }] }] }
+    const [view] = buildRoomViews({ r9: asked }, 1000)
+
+    assert.equal(view?.needsYou, true)
+    assert.equal(view?.preview, 'Waiting for your answer')
+  })
+})

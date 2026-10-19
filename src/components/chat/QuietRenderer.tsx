@@ -4,6 +4,7 @@ import { Renderer, type RendererOptions } from 'react-native-marked'
 
 import { splitMath, type MathItem } from '@/features/transcript/richMarkdown'
 import { serverTarget, type ServerTarget } from '@/features/viewer/kind'
+import { openLink } from '@/lib/openLink'
 import { fonts } from '@/theme/tokens'
 
 import { InlineMath } from './MathView'
@@ -83,21 +84,26 @@ export class QuietRenderer extends Renderer {
 
   /**
    * A link to a file on the server (an absolute path) or to something a server plugin serves (`/api/plugins/...`, such as a Paperless
-   * document) opens in the viewer, read with your sign-in. Any other link opens as the library does.
+   * document) opens in the viewer, read with your sign-in. Any other link opens outside the app: in its own app when it has one
+   * (a mail in its mail app), else as the system decides.
    */
   override link(children: string | ReactNode[], href: string, styles?: TextStyle, title?: string): ReactNode {
     const target = this.onServerLink ? serverTarget(href) : null
     const content = this.withMath(children, styles?.fontSize ?? 15)
-
-    if (!target || !this.onServerLink) {
-      return super.link(content, href, styles, title)
-    }
-
     const open = this.onServerLink
     const label = title || (typeof children === 'string' ? children : '') || href
+    const inViewer = target && open
 
     return (
-      <Text key={this.getKey()} selectable accessibilityRole="link" accessibilityHint="Opens in the viewer" accessibilityLabel={label} onPress={() => open(target, label)} style={styles}>
+      <Text
+        key={this.getKey()}
+        selectable
+        accessibilityRole="link"
+        accessibilityHint={inViewer ? 'Opens in the viewer' : 'Opens outside the app'}
+        accessibilityLabel={label}
+        onPress={() => (inViewer ? open(target, label) : void openLink(href))}
+        style={styles}
+      >
         {content}
       </Text>
     )

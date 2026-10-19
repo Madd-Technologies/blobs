@@ -603,6 +603,30 @@ words plus a chip.
   from a live `session_id` and, without one, edits the *server's default profile's* config, which the app never does.
 - Seen live on a throwaway bot: 20 of 29 on; switching Text-to-Speech off persisted across an app restart (19 of 29).
 
+## Keys (a bot's `.env`) (Hermes 0.21.0 to 0.22.2, from source at tags `v0.21.6` and `v0.22.2`, verified on a local 0.21.0)
+
+Hermes's own web Keys page routes (`hermes_cli/web_routers/config_env.py`, the same at both tags). Details → Keys uses them, so a key
+goes straight into the bot's `<home>/.env` with no model in the loop.
+
+- **`GET /api/env?profile=<bot>`** → `{NAME: {is_set, redacted_value, description, url, category, is_password, advanced, tools,
+  channel_managed, provider, provider_label, custom}}` for every name Hermes knows (about 350) plus whatever else the `.env` holds
+  (`custom: true`, `category: "custom"`, always `is_password: true`). `redacted_value` is a preview, never the value: `«redacted:sk-a...wxyz»`
+  from 0.21.5, a bare `sk-a...wxyz` before. `channel_managed` rows belong to Hermes's Channels page; Hermes's Keys page hides them and so
+  does the app. An unknown bot is 404 `Profile '<bot>' does not exist.` A fresh bot's `.env` already holds a dozen non-secret settings
+  (`TERMINAL_TIMEOUT`, `*_DEBUG`…), which come back as `custom`.
+- **`PUT /api/env?profile=<bot>`** with `{key, value, profile}` → `{ok, key, config_updates}`. It also moves config.yaml mirrors of the old
+  value and Hermes's credential pool over to the new one. 400 (with a string `detail`) for a denylisted name (PATH, LD_PRELOAD, HERMES_HOME…),
+  an invalid name, a name an administrator pinned and, from 0.21.5, a value shaped like a preview; 0.21.0 would save a preview, so the app
+  refuses one itself. Non-ASCII characters are stripped from any value without an error. **A 422 echoes the whole body, value included,
+  in `detail[].input`**: the app never shows or logs a write's response text.
+- **`DELETE /api/env?profile=<bot>`** with `{key, profile}` → `{ok, key, removed, pool_pruned, providers, config_scrubbed, found}`, from every
+  store. 404 `<NAME> not found in .env` when it was not there (an unknown bot is also 404, told apart by its `detail`).
+- **`POST /api/env/reveal`** returns a real value. The app never calls it.
+- When a change takes effect: a bot other than the server's own builds its secret scope from its `.env` on each turn
+  (`agent/secret_scope.py`, cached by file stat). The server's own profile uses its launch environment, frozen once the server hosts more
+  than one bot (`_config_profile_scope`), so the app also calls `reload.env` (as Details → Reload settings does). A running chat keeps its
+  provider credential pool; `/new` resolves fresh.
+
 ## Live work: background commands and helpers (Hermes 0.22.2, from source at tag `v0.22.2` and verified on a local 0.22.2)
 
 **What there is not:** no event reports progress *inside* a running tool step, on 0.21 or 0.22. A foreground step is

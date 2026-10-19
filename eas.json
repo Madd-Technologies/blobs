@@ -19,21 +19,37 @@
         "buildType": "apk"
       }
     },
+    "testflight": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "environment": "preview"
+    },
     "production": {
       "autoIncrement": true,
       "environment": "production"
     }
   },
   "submit": {
+    "testflight": {
+      "ios": {
+        "appleTeamId": "G48FJG2BJ4",
+        "appName": "Blobs - a Hermes Agent client",
+        "companyName": "Madd Technologies LLC",
+        "language": "en-US",
+        "sku": "blobs-ios"
+      }
+    },
     "production": {
       "android": {
         "track": "internal",
         "releaseStatus": "draft"
       },
       "ios": {
+        "appleTeamId": "G48FJG2BJ4",
         "appName": "Blobs - a Hermes Agent client",
         "companyName": "Madd Technologies LLC",
-        "language": "en-US"
+        "language": "en-US",
+        "sku": "blobs-ios"
       }
     }
   }

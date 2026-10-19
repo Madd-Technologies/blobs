@@ -140,9 +140,9 @@ export default function RoomScreen() {
               onContentSizeChange={stick.onContentSizeChange}
               // Sits at the bottom of the inverted list: what the room is holding for you, or that bots are replying.
               ListHeaderComponent={
-                attention?.actions.length || working ? (
+                attention?.actions.length || data.questions?.length || working ? (
                   <View style={styles.footer}>
-                    {attention?.actions.length ? <RoomActions room={room} actions={attention.actions} framed /> : null}
+                    {attention?.actions.length || data.questions?.length ? <RoomActions room={room} actions={attention?.actions ?? []} questions={data.questions} framed /> : null}
                     {working && replying.length
                       ? replying.map(memberId => {
                           const profile = memberOf(room, memberId)?.profile ?? memberId
@@ -168,7 +168,10 @@ export default function RoomScreen() {
                   </View>
                 ) : null
               }
-              maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+              // Holds your place while you read older messages, and follows new ones while you're at the newest: the list does both in
+              // the same layout pass. Pinning alone pushed a new message just below the screen whenever the pin landed after the
+              // jump to the newest row (often, on Android), so it looked like nothing arrived.
+              maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: 80 }}
             />
           </View>
         )}

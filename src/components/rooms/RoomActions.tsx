@@ -1,24 +1,40 @@
 import { StyleSheet, View } from 'react-native'
 
-import { ApprovalCard } from '@/components/chat/ActionCards'
+import { ApprovalCard, QuestionCard } from '@/components/chat/ActionCards'
 import { Pill } from '@/components/ui/Pill'
 import { T } from '@/components/ui/T'
 import type { HostedRoom, RoomPendingAction } from '@/lib/hermes/protocol'
-import { memberName } from '@/lib/hermes/rooms'
-import { answerRoomApproval, retryRoomWork } from '@/stores/rooms'
+import { memberName, type RoomQuestion } from '@/lib/hermes/rooms'
+import { answerRoomApproval, answerRoomQuestion, retryRoomWork } from '@/stores/rooms'
 import { toast } from '@/stores/toast'
 
 interface Props {
   room: HostedRoom
   actions: RoomPendingAction[]
+  /** Questions members asked you (claimed from their sessions). */
+  questions?: RoomQuestion[]
   /** Raised cards inside the room; bare inside Needs you's card, which is raised already. */
   framed: boolean
 }
 
-/** What a room is holding for you: a bot's command to approve, or a turn that did not finish and can be retried. */
-export function RoomActions({ room, actions, framed }: Props) {
+/** What a room is holding for you: a bot's question or command to approve, or a turn that did not finish and can be retried. */
+export function RoomActions({ room, actions, questions = [], framed }: Props) {
   return (
     <View style={styles.stack}>
+      {questions.map(question => (
+        <View key={question.requestId} style={styles.item}>
+          <T variant="label" color="text2" style={styles.who}>
+            {memberName(room, question.memberId)} is asking you
+          </T>
+          <QuestionCard
+            framed={framed}
+            riseKey={`room:${question.requestId}`}
+            questions={question.questions}
+            state="pending"
+            onAnswer={answers => answerRoomQuestion(room.room_id, question, answers)}
+          />
+        </View>
+      ))}
       {actions.map(action => {
         const name = memberName(room, action.member_id ?? '')
 

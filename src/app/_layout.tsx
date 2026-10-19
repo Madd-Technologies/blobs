@@ -7,18 +7,23 @@ import { Stack } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import * as SystemUI from 'expo-system-ui'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Platform } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
+import { useBoot } from '@/stores/boot'
 import { useConnection } from '@/stores/connection'
+import { prefsHydrated, usePrefs } from '@/stores/prefs'
 import { startSessionSync } from '@/stores/sync'
+import { BootSplash } from '@/components/boot/BootSplash'
 import { DiagramViewer } from '@/components/chat/DiagramViewer'
 import { ImageViewer } from '@/components/chat/ImageViewer'
 import { ToastHost } from '@/components/ui/ToastHost'
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider'
 
 void SplashScreen.preventAutoHideAsync()
+// The animated splash takes over on the native splash's own frame, so the native one may go quickly (Android fades it).
+SplashScreen.setOptions({ duration: 200 })
 
 /** Whatever opens the app (a notification, a link) lands with Home underneath, so back goes Home instead of leaving the app. */
 export const unstable_settings = { anchor: 'index' }
@@ -52,6 +57,8 @@ function RootStack() {
           {/* One screen per bot (and per room): opening a bot that is already open brings that screen up instead of a second copy
               sharing its session. */}
           <Stack.Screen name="bot/[profile]/index" dangerouslySingular />
+          {/* A call comes up from the bottom over its chat and goes back down to it; the call goes on in the chat's bar. */}
+          <Stack.Screen name="bot/[profile]/call" dangerouslySingular options={{ animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
           <Stack.Screen name="bot/[profile]/dashboard" />
           <Stack.Screen name="bot/[profile]/view" />
           <Stack.Screen name="bot/[profile]/record" />
@@ -73,6 +80,9 @@ function RootStack() {
         <Stack.Protected guard={!configured}>
           <Stack.Screen name="connect" options={{ animation: 'fade' }} />
         </Stack.Protected>
+        {/* The tutorial: before Connect on a first launch, and from Settings any time. Its pages swipe sideways, so the
+            back swipe stays off; Android's back button and its own buttons close it. */}
+        <Stack.Screen name="tour" options={{ animation: 'fade', gestureEnabled: false }} />
       </Stack>
       <ImageViewer />
       <DiagramViewer />
@@ -93,30 +103,33 @@ export default function RootLayout() {
     ...Feather.font,
   })
   const hydrated = useConnection(s => s.hydrated)
+  const [prefsReady, setPrefsReady] = useState(false)
+  const splashDone = useBoot(s => s.splashDone)
 
   useEffect(() => {
     // app.json orientation is "default"; the app itself stays portrait (taking over a bot's screen included).
     if (Platform.OS !== 'web') {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT).catch(() => {})
     }
-    void useConnection
-      .getState()
-      .hydrate()
-      .then(() => useConnection.getState().connect())
+    const connection = useConnection.getState().hydrate()
+    void connection.then(() => useConnection.getState().connect())
+    void Promise.all([connection.catch(() => undefined), prefsHydrated()]).then(() => {
+      // Someone already connected (from before the tutorial existed) knows the app: it never opens on its own for them.
+      if (useConnection.getState().config) usePrefs.getState().setTourSeen()
+      setPrefsReady(true)
+    })
     return startSessionSync()
   }, [])
 
-  const ready = fontsLoaded && hydrated
-  useEffect(() => {
-    if (ready) void SplashScreen.hideAsync()
-  }, [ready])
-
+  // The native splash stays up until this first frame; the animated splash then takes over and hides it.
+  const ready = fontsLoaded && hydrated && prefsReady
   if (!ready) return null
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
         <RootStack />
+        {splashDone ? null : <BootSplash />}
       </ThemeProvider>
     </GestureHandlerRootView>
   )

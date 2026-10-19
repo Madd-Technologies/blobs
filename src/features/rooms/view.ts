@@ -5,7 +5,7 @@
 
 import { ageLabel } from '../roster/derive.ts'
 import type { HostedRoom, RoomDriverStatus, RoomEvent } from '../../lib/hermes/protocol.ts'
-import { roomAttention, roomLastActive, roomPreview, type MemberActivity, type RoomAttention } from '../../lib/hermes/rooms.ts'
+import { roomAttention, roomLastActive, roomPreview, type MemberActivity, type RoomAttention, type RoomQuestion } from '../../lib/hermes/rooms.ts'
 
 /** What the store keeps per room. */
 export interface RoomData {
@@ -22,6 +22,8 @@ export interface RoomData {
   sessions?: string[]
   /** What each busy member is doing, from the server's hermes-bot-mobile plugin; null without it or while idle. */
   activity?: Record<string, MemberActivity> | null
+  /** Questions members asked you, claimed from their sessions: Hermes sends a room member's question to no one. */
+  questions?: RoomQuestion[]
 }
 
 export interface RoomView {
@@ -56,12 +58,12 @@ export function buildRoomViews(rooms: Record<string, RoomData | undefined>, nowS
         id: data.room.room_id,
         name: data.room.name,
         data,
-        preview: attention.actions.length ? 'Waiting for your answer' : attention.mention ? `${attention.mention.name}: ${oneLine(attention.mention.text, 100)}` : roomPreview(data.room, data.events, working, data.replying, data.activity),
+        preview: attention.actions.length || data.questions?.length ? 'Waiting for your answer' : attention.mention ? `${attention.mention.name}: ${oneLine(attention.mention.text, 100)}` : roomPreview(data.room, data.events, working, data.replying, data.activity),
         age: working ? 'now' : ageLabel(lastActive, nowS),
         lastActive,
         working,
         attention,
-        needsYou: attention.needsYou,
+        needsYou: attention.needsYou || !!data.questions?.length,
       }
     })
     .sort((a, b) => b.lastActive - a.lastActive || a.name.localeCompare(b.name))
