@@ -69,10 +69,19 @@ export function pluginState(name: string, hub: HubPlugin[] | null, answering: bo
 /** A 404, or the web app's HTML for a path it doesn't know (a JSON parse error): the route isn't there. */
 export const isAbsent = (error: unknown): boolean => (error instanceof HermesHttpError && (error.status === 404 || error.status === 405)) || error instanceof SyntaxError
 
-/** Hermes's plugins hub, or null when this server has none or won't show it (older Hermes, or a sign-in that can't read it). */
-export async function pluginHub(config: ServerConfig): Promise<HubPlugin[] | null> {
+/**
+ * How long the hub may take. Hermes 0.21.6 builds it the way `hermes plugins list` does, which can take a minute and more on a
+ * busy server; past this the hub is given up on, like a server that has none.
+ */
+export const HUB_MS = 10_000
+
+/**
+ * Hermes's plugins hub, or null when this server has none or won't show it (older Hermes, or a sign-in that can't read it).
+ * Throws when it fails, or doesn't answer within `timeoutMs`.
+ */
+export async function pluginHub(config: ServerConfig, timeoutMs = HUB_MS): Promise<HubPlugin[] | null> {
   try {
-    const hub = await restJson<{ plugins?: HubPlugin[] }>(config, '/api/dashboard/plugins/hub')
+    const hub = await restJson<{ plugins?: HubPlugin[] }>(config, '/api/dashboard/plugins/hub', {}, { timeoutMs })
 
     return Array.isArray(hub?.plugins) ? hub.plugins : null
   } catch (error) {

@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 
 import { installMessage, RELEASES, type PluginName } from '@/features/plugins/catalog'
+import { checkPlugins, type ProbeAnswer } from '@/features/plugins/check'
 import type { PluginCheck } from '@/features/plugins/view'
-import { describeError } from '@/features/sessions/store'
 import { getDashboardStatus } from '@/lib/hermes/dashboard'
-import { getDriveStatus, getPaperlessStatus, pluginHub, pluginState, type HubPlugin } from '@/lib/hermes/plugins'
+import { getDriveStatus, getPaperlessStatus } from '@/lib/hermes/plugins'
 import { pushStatusFrom, type PushStatus } from '@/lib/hermes/push-api'
 import type { ServerConfig } from '@/lib/hermes/server'
 import { useConnection } from '@/stores/connection'
@@ -26,7 +26,7 @@ export interface ServerPlugin {
    * Asks the plugin's own route. Null when it doesn't answer; otherwise one line on how it is doing, whether the user still
    * has something to set up on the server, and whether it was the older plugin that answered.
    */
-  probe: (config: ServerConfig) => Promise<{ detail: string; needsSetup: boolean; formerly?: boolean } | null>
+  probe: (config: ServerConfig) => Promise<ProbeAnswer | null>
 }
 
 function phonesLine(status: PushStatus): string {
@@ -120,8 +120,6 @@ export const SERVER_PLUGINS: ServerPlugin[] = [
   },
 ]
 
-const versionOf = (hub: HubPlugin[] | null, name: string | undefined) => hub?.find(row => row.name === name)?.version || null
-
 interface ServerPluginsState {
   byName: Record<string, PluginCheck | undefined>
   checking: boolean
@@ -139,22 +137,9 @@ export const useServerPlugins = create<ServerPluginsState>()((set, get) => ({
     }
 
     set({ checking: true })
-    // The hub is a nicety (it tells "not installed" from "not restarted yet"); failing to read it only loses that.
-    const hub = await pluginHub(config).catch(() => null)
-    const checks = await Promise.all(
-      SERVER_PLUGINS.map(async (plugin): Promise<[string, PluginCheck]> => {
-        try {
-          const answer = await plugin.probe(config)
-          // Served by the plugin it replaces: working, and due for the move.
-          const state = answer?.formerly ? { kind: 'ready' as const, version: versionOf(hub, plugin.formerly), update: true } : pluginState(plugin.name, hub, !!answer, plugin.version)
+    // Each row as soon as it is known, so a slow plugins hub holds up only the plugins that don't answer.
+    const byName = await checkPlugins(config, SERVER_PLUGINS, { onCheck: (name, check) => set(state => ({ byName: { ...state.byName, [name]: check } })) })
 
-          return [plugin.name, { state, detail: answer?.detail, needsSetup: answer?.needsSetup, formerly: answer?.formerly }]
-        } catch (error) {
-          return [plugin.name, { state: { kind: 'unknown', error: describeError(error) } }]
-        }
-      }),
-    )
-
-    set({ byName: Object.fromEntries(checks), checking: false })
+    set({ byName, checking: false })
   },
 }))
