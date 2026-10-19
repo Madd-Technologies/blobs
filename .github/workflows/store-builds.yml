@@ -1,0 +1,236 @@
+# Builds the app on EAS from GitHub (docs/RELEASING.md). A `testflight` build is iOS only and goes straight to TestFlight;
+# a `production` build is only built, and sending it to App Review or Google Play stays a person's step. Both build the
+# exact commit of main the run was started on, after `npm run check` passes on it, and only while main still points at
+# it, so a push made after the run started never rides into a signed build. Signing and uploads use the credentials EAS
+# keeps (the certificate, the profiles and the App Store Connect API key); this workflow never signs in to Apple or Google.
+#
+# Inert until set up: the repository variable EAS_BUILD_ENABLED must be `true` and the secret EXPO_TOKEN set.
+name: Store builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: What to build.
+        required: true
+        type: choice
+        options:
+          - testflight
+          - production
+      platform:
+        description: Platform to build. TestFlight is iOS only.
+        required: true
+        type: choice
+        default: ios
+        options:
+          - ios
+          - android
+          - all
+      production_confirmation:
+        description: For production, type BUILD_PRODUCTION. Ignored for TestFlight.
+        required: false
+        type: string
+
+concurrency:
+  group: store-builds-${{ github.event.inputs.profile }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Check the request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.plan.outputs.enabled }}
+      profile: ${{ steps.plan.outputs.profile }}
+      platforms: ${{ steps.plan.outputs.platforms }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - name: Check the profile, platform and branch
+        id: plan
+        shell: bash
+        env:
+          PROFILE: ${{ github.event.inputs.profile }}
+          PLATFORM: ${{ github.event.inputs.platform }}
+          CONFIRMATION: ${{ github.event.inputs.production_confirmation || '' }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          ENABLED: ${{ vars.EAS_BUILD_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "Store builds are made from main only; this run is on $REF." >&2
+            exit 1
+          fi
+          case "$PROFILE" in
+            testflight)
+              if [ "$PLATFORM" != "ios" ]; then
+                echo "The testflight profile builds iOS only." >&2
+                exit 1
+              fi
+              ;;
+            production)
+              if [ "$CONFIRMATION" != "BUILD_PRODUCTION" ]; then
+                echo "A production build needs BUILD_PRODUCTION typed into production_confirmation." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported profile: $PROFILE" >&2
+              exit 1
+              ;;
+          esac
+          case "$PLATFORM" in
+            ios) platforms='["ios"]' ;;
+            android) platforms='["android"]' ;;
+            all) platforms='["android","ios"]' ;;
+            *) echo "Unsupported platform: $PLATFORM" >&2; exit 1 ;;
+          esac
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The commit to build could not be resolved." >&2
+            exit 1
+          fi
+          if [ "$(printf '%s' "${ENABLED:-}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+            enabled=true
+            echo "Building $PROFILE ($PLATFORM) from commit $SHA of main."
+          else
+            enabled=false
+            echo "::notice title=No build::Store builds are set up but off (repository variable EAS_BUILD_ENABLED)."
+          fi
+          {
+            echo "enabled=$enabled"
+            echo "profile=$PROFILE"
+            echo "platforms=$platforms"
+            echo "sha=$SHA"
+          } >> "$GITHUB_OUTPUT"
+
+  check:
+    name: Typecheck, lint and test
+    needs: plan
+    if: needs.plan.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout the commit to build
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: npm run check
+        run: npm run check
+
+  build:
+    name: EAS ${{ matrix.platform }} ${{ needs.plan.outputs.profile }} build
+    needs: [plan, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    environment: ${{ needs.plan.outputs.profile }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.plan.outputs.platforms) }}
+    steps:
+      - name: Check the Expo token
+        shell: bash
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "Missing secret EXPO_TOKEN (Settings → Secrets and variables → Actions)." >&2
+            exit 1
+          fi
+
+      - name: Checkout the commit to build
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: Confirm the checkout is that commit
+        shell: bash
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          checked_out="$(git rev-parse HEAD)"
+          if [ "$checked_out" != "$SHA" ]; then
+            echo "Checked out $checked_out, not $SHA." >&2
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      # TestFlight uploads without a person, so EAS must know which App Store Connect app to send the build to.
+      - name: Check TestFlight knows the App Store Connect app
+        if: needs.plan.outputs.profile == 'testflight'
+        shell: bash
+        run: |
+          if ! node -e 'process.exit(require("./eas.json").submit?.testflight?.ios?.ascAppId ? 0 : 1)'; then
+            echo "eas.json has no submit.testflight.ios.ascAppId yet: do the first submit by hand (docs/RELEASING.md)." >&2
+            exit 1
+          fi
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Setup Expo and EAS CLI
+        uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
+        with:
+          eas-version: 24.14.0
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # Last check before anything goes to EAS: if main has moved on since the run started, build nothing and say so.
+      - name: Confirm main still points at the commit
+        shell: bash
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          current="$(git ls-remote origin refs/heads/main | awk '{ print $1 }')"
+          if [ "$current" != "$SHA" ]; then
+            echo "main is at ${current:-nothing} now, not $SHA. Start the workflow again for the new commit." >&2
+            exit 1
+          fi
+
+      # --wait waits for the build (and, with --auto-submit, the upload to TestFlight) and fails if either does.
+      - name: Build on EAS
+        shell: bash
+        env:
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+          PLATFORM: ${{ matrix.platform }}
+          PROFILE: ${{ needs.plan.outputs.profile }}
+        run: |
+          set -euo pipefail
+          args=(--platform "$PLATFORM" --profile "$PROFILE" --non-interactive --wait)
+          if [ "$PROFILE" = "testflight" ]; then
+            args+=(--auto-submit)
+          fi
+          eas build "${args[@]}"
+
+      - name: Summary
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          PROFILE: ${{ needs.plan.outputs.profile }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          if [ "$PROFILE" = "testflight" ]; then
+            echo "### Sent to TestFlight" >> "$GITHUB_STEP_SUMMARY"
+            echo "An iOS build of $SHA went to TestFlight. Testers can install it once Apple has processed it." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### $PLATFORM production build ready" >> "$GITHUB_STEP_SUMMARY"
+            echo "Built $SHA. Nothing was submitted: send it to the store with eas submit (docs/RELEASING.md)." >> "$GITHUB_STEP_SUMMARY"
+          fi
