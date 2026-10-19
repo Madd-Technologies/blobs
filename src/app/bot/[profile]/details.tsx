@@ -161,6 +161,7 @@ export default function BotDetails() {
               onPress={() => router.push({ pathname: '/bot/[profile]/skills', params: { profile } })}
             />
             <Row label="Tools" value={toolsLine} onPress={() => router.push({ pathname: '/bot/[profile]/tools', params: { profile } })} />
+            <Row label="Keys" onPress={() => router.push({ pathname: '/bot/[profile]/keys', params: { profile } })} />
             <Row label="Routines" value={routineCount === undefined ? '' : String(routineCount)} onPress={() => router.push({ pathname: '/bot/[profile]/routines', params: { profile } })} />
             <Row label="Approvals" value={approvals ? APPROVAL_MODES.find(mode => mode.value === approvals)?.label : ''} onPress={() => setChoosingApprovals(true)} />
             <Row label="Runs on" value={runsOn ? runsOnLabel(runsOn) : ''} onPress={() => router.push({ pathname: '/bot/[profile]/runs-on', params: { profile } })} />
