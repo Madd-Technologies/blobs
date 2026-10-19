@@ -7,7 +7,7 @@
  */
 
 import { call, type RpcClient } from './rpc.ts'
-import type { ActiveSessionRow, HostedRoom, RoomEvent, RoomLogPage, RoomMember, RoomDriverStatus, RoomPendingAction } from './protocol.ts'
+import type { ActiveSessionRow, ClarifyQuestion, HostedRoom, RoomEvent, RoomLogPage, RoomMember, RoomDriverStatus, RoomPendingAction } from './protocol.ts'
 
 /** The server's limits for a room's roster. */
 export const MIN_MEMBERS = 2
@@ -327,6 +327,53 @@ export function replyingFromSessions(room: Pick<HostedRoom, 'members'>, sessions
 }
 
 /**
+ * Members whose room session is waiting on a person (`status: waiting`: a question, a secret or sudo), each with the live
+ * session id its parked request is read from. Hermes runs room members on an internal connection with no app attached, so a
+ * question a member asks waits in the server's open requests until someone claims it (Hermes 0.21.5,
+ * tui_gateway/session_transports.py `_session_client_answers_requests`).
+ */
+export function waitingFromSessions(room: Pick<HostedRoom, 'members'>, sessions: Record<string, string[] | undefined>, live: Pick<ActiveSessionRow, 'id' | 'session_key' | 'status'>[]): { memberId: string; sessionId: string }[] {
+  return room.members.flatMap(member => {
+    const ids = new Set(sessions[member.member_id] ?? [])
+    const row = live.find(entry => entry.status === 'waiting' && (ids.has(entry.id) || (!!entry.session_key && ids.has(entry.session_key))))
+
+    return row ? [{ memberId: member.member_id, sessionId: row.id }] : []
+  })
+}
+
+/** A question a room member asked you, claimed from its session's open requests. */
+export interface RoomQuestion {
+  memberId: string
+  /** The member's live session, where the request waits. */
+  sessionId: string
+  /** The server request's id: the answer goes back under it. */
+  requestId: string
+  questions: ClarifyQuestion[]
+}
+
+/** The questions in a session's open requests (`session.events.since` → `open_requests`); secrets and sudo are left out. */
+export function roomQuestionsFrom(memberId: string, sessionId: string, open: unknown): RoomQuestion[] {
+  if (!Array.isArray(open)) {
+    return []
+  }
+
+  return open.flatMap(entry => {
+    const frame = entry && typeof entry === 'object' ? (entry as { id?: unknown; method?: unknown; params?: Record<string, unknown> }) : null
+
+    if (!frame || frame.method !== 'clarify' || (typeof frame.id !== 'string' && typeof frame.id !== 'number')) {
+      return []
+    }
+
+    const params = frame.params ?? {}
+    const batch = Array.isArray(params.questions) ? (params.questions as ClarifyQuestion[]) : []
+    const single = typeof params.question === 'string' ? [{ question: params.question, choices: Array.isArray(params.choices) ? (params.choices as string[]) : null, ...(params.multi_select ? { multi_select: true } : {}) } as ClarifyQuestion] : []
+    const questions = batch.length ? batch : single
+
+    return questions.length ? [{ memberId, sessionId, requestId: String(frame.id), questions }] : []
+  })
+}
+
+/**
  * Who should be replying, read from the log, for when the live sessions cannot say: the bots your latest message asked (the
  * ones it @mentions, or everyone), and any a bot @mentioned since that had not spoken yet (the server does not ask a bot
  * again once it has), that have not finished a turn after being asked. Only meaningful while the room is working. Member
@@ -380,6 +427,51 @@ export function replyingFromLog(room: Pick<HostedRoom, 'members'>, events: RoomE
   return everyone.filter(id => asked.has(id))
 }
 
+/**
+ * Each member's newest turn in the log: when it started (epoch seconds) and whether it has ended. A member without a turn in the
+ * events read so far is absent.
+ */
+export function memberTurns(events: RoomEvent[]): Map<string, { started: number; ended: boolean }> {
+  const turns = new Map<string, { started: number; ended: boolean }>()
+
+  for (const event of events) {
+    const member = typeof event.payload.member_id === 'string' ? event.payload.member_id : undefined
+
+    if (member === undefined) {
+      continue
+    }
+
+    if (event.kind === 'turn.started') {
+      turns.set(member, { started: event.created_at, ended: false })
+    } else if (TURN_ENDS.has(event.kind)) {
+      turns.set(member, { started: turns.get(member)?.started ?? event.created_at, ended: true })
+    }
+  }
+
+  return turns
+}
+
+/**
+ * What each replying member is doing, from the plugin, kept only if it was recorded during that member's current turn. Hermes
+ * never tells the plugin a turn ended normally, so a member's last phase ("writing") stays in its file until the next turn
+ * changes it; shown as-is it read "writing · 8 min" after a reply that took seconds.
+ */
+export function currentActivity(activity: Record<string, MemberActivity> | null | undefined, replying: string[], events: RoomEvent[]): Record<string, MemberActivity> | null {
+  if (!activity) {
+    return activity ?? null
+  }
+
+  const turns = memberTurns(events)
+  const kept = Object.entries(activity).filter(([member, entry]) => {
+    const turn = turns.get(member)
+
+    // A few seconds of slack: the plugin's clock and the log's are the same server's, but the turn may log just after it starts.
+    return replying.includes(member) && (!turn || entry.since == null || entry.since >= turn.started - 5)
+  })
+
+  return Object.fromEntries(kept)
+}
+
 /** Who to show as replying: the live sessions when they name anyone, otherwise the log's reading. Nobody unless the room works. */
 export function whoIsReplying(
   room: Pick<HostedRoom, 'members'>,
@@ -392,7 +484,9 @@ export function whoIsReplying(
     return []
   }
 
-  const fromSessions = live ? replyingFromSessions(room, sessions, live) : []
+  // A member's hidden session can go on reporting "working" for a while after its reply is in; the log's turn end is the truth.
+  const turns = memberTurns(events)
+  const fromSessions = (live ? replyingFromSessions(room, sessions, live) : []).filter(member => !turns.get(member)?.ended)
 
   return fromSessions.length ? fromSessions : replyingFromLog(room, events)
 }

@@ -357,8 +357,10 @@ export default function BotChat() {
                 onMomentumScrollEnd={stick.onMomentumScrollEnd}
                 scrollEventThrottle={32}
                 onContentSizeChange={stick.onContentSizeChange}
-                // Reading older messages: new ones arriving below must not shift what is on screen.
-                maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+                // Holds your place while you read older messages, and follows new ones while you're at the newest: the list does both in
+                // the same layout pass. Pinning alone pushed a new message just below the screen whenever the pin landed after the
+                // jump to the newest row (often, on Android), so it looked like nothing arrived.
+                maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: 80 }}
               />
               {away ? (
                 <View style={styles.jump}>
