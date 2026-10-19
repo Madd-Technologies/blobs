@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { create } from 'zustand'
 
 import { buildRoomViews, type RoomData, type RoomView } from '@/features/rooms/view'
-import { describeError, type RespondResult } from '@/features/sessions/store'
+import { describeError, type ClarifyAnswer, type RespondResult } from '@/features/sessions/store'
 import type { ActiveSessionRow, HostedRoom, RoomMember, RoomPendingAction } from '@/lib/hermes/protocol'
 import {
   approveRoomAction,
@@ -13,18 +13,21 @@ import {
   readLog,
   renameRoom,
   retryRoomTask,
+  roomQuestionsFrom,
   roomSessionTitle,
   roomsAvailable,
   roomState,
   sendRoomMessage,
   stopRoom,
+  waitingFromSessions,
   whoIsReplying,
+  type RoomQuestion,
 } from '@/lib/hermes/rooms'
 import { getRoomActivity } from '@/lib/hermes/plugins'
 import { call } from '@/lib/hermes/rpc'
 import { startPoller } from '@/lib/poller'
 import { useNow } from '@/lib/useNow'
-import { gateway, useConnection } from '@/stores/connection'
+import { gateway, requests, useConnection } from '@/stores/connection'
 
 interface RoomsState {
   /** Whether the server can run rooms (its worker is up). Null until asked. */
@@ -93,6 +96,40 @@ function liveSessions(): Promise<ActiveSessionRow[] | null> {
   return live.rows
 }
 
+/** Requests already handed to the request bridge (so answering works), and ones answered here (gone before the next read). */
+const claimed = new Set<string>()
+const answered = new Set<string>()
+
+/**
+ * Questions members asked you. Hermes runs room members on an internal connection with no app attached, so a member's question
+ * waits in the server's open requests until it times out, blocking the turn (only approvals reach the room's own actions). Each
+ * waiting member's session is read with `session.events.since`, which hands back its open requests, and each one is given to the
+ * request bridge once, so the usual answer path (a response under the request's id) settles it.
+ */
+async function claimQuestions(room: HostedRoom, sessions: Record<string, string[] | undefined>, live: ActiveSessionRow[]): Promise<RoomQuestion[]> {
+  const found = await Promise.all(
+    waitingFromSessions(room, sessions, live).map(async ({ memberId, sessionId }) => {
+      try {
+        const { open_requests: open = [] } = await call(gateway, 'session.events.since', { session_id: sessionId, last_seen: Number.MAX_SAFE_INTEGER })
+        const questions = roomQuestionsFrom(memberId, sessionId, open).filter(question => !answered.has(question.requestId))
+        const fresh = (open as { id?: unknown }[]).filter(frame => questions.some(question => question.requestId === String(frame.id)) && !claimed.has(String(frame.id)))
+
+        if (fresh.length) {
+          requests.ingest(sessionId, fresh)
+          fresh.forEach(frame => claimed.add(String(frame.id)))
+        }
+
+        return questions
+      } catch {
+        // An older server, or the session ended between the two reads: nothing to show.
+        return []
+      }
+    }),
+  )
+
+  return found.flat()
+}
+
 /**
  * Reads one room's newest events and the server's view of its worker. Asks the server for the room's current state
  * first: a copy fetched earlier would not say whether anything new has been logged since. While the room works, also which
@@ -105,7 +142,12 @@ async function syncRoom(room: HostedRoom, previous: RoomData | undefined): Promi
   const page = !previous || latest > previous.cursor ? await readLog(gateway, room.room_id, since) : null
   const events = page ? mergeEvents(previous?.events ?? [], page.events) : (previous?.events ?? [])
   const status = state.driver_status ?? null
-  const replying = status?.working ? whoIsReplying(state.room, events, status, await memberSessions(state.room), await liveSessions()) : []
+  // Members' sessions and the server's live ones, while a member is mid-turn: who is replying, and who is waiting on you.
+  const busy = status?.working || status?.blocked
+  const members = busy ? await memberSessions(state.room) : null
+  const liveRows = members ? await liveSessions() : null
+  const replying = status?.working && members ? whoIsReplying(state.room, events, status, members, liveRows) : []
+  const questions = members && liveRows ? await claimQuestions(state.room, members, liveRows) : []
   const sameReplying = (previous?.replying ?? []).join() === replying.join()
   // What each busy bot is doing (hermes-bot-mobile's room activity), asked only while the room works.
   const config = useConnection.getState().config
@@ -119,11 +161,12 @@ async function syncRoom(room: HostedRoom, previous: RoomData | undefined): Promi
     sessions === previous.sessions &&
     JSON.stringify(status) === JSON.stringify(previous.status) &&
     JSON.stringify(state.room) === JSON.stringify(previous.room) &&
-    JSON.stringify(activity) === JSON.stringify(previous.activity ?? null)
+    JSON.stringify(activity) === JSON.stringify(previous.activity ?? null) &&
+    JSON.stringify(questions) === JSON.stringify(previous.questions ?? [])
 
   return unchanged
     ? previous
-    : { room: state.room, events, cursor: page ? Math.max(page.cursor, previous?.cursor ?? 0) : (previous?.cursor ?? 0), status, replying: sameReplying && previous?.replying ? previous.replying : replying, sessions, activity }
+    : { room: state.room, events, cursor: page ? Math.max(page.cursor, previous?.cursor ?? 0) : (previous?.cursor ?? 0), status, replying: sameReplying && previous?.replying ? previous.replying : replying, sessions, activity, questions }
 }
 
 /** Rooms disbanded here: a list read that was already under way must not put one back. */
@@ -317,6 +360,40 @@ export async function answerRoomApproval(id: string, action: RoomPendingAction, 
     // Someone else answered it, or the turn ended, before this arrived.
     return /no longer pending/i.test(describeError(error)) ? 'expired' : 'failed'
   }
+}
+
+/** Answers a question a room member asked: as a response to its server request, or with `clarify.respond` if the bridge lost it. */
+export async function answerRoomQuestion(id: string, question: RoomQuestion, answers: ClarifyAnswer[]): Promise<RespondResult> {
+  if (!answers.length) {
+    return 'failed'
+  }
+
+  const sent = requests.answer(question.requestId, { kind: 'clarify', answers })
+  let result: RespondResult = 'answered'
+
+  if (sent === 'failed') {
+    return 'failed'
+  }
+
+  if (sent === 'unknown') {
+    try {
+      for (const { questionId, answer } of answers) {
+        const reply = await call(gateway, 'clarify.respond', { session_id: question.sessionId, request_id: question.requestId, answer, ...(questionId ? { question_id: questionId } : {}) })
+
+        if (reply.status === 'expired') {
+          result = 'expired'
+          break
+        }
+      }
+    } catch {
+      return 'failed'
+    }
+  }
+
+  answered.add(question.requestId)
+  void useRooms.getState().refreshRoom(id)
+
+  return result
 }
 
 /** `who` names the bot whose reply this runs again, for the message if the server refuses. */

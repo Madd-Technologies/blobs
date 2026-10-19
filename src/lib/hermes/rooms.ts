@@ -7,7 +7,7 @@
  */
 
 import { call, type RpcClient } from './rpc.ts'
-import type { ActiveSessionRow, HostedRoom, RoomEvent, RoomLogPage, RoomMember, RoomDriverStatus, RoomPendingAction } from './protocol.ts'
+import type { ActiveSessionRow, ClarifyQuestion, HostedRoom, RoomEvent, RoomLogPage, RoomMember, RoomDriverStatus, RoomPendingAction } from './protocol.ts'
 
 /** The server's limits for a room's roster. */
 export const MIN_MEMBERS = 2
@@ -324,6 +324,53 @@ export function replyingFromSessions(room: Pick<HostedRoom, 'members'>, sessions
   const busy = new Set(live.filter(row => row.status === 'working' || row.status === 'starting').flatMap(row => [row.id, row.session_key]))
 
   return room.members.filter(member => (sessions[member.member_id] ?? []).some(id => busy.has(id))).map(member => member.member_id)
+}
+
+/**
+ * Members whose room session is waiting on a person (`status: waiting`: a question, a secret or sudo), each with the live
+ * session id its parked request is read from. Hermes runs room members on an internal connection with no app attached, so a
+ * question a member asks waits in the server's open requests until someone claims it (Hermes 0.21.5,
+ * tui_gateway/session_transports.py `_session_client_answers_requests`).
+ */
+export function waitingFromSessions(room: Pick<HostedRoom, 'members'>, sessions: Record<string, string[] | undefined>, live: Pick<ActiveSessionRow, 'id' | 'session_key' | 'status'>[]): { memberId: string; sessionId: string }[] {
+  return room.members.flatMap(member => {
+    const ids = new Set(sessions[member.member_id] ?? [])
+    const row = live.find(entry => entry.status === 'waiting' && (ids.has(entry.id) || (!!entry.session_key && ids.has(entry.session_key))))
+
+    return row ? [{ memberId: member.member_id, sessionId: row.id }] : []
+  })
+}
+
+/** A question a room member asked you, claimed from its session's open requests. */
+export interface RoomQuestion {
+  memberId: string
+  /** The member's live session, where the request waits. */
+  sessionId: string
+  /** The server request's id: the answer goes back under it. */
+  requestId: string
+  questions: ClarifyQuestion[]
+}
+
+/** The questions in a session's open requests (`session.events.since` → `open_requests`); secrets and sudo are left out. */
+export function roomQuestionsFrom(memberId: string, sessionId: string, open: unknown): RoomQuestion[] {
+  if (!Array.isArray(open)) {
+    return []
+  }
+
+  return open.flatMap(entry => {
+    const frame = entry && typeof entry === 'object' ? (entry as { id?: unknown; method?: unknown; params?: Record<string, unknown> }) : null
+
+    if (!frame || frame.method !== 'clarify' || (typeof frame.id !== 'string' && typeof frame.id !== 'number')) {
+      return []
+    }
+
+    const params = frame.params ?? {}
+    const batch = Array.isArray(params.questions) ? (params.questions as ClarifyQuestion[]) : []
+    const single = typeof params.question === 'string' ? [{ question: params.question, choices: Array.isArray(params.choices) ? (params.choices as string[]) : null, ...(params.multi_select ? { multi_select: true } : {}) } as ClarifyQuestion] : []
+    const questions = batch.length ? batch : single
+
+    return questions.length ? [{ memberId, sessionId, requestId: String(frame.id), questions }] : []
+  })
 }
 
 /**

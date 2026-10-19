@@ -18,6 +18,8 @@ import {
   readLog,
   replyingFromLog,
   replyingFromSessions,
+  roomQuestionsFrom,
+  waitingFromSessions,
   replyingLine,
   roomAttention,
   roomLastActive,
@@ -349,5 +351,44 @@ describe('who is replying in a room', () => {
     assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('approval') }), 'Forge needs your OK')
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('writing') }), 'Hermes and Forge are writing…')
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('tool', 'terminal') }), 'Hermes and Forge are working…')
+  })
+})
+
+describe('a question a room member asks you (Hermes 0.21.5 sends it to no one)', () => {
+  const sessions = { 'm-hermes': ['s-hermes'], 'm-forge': ['s-forge'] }
+
+  it('finds the members whose room session waits on you, with the live session to read it from', () => {
+    const live = [
+      { id: 'live-1', session_key: 's-forge', status: 'waiting' as const },
+      { id: 'live-2', session_key: 's-hermes', status: 'working' as const },
+    ]
+
+    assert.deepEqual(waitingFromSessions(room, sessions, live), [{ memberId: 'm-forge', sessionId: 'live-1' }])
+    assert.deepEqual(waitingFromSessions(room, { 'm-forge': ['live-1'] }, live), [{ memberId: 'm-forge', sessionId: 'live-1' }], 'by the live id too')
+    assert.deepEqual(waitingFromSessions(room, sessions, [{ id: 'live-3', session_key: 's-other', status: 'waiting' as const }]), [], 'not a member of this room')
+  })
+
+  it('reads the question from the open requests, single or several at once', () => {
+    const open = [
+      { id: 'req-1', method: 'clarify', params: { session_id: 'live-1', question: 'Ship it today?', choices: ['Yes', 'No'] } },
+      { id: 'req-2', method: 'clarify', params: { session_id: 'live-1', questions: [{ qid: 'q0', question: 'Which branch?', choices: ['main', 'beta'], multi_select: false }] } },
+    ]
+
+    assert.deepEqual(roomQuestionsFrom('m-forge', 'live-1', open), [
+      { memberId: 'm-forge', sessionId: 'live-1', requestId: 'req-1', questions: [{ question: 'Ship it today?', choices: ['Yes', 'No'] }] },
+      { memberId: 'm-forge', sessionId: 'live-1', requestId: 'req-2', questions: [{ qid: 'q0', question: 'Which branch?', choices: ['main', 'beta'], multi_select: false }] },
+    ])
+  })
+
+  it('leaves secrets, sudo and anything malformed alone', () => {
+    const open = [
+      { id: 'req-3', method: 'secret', params: { prompt: 'API key' } },
+      { id: 'req-4', method: 'sudo', params: {} },
+      { method: 'clarify', params: { question: 'no id' } },
+      { id: 'req-5', method: 'clarify', params: {} },
+    ]
+
+    assert.deepEqual(roomQuestionsFrom('m-forge', 'live-1', open), [])
+    assert.deepEqual(roomQuestionsFrom('m-forge', 'live-1', null), [])
   })
 })

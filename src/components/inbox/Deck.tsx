@@ -134,8 +134,8 @@ function CardBody({ card, context }: { card: DeckCard; context: DeckContext }) {
   if (card.kind === 'room') {
     const view = card.view
 
-    return view.attention.actions.length ? (
-      <RoomActions room={view.data.room} actions={view.attention.actions} framed={false} />
+    return view.attention.actions.length || view.data.questions?.length ? (
+      <RoomActions room={view.data.room} actions={view.attention.actions} questions={view.data.questions} framed={false} />
     ) : (
       <>
         <T variant="display">{view.preview || 'Waiting for you'}</T>
