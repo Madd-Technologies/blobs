@@ -427,6 +427,51 @@ export function replyingFromLog(room: Pick<HostedRoom, 'members'>, events: RoomE
   return everyone.filter(id => asked.has(id))
 }
 
+/**
+ * Each member's newest turn in the log: when it started (epoch seconds) and whether it has ended. A member without a turn in the
+ * events read so far is absent.
+ */
+export function memberTurns(events: RoomEvent[]): Map<string, { started: number; ended: boolean }> {
+  const turns = new Map<string, { started: number; ended: boolean }>()
+
+  for (const event of events) {
+    const member = typeof event.payload.member_id === 'string' ? event.payload.member_id : undefined
+
+    if (member === undefined) {
+      continue
+    }
+
+    if (event.kind === 'turn.started') {
+      turns.set(member, { started: event.created_at, ended: false })
+    } else if (TURN_ENDS.has(event.kind)) {
+      turns.set(member, { started: turns.get(member)?.started ?? event.created_at, ended: true })
+    }
+  }
+
+  return turns
+}
+
+/**
+ * What each replying member is doing, from the plugin, kept only if it was recorded during that member's current turn. Hermes
+ * never tells the plugin a turn ended normally, so a member's last phase ("writing") stays in its file until the next turn
+ * changes it; shown as-is it read "writing · 8 min" after a reply that took seconds.
+ */
+export function currentActivity(activity: Record<string, MemberActivity> | null | undefined, replying: string[], events: RoomEvent[]): Record<string, MemberActivity> | null {
+  if (!activity) {
+    return activity ?? null
+  }
+
+  const turns = memberTurns(events)
+  const kept = Object.entries(activity).filter(([member, entry]) => {
+    const turn = turns.get(member)
+
+    // A few seconds of slack: the plugin's clock and the log's are the same server's, but the turn may log just after it starts.
+    return replying.includes(member) && (!turn || entry.since == null || entry.since >= turn.started - 5)
+  })
+
+  return Object.fromEntries(kept)
+}
+
 /** Who to show as replying: the live sessions when they name anyone, otherwise the log's reading. Nobody unless the room works. */
 export function whoIsReplying(
   room: Pick<HostedRoom, 'members'>,
@@ -439,7 +484,9 @@ export function whoIsReplying(
     return []
   }
 
-  const fromSessions = live ? replyingFromSessions(room, sessions, live) : []
+  // A member's hidden session can go on reporting "working" for a while after its reply is in; the log's turn end is the truth.
+  const turns = memberTurns(events)
+  const fromSessions = (live ? replyingFromSessions(room, sessions, live) : []).filter(member => !turns.get(member)?.ended)
 
   return fromSessions.length ? fromSessions : replyingFromLog(room, events)
 }

@@ -7,6 +7,7 @@ import type { ActiveSessionRow, HostedRoom, RoomMember, RoomPendingAction } from
 import {
   approveRoomAction,
   createRoom,
+  currentActivity,
   disbandRoom,
   listRooms,
   mergeEvents,
@@ -151,7 +152,7 @@ async function syncRoom(room: HostedRoom, previous: RoomData | undefined): Promi
   const sameReplying = (previous?.replying ?? []).join() === replying.join()
   // What each busy bot is doing (hermes-bot-mobile's room activity), asked only while the room works.
   const config = useConnection.getState().config
-  const activity = status?.working && config ? await getRoomActivity(config, state.room.room_id).catch(() => previous?.activity ?? null) : null
+  const activity = status?.working && config ? currentActivity(await getRoomActivity(config, state.room.room_id).catch(() => previous?.activity ?? null), replying, events) : null
   const found = Object.values(roomSessions.get(state.room.room_id) ?? {}).flatMap(ids => ids ?? [])
   const sessions = previous?.sessions && previous.sessions.join() === found.join() ? previous.sessions : found
   const unchanged =

@@ -168,7 +168,10 @@ export default function RoomScreen() {
                   </View>
                 ) : null
               }
-              maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+              // Holds your place while you read older messages, and follows new ones while you're at the newest: the list does both in
+              // the same layout pass. Pinning alone pushed a new message just below the screen whenever the pin landed after the
+              // jump to the newest row (often, on Android), so it looked like nothing arrived.
+              maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: 80 }}
             />
           </View>
         )}
