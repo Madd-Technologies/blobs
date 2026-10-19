@@ -4,6 +4,7 @@ import { BackHandler, StyleSheet, View, useWindowDimensions } from 'react-native
 import Animated, { FadeIn, runOnJS, useAnimatedReaction, useAnimatedRef, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, type SharedValue } from 'react-native-reanimated'
 
 import { Ask } from '@/components/tour/Ask'
+import { Dashboard } from '@/components/tour/Dashboard'
 import { Inbox } from '@/components/tour/Inbox'
 import { PagerHold } from '@/components/tour/kit'
 import { Meet } from '@/components/tour/Meet'
@@ -34,6 +35,7 @@ const PAGES: Page[] = [
   { key: 'inbox', title: 'Needs you', body: 'Every approval and question from every bot, gathered in one place, one card at a time. Swipe a card away once it’s handled.', Scene: Inbox },
   { key: 'screen', title: 'Take over the screen', body: 'Watch a bot’s desktop live. When it gets stuck, take the mouse and keyboard, then hand it back.', Scene: TakeOver },
   { key: 'rooms', title: 'Rooms and routines', body: 'Put several bots in one room and @mention who should answer. Routines run on a schedule, even while you sleep.', Scene: Rooms },
+  { key: 'dashboard', title: 'Need a dashboard panel? Just ask', body: 'Here’s a dashboard a bot keeps for you. Tell it what to track and it adds the panel. Dashboards are an optional plugin for your server.', Scene: Dashboard },
   { key: 'ready', title: 'Ready when you are', body: 'Blobs connects straight to your own Hermes server. No account, no analytics.', Scene: Ready },
 ]
 
@@ -69,7 +71,7 @@ function TourPage({ page, at, offset, width, active, mounted, title, body }: { p
 }
 
 /**
- * The tutorial: seven pages, each a live scene played by the brand's faces, that walk through what the app does. It opens
+ * The tutorial: eight pages, each a live scene played by the brand's faces, that walk through what the app does. It opens
  * on its own before Connect on a first launch, and from Settings any time after. Swipe or tap Next; Skip leaves at once.
  */
 export default function Tour() {

@@ -77,18 +77,25 @@ export function BotPanel({ id, status, waiting, face, faceSize, children }: { id
     <BotTint color={crowdColor(id)}>
       <Peek size={faceSize}>{face}</Peek>
       <PanelPaper>
-        <View style={styles.head}>
-          <T variant="heading">{CROWD[id].name}</T>
-          <View style={styles.status}>
-            {waiting ? <AttentionDot /> : null}
-            <T variant="status" color="text2" numberOfLines={1}>
-              {status}
-            </T>
-          </View>
-        </View>
+        <PanelHead title={CROWD[id].name} status={status} waiting={waiting} />
         <View style={styles.body}>{children}</View>
       </PanelPaper>
     </BotTint>
+  )
+}
+
+/** A panel's name and what is going on, with the amber dot while it waits for you. */
+export function PanelHead({ title, status, waiting }: { title: string; status: string; waiting?: boolean }) {
+  return (
+    <View style={styles.head}>
+      <T variant="heading">{title}</T>
+      <View style={styles.status}>
+        {waiting ? <AttentionDot /> : null}
+        <T variant="status" color="text2" numberOfLines={1}>
+          {status}
+        </T>
+      </View>
+    </View>
   )
 }
 
