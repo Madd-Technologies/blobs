@@ -9,6 +9,8 @@ interface BotChats {
   inbox: ChatSummary | null
   /** How many chats the server has in all, so the screen knows whether to read more. */
   total: number
+  /** The server's offset for the next page: not `listed.length`, which leaves out what was already read. */
+  next: number
   /** A further page is being read. */
   more: boolean
   error: string | null
@@ -33,32 +35,32 @@ export const useChatList = create<ChatListState>((set, get) => ({
     try {
       // A server without the inbox has no chat by its title; a lookup that fails only leaves the row out.
       const [page, inbox] = await Promise.all([sessions.listChats(profile), sessions.findInbox(profile).catch(() => null)])
-      set(state => ({ byBot: { ...state.byBot, [profile]: { listed: page.chats, inbox, total: page.total, more: false, error: null } } }))
+      set(state => ({ byBot: { ...state.byBot, [profile]: { listed: page.chats, inbox, total: page.total, next: page.next, more: false, error: null } } }))
     } catch (error) {
       set(state => {
         const known = state.byBot[profile]
 
-        return { byBot: { ...state.byBot, [profile]: { listed: known?.listed ?? [], inbox: known?.inbox ?? null, total: known?.total ?? 0, more: false, error: failure(error) } } }
+        return { byBot: { ...state.byBot, [profile]: { listed: known?.listed ?? [], inbox: known?.inbox ?? null, total: known?.total ?? 0, next: known?.next ?? 0, more: false, error: failure(error) } } }
       })
     }
   },
   loadMore: async profile => {
     const known = get().byBot[profile]
 
-    if (!known || known.more || known.listed.length >= known.total) {
+    if (!known || known.more || known.next >= known.total) {
       return
     }
 
     set(state => ({ byBot: { ...state.byBot, [profile]: { ...known, more: true } } }))
 
     try {
-      const page = await sessions.listChats(profile, known.listed.length)
+      const page = await sessions.listChats(profile, known.next)
       set(state => {
         const current = state.byBot[profile] ?? known
         const seen = new Set(current.listed.map(chat => chat.id))
 
         // A chat started while reading shifts the pages by one: the same chat can come back, and is kept once.
-        return { byBot: { ...state.byBot, [profile]: { ...current, listed: [...current.listed, ...page.chats.filter(chat => !seen.has(chat.id))], total: page.total, more: false } } }
+        return { byBot: { ...state.byBot, [profile]: { ...current, listed: [...current.listed, ...page.chats.filter(chat => !seen.has(chat.id))], total: page.total, next: page.next, more: false } } }
       })
     } catch (error) {
       set(state => ({ byBot: { ...state.byBot, [profile]: { ...(state.byBot[profile] ?? known), more: false, error: failure(error) } } }))
@@ -72,6 +74,7 @@ export const useChatList = create<ChatListState>((set, get) => ({
         return state
       }
 
-      return { byBot: { ...state.byBot, [profile]: { ...known, listed: known.listed.filter(chat => chat.id !== id), total: Math.max(0, known.total - 1) } } }
+      // Every chat after it moves up one on the server.
+      return { byBot: { ...state.byBot, [profile]: { ...known, listed: known.listed.filter(chat => chat.id !== id), total: Math.max(0, known.total - 1), next: Math.max(0, known.next - 1) } } }
     }),
 }))

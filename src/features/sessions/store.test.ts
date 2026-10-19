@@ -1056,10 +1056,21 @@ describe('choosing a chat', () => {
       h.setChats(({ offset }) => ({ sessions: offset ? [] : [{ id: 'stored-2', title: 'Deploy', preview: 'Deploying', started_at: 20, message_count: 6, source: 'tui' }], total: 31 }))
       const first = await h.sessions.listChats('bot')
       assert.deepEqual(h.chatQueries[0], { offset: 0, limit: 30, excludeSources: ['cron'] })
-      assert.deepEqual(first, { chats: [{ id: 'stored-2', title: 'Deploy', preview: 'Deploying', startedAt: 20, messageCount: 6, source: 'tui' }], total: 31 })
+      assert.deepEqual(first, { chats: [{ id: 'stored-2', title: 'Deploy', preview: 'Deploying', startedAt: 20, messageCount: 6, source: 'tui' }], total: 31, next: 30 })
       await h.sessions.listChats('bot', 30)
       assert.equal(h.chatQueries[1]?.offset, 30)
       assert.equal(h.calls.length, 0, 'the paged list is REST, not session.list')
+    })
+
+    it('leaves out the pinned chats the server adds after a page, so each comes on its own page in date order', async () => {
+      const h = withChats()
+      const row = (n: number, pinned = false) => ({ id: `c${n}`, title: `Chat ${n}`, preview: '', started_at: 1000 - n, message_count: 1, source: 'tui', pinned })
+      h.setChats(({ offset }) => ({ sessions: [...Array.from({ length: 30 }, (_, i) => row(offset + i)), row(90, true)], total: 100 }))
+      const page = await h.sessions.listChats('bot', 30)
+      assert.equal(page.chats.length, 30)
+      assert.equal(page.chats.at(-1)?.id, 'c59')
+      assert.ok(!page.chats.some(chat => chat.id === 'c90'))
+      assert.equal(page.next, 60, 'the next page starts after this one, however many rows came back')
     })
 
     it('fills in what a stored chat leaves out', async () => {

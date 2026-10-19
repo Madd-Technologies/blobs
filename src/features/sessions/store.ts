@@ -638,8 +638,11 @@ export function createSessions(deps: SessionsDeps) {
     })
   }
 
-  /** A page of the bot's stored chats, newest started first, without routines; `total` says how many there are in all. */
-  async function listChats(profile: string, offset = 0): Promise<{ chats: ChatSummary[]; total: number }> {
+  /**
+   * A page of the bot's stored chats, newest started first, without routines. `total` is how many there are in all and
+   * `next` the offset of the page after this one.
+   */
+  async function listChats(profile: string, offset = 0): Promise<{ chats: ChatSummary[]; total: number; next: number }> {
     const config = deps.getConfig()
 
     if (!config) {
@@ -649,8 +652,14 @@ export function createSessions(deps: SessionsDeps) {
     const page = await (deps.listSessions ?? listSessionsPage)(config, { profile, limit: CHATS_PAGE, offset, excludeSources: ['cron'] })
 
     return {
-      chats: page.sessions.map(entry => summaryOf({ ...entry, title: entry.title ?? undefined, preview: entry.preview ?? undefined, started_at: entry.started_at ?? undefined, message_count: entry.message_count ?? undefined, source: entry.source ?? undefined })),
+      // The server adds every pinned chat the page missed after the page itself (Hermes 0.21.5 list_sessions_rich
+      // include_pinned). Those are left out: each comes on its own page, in date order, instead of jumping down the list
+      // as the pages before it arrive.
+      chats: page.sessions
+        .slice(0, CHATS_PAGE)
+        .map(entry => summaryOf({ ...entry, title: entry.title ?? undefined, preview: entry.preview ?? undefined, started_at: entry.started_at ?? undefined, message_count: entry.message_count ?? undefined, source: entry.source ?? undefined })),
       total: page.total,
+      next: offset + CHATS_PAGE,
     }
   }
 
