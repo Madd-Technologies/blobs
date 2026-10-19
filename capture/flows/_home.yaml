@@ -7,5 +7,10 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: "3 things need you"
     timeout: 60000
+# The cold-boot splash plays over Home for a second and a half; no moment starts under it.
+- extendedWaitUntil:
+    notVisible:
+      id: "boot-splash"
+    timeout: 10000
 - waitForAnimationToEnd:
     timeout: 1500

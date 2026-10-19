@@ -78,6 +78,10 @@ export default function Settings() {
           {Platform.OS === 'android' ? <Row label="Notifications" onPress={() => router.push('/notifications')} /> : null}
         </GroupedList>
 
+        <GroupedList separators={false}>
+          <Row label="How Blobs works" onPress={() => router.push('/tour')} />
+        </GroupedList>
+
         {__DEV__ ? (
           <GroupedList separators={false}>
             <Row label="Design gallery" onPress={() => router.push('/dev/gallery')} />

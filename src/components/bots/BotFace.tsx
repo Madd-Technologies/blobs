@@ -11,6 +11,7 @@ import Animated, {
   withSequence,
   withSpring,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated'
 import Svg, { Circle, Ellipse, Path, SvgXml } from 'react-native-svg'
 
@@ -33,7 +34,19 @@ interface Props {
   motion?: FaceMotion
   /** Raise it to make the face react to a press (it squishes and blinks). */
   poke?: number
+  /** A blobatar drawn elsewhere, used instead of the profile's (the brand's own faces, which lock a hue). */
+  xml?: string
+  /** Where the eyes look, -1 to 1 on each axis (0 is straight ahead): a face that follows your finger. */
+  gaze?: SharedValue<Gaze>
 }
+
+export interface Gaze {
+  x: number
+  y: number
+}
+
+/** How far the eyes travel at full gaze, as shares of the face's size. */
+const GAZE_REACH = { x: 0.07, y: 0.045 }
 
 // ── the parts of a face ──────────────────────────────────────────────────────────────────────────
 
@@ -99,7 +112,7 @@ interface Layers {
   eyeLine: number
 }
 
-function LiveFace({ layers, size, motion, poke, reduced }: { layers: Layers; size: number; motion: FaceMotion; poke: number; reduced: boolean }) {
+function LiveFace({ layers, size, motion, poke, gaze, reduced }: { layers: Layers; size: number; motion: FaceMotion; poke: number; gaze?: SharedValue<Gaze>; reduced: boolean }) {
   const blink = useSharedValue(1)
   const squint = useSharedValue(1)
   const eyeScale = useSharedValue(motion === 'doze' ? MOTIONS.doze.eyes : 1)
@@ -221,9 +234,18 @@ function LiveFace({ layers, size, motion, poke, reduced }: { layers: Layers; siz
       { scaleY: (1 + breath.value * 0.025) * (1 - squish.value) },
     ],
   }))
-  const eyesStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: glance.value * glanceAmount * size }, { translateY: lift }, { scaleY: eyeScale.value * blink.value * squint.value }, { translateY: -lift }],
-  }))
+  const eyesStyle = useAnimatedStyle(() => {
+    const look = gaze?.get()
+
+    return {
+      transform: [
+        { translateX: (glance.value * glanceAmount + (look?.x ?? 0) * GAZE_REACH.x) * size },
+        { translateY: lift + (look?.y ?? 0) * GAZE_REACH.y * size },
+        { scaleY: eyeScale.value * blink.value * squint.value },
+        { translateY: -lift },
+      ],
+    }
+  })
 
   return (
     <Animated.View style={[{ width: size, height: size }, faceStyle]}>
@@ -241,19 +263,19 @@ function LiveFace({ layers, size, motion, poke, reduced }: { layers: Layers; siz
  * Still by default; with a `motion` (or a press) it comes alive: blinks, glances, breathes, hops.
  * Decorative: the bot's name is always shown next to it.
  */
-export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'idle', photo, motion = 'still', poke = 0 }: Props) {
+export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'idle', photo, motion = 'still', poke = 0, xml, gaze }: Props) {
   const reduced = useReducedMotion()
   const appearance = useMemo(() => botAppearance(name, meta), [name, meta])
   const image = photo ?? appearance.image
   const color = avatarColor(appearance.color, name)
   const shape = appearance.shape
 
-  const blob = useMemo(() => (isBlobShape(shape) && !image ? blobSvg(shape, name, size) : null), [shape, name, size, image])
+  const blob = useMemo(() => (xml ?? (isBlobShape(shape) && !image ? blobSvg(shape, name, size) : null)), [xml, shape, name, size, image])
   // An unrenderable blobatar falls back to the name's classic shape, like Desktop's older SDKs.
   const classic = isBlobShape(shape) ? botAppearance(name, { ...meta, shape: undefined }).shape : shape
   const face = useMemo(() => buildFace(classic, color, name, mood), [classic, color, name, mood])
   // A dozing face is drawn live even under Reduce Motion: its shut eyes are a state, not an animation.
-  const live = (!reduced && (motion !== 'still' || poke > 0)) || motion === 'doze'
+  const live = (!reduced && (motion !== 'still' || poke > 0 || !!gaze)) || motion === 'doze'
   const parts = useMemo(() => (live && blob ? splitBlob(blob) : null), [live, blob])
 
   if (!live) {
@@ -285,7 +307,7 @@ export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'id
 
   return (
     <View aria-hidden style={{ width: size, height: size }}>
-      <LiveFace layers={layers} size={size} motion={motion} poke={poke} reduced={!!reduced} />
+      <LiveFace layers={layers} size={size} motion={motion} poke={poke} gaze={gaze} reduced={!!reduced} />
     </View>
   )
 })

@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router'
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router'
 import { useState } from 'react'
 import { KeyboardAvoidingView, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 
@@ -10,6 +10,7 @@ import { authDeps } from '@/lib/auth-native'
 import { signInWithPassword, SignInError } from '@/lib/hermes/auth'
 import { normalizeBaseUrl, probeServer } from '@/lib/hermes/server'
 import { useConnection } from '@/stores/connection'
+import { usePrefs } from '@/stores/prefs'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
@@ -34,6 +35,9 @@ function signInMessage(error: unknown, baseUrl: string): string {
 
 export default function Connect() {
   const { c } = useTheme()
+  const router = useRouter()
+  // A first launch shows the tutorial before anything else; it comes back here when it is done or skipped.
+  const tourSeen = usePrefs(state => state.tourSeen)
   const saveConfig = useConnection(state => state.saveConfig)
   // Set when a saved session ran out: come back to the same server, ready to sign in again.
   const signedOut = useConnection(state => state.signedOut)
@@ -55,6 +59,11 @@ export default function Connect() {
   const [notice, setNotice] = useState<string | null>(signedOut?.reason ?? null)
 
   const field = [styles.field, { backgroundColor: c.sheet, color: c.text }]
+
+  if (!tourSeen) {
+    return <Redirect href="/tour" />
+  }
+
   const canSubmit = !busy && !!url.trim() && (usePassword ? !!username.trim() && !!password : !!token.trim())
 
   async function connect() {
@@ -238,9 +247,12 @@ export default function Connect() {
             />
           </View>
 
-          <T variant="label" color="text2" style={styles.foot}>
-            Connects straight to your server over your own network.
-          </T>
+          <View style={styles.foot}>
+            <T variant="label" color="text2" style={styles.center}>
+              Connects straight to your server over your own network.
+            </T>
+            <Pill label="How Blobs works" variant="ghost" height={40} onPress={() => router.push('/tour')} />
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
@@ -256,5 +268,6 @@ const styles = StyleSheet.create({
   label: { gap: 6 },
   field: { height: 52, borderRadius: radius.field, paddingHorizontal: 16, fontFamily: fonts.regular, fontSize: 15 },
   primary: { marginTop: 12 },
-  foot: { marginTop: 'auto', paddingTop: 32, paddingBottom: 16, textAlign: 'center' },
+  foot: { marginTop: 'auto', paddingTop: 32, paddingBottom: 8, alignItems: 'center', gap: 4 },
+  center: { textAlign: 'center' },
 })

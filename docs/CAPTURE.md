@@ -86,8 +86,8 @@ For each phone, in turn (iPhone first):
    its own reset because its dark pass sends the room message and allows Courier's push, which only a reset brings
    back.
 2. **Boots the device** with its clean status bar.
-3. **Signs in** if the app is on its Connect screen. Nothing ever prints the demo password, and it is never on a command
-   line on this Mac:
+3. **Signs in** if the app is on its Connect screen (a fresh install shows the tutorial first, which the flow skips).
+   Nothing ever prints the demo password, and it is never on a command line on this Mac:
    - *iPhone:* the password goes onto the simulator's pasteboard (`demo.sh password --sim`), the flow pastes it, and
      the pasteboard is cleared straight after.
    - *Android* has no pasteboard to fill from outside. The flow fills the address and username and focuses the
