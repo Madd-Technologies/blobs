@@ -1,12 +1,14 @@
 import { useMemo } from 'react'
-import { Linking, StyleSheet } from 'react-native'
+import { StyleSheet } from 'react-native'
 import { WebView, type WebViewNavigation } from 'react-native-webview'
 
+import { openLink } from '@/lib/openLink'
 import { useTheme } from '@/theme/ThemeProvider'
 
 /**
  * A web page a bot made (an HTML file), shown as a page. It runs in a WebView of its own, with no bridge to the app and no origin
- * of the server's, so it can draw and run its scripts but reaches nothing of yours; a link out opens in the browser.
+ * of the server's, so it can draw and run its scripts but reaches nothing of yours; a link out opens outside the app (in its own
+ * app when it has one).
  */
 export function HtmlView({ html }: { html: string }) {
   const { c } = useTheme()
@@ -18,7 +20,7 @@ export function HtmlView({ html }: { html: string }) {
     }
 
     if (/^https?:\/\//i.test(request.url)) {
-      void Linking.openURL(request.url)
+      void openLink(request.url)
     }
 
     return false

@@ -1,0 +1,6 @@
+{
+  "name": "app-links",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hands a web link to one app on Android (Gmail, Outlook) instead of letting the system choose the browser."
+}
