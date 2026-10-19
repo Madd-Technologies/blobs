@@ -1,7 +1,7 @@
 /**
- * Polls what is going on across all bots: `session.active_list` for status, `approval.pending`
- * for sessions that are working or waiting but not open in the app (their approval prompts were never
- * sent to this connection), and `delegation.status` for helpers still running after their bot's turn.
+ * Polls what is going on across all bots: `session.active_list` for status, the open requests of sessions
+ * that are working or waiting but not open in the app (their approval prompts were never sent to this
+ * connection), and `delegation.status` for helpers still running after their bot's turn.
  * Framework-free with injected dependencies; the app wires the real one.
  */
 
@@ -29,8 +29,39 @@ export interface InboxDeps {
   now?: () => number
 }
 
-/** `approval.pending` can block for up to 30 s on a busy session; do not hold a refresh that long. */
-const PENDING_TIMEOUT_MS = 8_000
+/** A session's open requests are read in memory and answer at once; a slow reply is not worth holding the poll for. */
+const PENDING_TIMEOUT_MS = 5_000
+
+/**
+ * The approvals among a session's open requests (`session.events.since` → `open_requests`, Hermes 0.21.5): the server
+ * request's params are the approval as sent (`tui_gateway/contracts/server_requests.py` ApprovalRequestParams, command
+ * already redacted).
+ */
+export function approvalsFrom(open: unknown): ApprovalRequestPayload[] {
+  if (!Array.isArray(open)) {
+    return []
+  }
+
+  return open.flatMap(entry => {
+    const frame = entry && typeof entry === 'object' ? (entry as { id?: unknown; method?: unknown; params?: Record<string, unknown> }) : null
+    const params = frame?.params ?? {}
+
+    if (frame?.method !== 'approval' || (typeof params.request_id !== 'string' && typeof frame.id !== 'string')) {
+      return []
+    }
+
+    return [
+      {
+        request_id: typeof params.request_id === 'string' && params.request_id ? params.request_id : String(frame.id),
+        command: typeof params.command === 'string' ? params.command : '',
+        description: typeof params.description === 'string' ? params.description : '',
+        ...(Array.isArray(params.choices) ? { choices: params.choices as ApprovalRequestPayload['choices'] } : {}),
+        ...(typeof params.allow_session === 'boolean' ? { allow_session: params.allow_session } : {}),
+        ...(typeof params.allow_permanent === 'boolean' ? { allow_permanent: params.allow_permanent } : {}),
+      },
+    ]
+  })
+}
 
 export function createInbox(deps: InboxDeps) {
   const now = deps.now ?? Date.now
@@ -49,8 +80,15 @@ export function createInbox(deps: InboxDeps) {
       // session that is asking a question, a sudo or a secret answers with an empty list.
       const candidates = sessions.filter(row => (row.status === 'working' || row.status === 'waiting') && !open.has(row.id))
 
+      // Each session's open requests, not `approval.pending`: that runs on the socket's own reader (not the server's worker
+      // pool) and waits up to 30 s for a cold agent to build, holding every later request on the connection behind it.
+      // The open requests are read from memory and include the approval as it was sent.
       const results = await Promise.allSettled(
-        candidates.map(async row => ({ id: row.id, approvals: (await call(deps.client, 'approval.pending', { session_id: row.id }, { timeoutMs: PENDING_TIMEOUT_MS })).approvals })),
+        candidates.map(async row => {
+          const { open_requests: open } = await call(deps.client, 'session.events.since', { session_id: row.id, last_seen: Number.MAX_SAFE_INTEGER }, { timeoutMs: PENDING_TIMEOUT_MS })
+
+          return { id: row.id, approvals: approvalsFrom(open) }
+        }),
       )
 
       const polled: Record<string, ApprovalRequestPayload[]> = {}

@@ -72,7 +72,8 @@ export interface RpcMethods {
     result: SessionCreateResult
   }
   'session.resume': {
-    params: { session_id: string; profile?: string; omit_messages?: boolean }
+    /** `defer_history`: answer at once and restore the model's history in the background (Hermes 0.21.5; older servers ignore it). */
+    params: { session_id: string; profile?: string; omit_messages?: boolean; defer_history?: boolean }
     result: SessionResumeResult
   }
   'session.list': {
@@ -169,6 +170,8 @@ export interface RpcMethods {
   /** Background processes the session owns, running or recently finished (Hermes Desktop's status stack polls it). */
   'process.list': { params: { session_id: string }; result: { processes: ProcessListRow[] } }
   /** Helpers (subagents) the session sent off that are still running. */
+  /** A session's events after `last_seen`, and its server requests still unanswered (`open_requests`), for any session id. */
+  'session.events.since': { params: { session_id: string; last_seen: number }; result: { events?: unknown[]; open_requests?: unknown[] } }
   'subagent.list': { params: { session_id: string }; result: { subagents: SubagentListRow[]; delegations?: unknown[] } }
   /** Every helper running on the server, each with the chat whose bot sent it off (Hermes 0.21.5+). */
   'delegation.status': { params: Record<never, never>; result: { active?: DelegationStatusRow[] } }

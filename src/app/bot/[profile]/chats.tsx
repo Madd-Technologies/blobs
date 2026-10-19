@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router'
 import { useEffect, useMemo, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { type NativeScrollEvent, type NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotPaper } from '@/components/bots/BotPaper'
 import { BotFace } from '@/components/bots/BotFace'
@@ -62,6 +62,7 @@ export default function Chats() {
   const listed = list?.listed ?? null
   const inbox = list?.inbox ?? null
   const failed = list?.error ?? null
+  const more = list?.more ?? false
   const [pressed, setPressed] = useState<ChatEntry | null>(null)
   const [deleting, setDeleting] = useState<ChatEntry | null>(null)
   const [busy, setBusy] = useState(false)
@@ -143,9 +144,18 @@ export default function Chats() {
 
     if (error) {
       toast(error)
+
+      return
     }
 
-    void useChatList.getState().load(profile)
+    useChatList.getState().drop(profile, entry.id)
+  }
+
+  /** Reads the next page of side chats a screen before the end, so scrolling rarely has to wait for it. */
+  function onScroll({ nativeEvent: { contentOffset, layoutMeasurement, contentSize } }: NativeSyntheticEvent<NativeScrollEvent>) {
+    if (contentOffset.y + layoutMeasurement.height >= contentSize.height - layoutMeasurement.height) {
+      void useChatList.getState().loadMore(profile)
+    }
   }
 
   return (
@@ -159,107 +169,114 @@ export default function Chats() {
           <IconCircle icon="edit" label="New side chat" diameter={40} onPress={() => void startNew()} disabled={busy || !online} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-          {listed === null && !failed ? (
-            <View style={styles.center}>
-              <Spinner size={16} />
-            </View>
-          ) : (
-            <>
-              {failed ? (
-                <T variant="label" color="danger" style={styles.note}>
-                  {failed}
-                </T>
-              ) : null}
+        {/* The main chat comes from the roster, already here: only the side chats wait for the server. */}
+        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={200}>
+          {failed ? (
+            <T variant="label" color="danger" style={styles.note}>
+              {failed}
+            </T>
+          ) : null}
 
-              {main ? (
-                <GroupedList>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Main chat${main.current ? ', open now' : ''}`}
-                    onPress={() => void open(main)}
-                    style={({ pressed: down }) => [styles.mainRow, { backgroundColor: down ? c.sheet : 'transparent' }]}
-                  >
-                    <BotFace name={profile} meta={view?.meta} size={40} />
-                    <View style={styles.rowText}>
-                      <T variant="rowTitle" numberOfLines={1}>
-                        Main chat
+          {main ? (
+            <GroupedList>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Main chat${main.current ? ', open now' : ''}`}
+                onPress={() => void open(main)}
+                style={({ pressed: down }) => [styles.mainRow, { backgroundColor: down ? c.sheet : 'transparent' }]}
+              >
+                <BotFace name={profile} meta={view?.meta} size={40} />
+                <View style={styles.rowText}>
+                  <T variant="rowTitle" numberOfLines={1}>
+                    Main chat
+                  </T>
+                  {main.preview ? (
+                    <T variant="label" color="text2" numberOfLines={1}>
+                      {main.preview}
+                    </T>
+                  ) : null}
+                </View>
+                <T variant="meta" color={main.current ? 'text' : 'text2'}>
+                  {main.current ? 'Open' : since(main.startedAt, nowS)}
+                </T>
+              </Pressable>
+              {between ? (
+                // What other bots asked this one, and its answers: kept out of the main chat, here to read.
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Between bots, read only"
+                  onPress={() => router.push({ pathname: '/bot/[profile]/past', params: { profile, session: between.id, title: between.title, inbox: '1' } })}
+                  style={({ pressed: down }) => [styles.row, { backgroundColor: down ? c.sheet : 'transparent' }]}
+                >
+                  <View style={styles.rowText}>
+                    <T variant="body" numberOfLines={1}>
+                      {between.title}
+                    </T>
+                    {between.preview ? (
+                      <T variant="label" color="text2" numberOfLines={1}>
+                        {between.preview}
                       </T>
-                      {main.preview ? (
+                    ) : null}
+                  </View>
+                  <T variant="meta" color="text2">
+                    {since(between.startedAt, nowS)}
+                  </T>
+                </Pressable>
+              ) : null}
+            </GroupedList>
+          ) : null}
+
+          {listed === null && !failed ? (
+            <View style={styles.group}>
+              <T variant="meta" color="text2" style={styles.section}>
+                Side chats
+              </T>
+              <View style={styles.waiting}>
+                <Spinner size={16} />
+              </View>
+            </View>
+          ) : side.length ? (
+            <View style={styles.group}>
+              <T variant="meta" color="text2" style={styles.section}>
+                Side chats
+              </T>
+              <GroupedList>
+                {side.map(entry => (
+                  <Pressable
+                    key={entry.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${entry.title}${entry.current ? ', open now' : ''}`}
+                    onPress={() => void open(entry)}
+                    onLongPress={() => setPressed(entry)}
+                    style={({ pressed: down }) => [styles.row, { backgroundColor: down ? c.sheet : 'transparent' }]}
+                  >
+                    <View style={styles.rowText}>
+                      <T variant="body" numberOfLines={1} style={entry.current ? styles.bold : undefined}>
+                        {entry.title}
+                      </T>
+                      {entry.preview ? (
                         <T variant="label" color="text2" numberOfLines={1}>
-                          {main.preview}
+                          {entry.preview}
                         </T>
                       ) : null}
                     </View>
-                    <T variant="meta" color={main.current ? 'text' : 'text2'}>
-                      {main.current ? 'Open' : since(main.startedAt, nowS)}
+                    <T variant="meta" color={entry.current ? 'text' : 'text2'}>
+                      {entry.current ? 'Open' : since(entry.startedAt, nowS)}
                     </T>
                   </Pressable>
-                  {between ? (
-                    // What other bots asked this one, and its answers: kept out of the main chat, here to read.
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Between bots, read only"
-                      onPress={() => router.push({ pathname: '/bot/[profile]/past', params: { profile, session: between.id, title: between.title, inbox: '1' } })}
-                      style={({ pressed: down }) => [styles.row, { backgroundColor: down ? c.sheet : 'transparent' }]}
-                    >
-                      <View style={styles.rowText}>
-                        <T variant="body" numberOfLines={1}>
-                          {between.title}
-                        </T>
-                        {between.preview ? (
-                          <T variant="label" color="text2" numberOfLines={1}>
-                            {between.preview}
-                          </T>
-                        ) : null}
-                      </View>
-                      <T variant="meta" color="text2">
-                        {since(between.startedAt, nowS)}
-                      </T>
-                    </Pressable>
-                  ) : null}
-                </GroupedList>
-              ) : null}
-
-              {side.length ? (
-                <View style={styles.group}>
-                  <T variant="meta" color="text2" style={styles.section}>
-                    Side chats
-                  </T>
-                  <GroupedList>
-                    {side.map(entry => (
-                      <Pressable
-                        key={entry.id}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${entry.title}${entry.current ? ', open now' : ''}`}
-                        onPress={() => void open(entry)}
-                        onLongPress={() => setPressed(entry)}
-                        style={({ pressed: down }) => [styles.row, { backgroundColor: down ? c.sheet : 'transparent' }]}
-                      >
-                        <View style={styles.rowText}>
-                          <T variant="body" numberOfLines={1} style={entry.current ? styles.bold : undefined}>
-                            {entry.title}
-                          </T>
-                          {entry.preview ? (
-                            <T variant="label" color="text2" numberOfLines={1}>
-                              {entry.preview}
-                            </T>
-                          ) : null}
-                        </View>
-                        <T variant="meta" color={entry.current ? 'text' : 'text2'}>
-                          {entry.current ? 'Open' : since(entry.startedAt, nowS)}
-                        </T>
-                      </Pressable>
-                    ))}
-                  </GroupedList>
+                ))}
+              </GroupedList>
+              {more ? (
+                <View style={styles.more}>
+                  <Spinner size={14} />
                 </View>
               ) : null}
+            </View>
+          ) : null}
 
-              <T variant="label" color="text2" style={styles.foot}>
-                {name}’s main chat is its one long conversation.{between ? ` Messages from other bots go to Between bots instead, to read only.` : ''} Side chats are scratch space and stay here until you delete them: hold one to delete it.
-              </T>
-            </>
-          )}
+          <T variant="label" color="text2" style={styles.foot}>
+            {name}’s main chat is its one long conversation.{between ? ` Messages from other bots go to Between bots instead, to read only.` : ''} Side chats are scratch space and stay here until you delete them: hold one to delete it.
+          </T>
         </ScrollView>
 
         <Sheet visible={pressed !== null} onClose={() => setPressed(null)} label="Chat options">
@@ -300,7 +317,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 8, paddingRight: 16, paddingTop: 8, paddingBottom: 10 },
   title: { flex: 1, minWidth: 0 },
   body: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 32, gap: 16 },
-  center: { alignItems: 'center', paddingTop: 80 },
+  waiting: { alignItems: 'center', paddingVertical: 24 },
+  more: { alignItems: 'center', paddingTop: 12 },
   note: { paddingHorizontal: 4 },
   row: { minHeight: 64, paddingHorizontal: 16, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
   mainRow: { minHeight: 72, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },

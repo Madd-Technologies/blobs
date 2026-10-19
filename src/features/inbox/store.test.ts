@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import type { ActiveSessionRow, ApprovalRequestPayload, DelegationStatusRow } from '../../lib/hermes/protocol.ts'
-import { createInbox } from './store.ts'
+import { approvalsFrom, createInbox } from './store.ts'
 
 function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string, ApprovalRequestPayload[]>; open?: string[]; fail?: string; helpers?: DelegationStatusRow[] } = {}) {
   const calls: { method: string; params: Record<string, unknown>; timeoutMs?: number }[] = []
@@ -19,8 +19,11 @@ function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string
         return { sessions: state.active } as T
       }
 
-      if (method === 'approval.pending') {
-        return { approvals: state.approvals[params.session_id as string] ?? [] } as T
+      if (method === 'session.events.since') {
+        // As Hermes 0.21.5 replays them: each waiting approval is an open server request, its params the approval as sent.
+        const open = (state.approvals[params.session_id as string] ?? []).map(entry => ({ id: `srq-${entry.request_id}`, method: 'approval', params: { session_id: params.session_id, ...entry } }))
+
+        return { events: [], open_requests: open } as T
       }
 
       if (method === 'approval.respond') {
@@ -43,14 +46,15 @@ const row = (id: string, status: ActiveSessionRow['status']): ActiveSessionRow =
 const approval = (id: string): ApprovalRequestPayload => ({ command: 'cmd', description: 'desc', request_id: id })
 
 describe('inbox refresh', () => {
-  it('asks approval.pending for working and waiting sessions the app has not opened', async () => {
+  it('reads the open requests of working and waiting sessions the app has not opened', async () => {
     const { inbox, calls } = setup({
       active: [row('a', 'working'), row('b', 'idle'), row('c', 'waiting'), row('d', 'working'), row('e', 'waiting')],
       open: ['d', 'e'],
       approvals: { a: [approval('r1')] },
     })
     await inbox.refresh()
-    assert.deepEqual(calls.filter(call => call.method === 'approval.pending').map(call => call.params.session_id), ['a', 'c'])
+    assert.deepEqual(calls.filter(call => call.method === 'session.events.since').map(call => call.params.session_id), ['a', 'c'])
+    assert.equal(calls.some(call => call.method === 'approval.pending'), false, 'never approval.pending: it can hold the socket for 30 s')
     assert.deepEqual(Object.keys(inbox.store.getState().polled), ['a'])
     assert.equal(inbox.store.getState().loadedAt, 42)
   })
@@ -61,10 +65,10 @@ describe('inbox refresh', () => {
     assert.deepEqual(inbox.store.getState().polled.courier?.map(entry => entry.request_id), ['r1'])
   })
 
-  it('does not hold a refresh for the 30 s approval.pending can block', async () => {
+  it('does not hold a refresh for a slow reply', async () => {
     const { inbox, calls } = setup({ active: [row('a', 'working')] })
     await inbox.refresh()
-    assert.equal(calls.find(call => call.method === 'approval.pending')?.timeoutMs, 8_000)
+    assert.equal(calls.find(call => call.method === 'session.events.since')?.timeoutMs, 5_000)
   })
 
   it('drops sessions that no longer hold an approval', async () => {
@@ -134,5 +138,21 @@ describe('helpers still running after their bot’s turn', () => {
     assert.deepEqual(inbox.store.getState().background, [])
     assert.equal(inbox.store.getState().error, null)
     assert.equal(inbox.store.getState().active.length, 1)
+  })
+})
+
+describe('approvals among a session\'s open requests', () => {
+  it('reads an approval as the server sent it, and nothing else', () => {
+    const open = [
+      { id: 'srq-1', method: 'approval', params: { session_id: 's', request_id: 'r1', command: 'docker compose pull', description: 'Pulls images', choices: ['once', 'deny'], allow_session: true, allow_permanent: false } },
+      { id: 'srq-2', method: 'clarify', params: { session_id: 's', question: 'A or B?' } },
+      { id: 'srq-3', method: 'approval', params: { session_id: 's', command: 'rm -r /tmp/x', description: '' } },
+    ]
+
+    assert.deepEqual(approvalsFrom(open), [
+      { request_id: 'r1', command: 'docker compose pull', description: 'Pulls images', choices: ['once', 'deny'], allow_session: true, allow_permanent: false },
+      { request_id: 'srq-3', command: 'rm -r /tmp/x', description: '' },
+    ])
+    assert.deepEqual(approvalsFrom(undefined), [])
   })
 })

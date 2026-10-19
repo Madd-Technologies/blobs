@@ -8,7 +8,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 
 import { JsonRpcGatewayError, type GatewayEvent } from '../../lib/hermes/gateway-client.ts'
 import { asHermesEvent, RpcCode, type HermesEvent, type ProfileRow, type SessionInfo, type SessionResumeResult } from '../../lib/hermes/protocol.ts'
-import { listSessionMessages, type StoredMessage } from '../../lib/hermes/rest.ts'
+import { listSessionMessages, listSessionsPage, type StoredMessage } from '../../lib/hermes/rest.ts'
 import { call, isRpcCode, type RpcClient, type RpcMethods } from '../../lib/hermes/rpc.ts'
 import type { RequestBridge } from '../../lib/hermes/server-requests.ts'
 import { HermesHttpError, type ServerConfig } from '../../lib/hermes/server.ts'
@@ -25,6 +25,8 @@ import { createEventQueue, realTimers, type EventQueue, type QueueTimers } from 
 
 /** Rows fetched per page; the chat opens on the newest page and pages back from there. */
 export const PAGE_SIZE = 200
+/** Side chats read at a time on the Chats screen; more are read as you scroll. */
+const CHATS_PAGE = 30
 
 export interface BotSession {
   profile: string
@@ -88,6 +90,8 @@ export interface SessionsDeps {
    */
   requests?: Pick<RequestBridge, 'answer' | 'ingest'>
   listMessages?: typeof listSessionMessages
+  /** A page of a bot's stored chats (`GET /api/sessions`); injected in tests. */
+  listSessions?: typeof listSessionsPage
   /** A picked file's bytes as base64 (the phone's file system). Needed only to send attachments. */
   readBase64?: (uri: string) => Promise<string>
   now?: () => number
@@ -341,7 +345,9 @@ export function createSessions(deps: SessionsDeps) {
   async function resume(profile: string, storedId: string): Promise<{ resume: SessionResumeResult; storedId: string }> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return { resume: await call(deps.client, 'session.resume', { session_id: storedId, profile, omit_messages: true }), storedId }
+        // `defer_history`: the server answers at once and restores the model's history in the background, as it does for
+        // Hermes Desktop, which also reads what it shows through REST pages. Without it a cold resume reads the whole chat first.
+        return { resume: await call(deps.client, 'session.resume', { session_id: storedId, profile, omit_messages: true, defer_history: true }), storedId }
       } catch (error) {
         if (isRpcCode(error, RpcCode.Settling) && attempt < 3) {
           await sleep(400 * 2 ** attempt)
@@ -379,15 +385,21 @@ export function createSessions(deps: SessionsDeps) {
 
     try {
       const found = await findStoredId(profile)
-      const { resume: resumed, storedId } = await resume(profile, found)
-      const page = await listMessages(config, storedId, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true }).catch((error: unknown) => {
-        // A chat nobody has written in yet has no stored row, so there is nothing to read: it opens empty.
-        if (error instanceof HermesHttpError && error.status === 404 && store.getState().chosen[profile] === storedId) {
-          return { session_id: storedId, messages: [] as StoredMessage[], pagination: { limit: PAGE_SIZE, offset: 0, order: 'latest', returned: 0 } }
-        }
+      const read = (id: string) =>
+        listMessages(config, id, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true }).catch((error: unknown) => {
+          // A chat nobody has written in yet has no stored row, so there is nothing to read: it opens empty.
+          if (error instanceof HermesHttpError && error.status === 404 && store.getState().chosen[profile] === id) {
+            return { session_id: id, messages: [] as StoredMessage[], pagination: { limit: PAGE_SIZE, offset: 0, order: 'latest', returned: 0 } }
+          }
 
-        throw error
-      })
+          throw error
+        })
+      // The history needs only the stored id, so it is read while the server resumes the chat instead of after it. If the
+      // resume recreated the chat under a new id, that read is dropped and the new chat is read.
+      const early = read(found)
+      early.catch(() => undefined)
+      const { resume: resumed, storedId } = await resume(profile, found)
+      const page = await (storedId === found ? early : read(storedId))
 
       // Re-key by the id the server returned: it is new if the session had been closed.
       const previous = get(profile).liveId
@@ -626,19 +638,28 @@ export function createSessions(deps: SessionsDeps) {
     })
   }
 
-  /** The bot's stored chats, newest first (routines and sub-agents are left out by the caller). */
-  async function listChats(profile: string): Promise<ChatSummary[]> {
-    const { sessions } = await call(deps.client, 'session.list', { profile, limit: 80 })
+  /** A page of the bot's stored chats, newest started first, without routines; `total` says how many there are in all. */
+  async function listChats(profile: string, offset = 0): Promise<{ chats: ChatSummary[]; total: number }> {
+    const config = deps.getConfig()
 
-    return sessions.map(summaryOf)
+    if (!config) {
+      throw new Error('Not connected to a server.')
+    }
+
+    const page = await (deps.listSessions ?? listSessionsPage)(config, { profile, limit: CHATS_PAGE, offset, excludeSources: ['cron'] })
+
+    return {
+      chats: page.sessions.map(entry => summaryOf({ ...entry, title: entry.title ?? undefined, preview: entry.preview ?? undefined, started_at: entry.started_at ?? undefined, message_count: entry.message_count ?? undefined, source: entry.source ?? undefined })),
+      total: page.total,
+    }
   }
 
   /**
    * The bot's inbox (see `INBOX_TITLE`), or null when it has none. Found by its exact title, which the server looks up
-   * outside the newest-80 window: a bot that runs routines all day would push it out of `listChats`.
+   * outside the paged list: a bot that runs routines all day would push it far down `listChats`.
    */
   async function findInbox(profile: string): Promise<ChatSummary | null> {
-    const { sessions } = await call(deps.client, 'session.list', { profile, title: INBOX_TITLE, include_hidden: true })
+    const { sessions } = await call(deps.client, 'session.list', { profile, title: INBOX_TITLE, include_hidden: true, limit: 1 })
     const entry = sessions[0]
 
     return entry ? { ...summaryOf(entry), id: entry.resolved_id || entry.id } : null
