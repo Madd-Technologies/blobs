@@ -3,12 +3,12 @@ import { describe, it } from 'node:test'
 
 import { isRoomChat, parseNeedsYou, promptOf, type PushedRequest } from './pushed.ts'
 
-const request = (partial: Partial<PushedRequest>): PushedRequest => ({ id: 'srq-1', method: 'approval', sessionId: 's', profile: 'leto', title: 'Bot Chat', createdAt: 1, params: {}, ...partial })
+const request = (partial: Partial<PushedRequest>): PushedRequest => ({ id: 'srq-1', method: 'approval', sessionId: 's', profile: 'orion', title: 'Bot Chat', createdAt: 1, params: {}, ...partial })
 
 describe('parseNeedsYou', () => {
   it('reads the plugin’s list', () => {
-    const body = { live: true, version: 2, requests: [{ id: 'srq-1', method: 'clarify', session_id: 's1', session_key: 'k', profile: 'hydra', title: 'Scratch', created_at: 7, params: { question: 'Which?' } }] }
-    assert.deepEqual(parseNeedsYou(body), [{ id: 'srq-1', method: 'clarify', sessionId: 's1', profile: 'hydra', title: 'Scratch', createdAt: 7, params: { question: 'Which?' } }])
+    const body = { live: true, version: 2, requests: [{ id: 'srq-1', method: 'clarify', session_id: 's1', session_key: 'k', profile: 'juniper', title: 'Scratch', created_at: 7, params: { question: 'Which?' } }] }
+    assert.deepEqual(parseNeedsYou(body), [{ id: 'srq-1', method: 'clarify', sessionId: 's1', profile: 'juniper', title: 'Scratch', createdAt: 7, params: { question: 'Which?' } }])
   })
 
   it('is null when the server cannot push it, so the app keeps its own check', () => {
