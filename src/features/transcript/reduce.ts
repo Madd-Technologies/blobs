@@ -678,6 +678,20 @@ export function appendUser(state: TranscriptState, text: string, now: number = D
   return withItems(state, [...settleChatter(closeStreaming(state.items), state.chatterFrom), { kind: 'user', id, text, pending: true, ts: now, ...(attachments.length ? { attachments } : {}) }], { nextId, running: true, phase: 'thinking', lastTurn: null, chatterFrom: null, routineFrom: null, wake: false })
 }
 
+/**
+ * A line the app adds to the chat for itself ("Call started 10:41"): one quiet note, never stored by the server. Only between
+ * turns: a turn's events continue its last item, so nothing may be put after it while it runs.
+ */
+export function appendNote(state: TranscriptState, text: string, now: number = Date.now()): TranscriptState {
+  if (state.running) {
+    return state
+  }
+
+  const [id, nextId] = newId(state, 'n-')
+
+  return withItems(state, [...state.items, { kind: 'note', id, text, ts: now }], { nextId })
+}
+
 /** A command is running on the server and has not answered yet: a quiet "Running…" line under its name. */
 export function startOutput(state: TranscriptState, command: string): TranscriptState {
   const [id, nextId] = newId(state, 'o-')

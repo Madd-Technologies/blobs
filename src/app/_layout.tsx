@@ -57,6 +57,8 @@ function RootStack() {
           {/* One screen per bot (and per room): opening a bot that is already open brings that screen up instead of a second copy
               sharing its session. */}
           <Stack.Screen name="bot/[profile]/index" dangerouslySingular />
+          {/* A call comes up from the bottom over its chat and goes back down to it; the call goes on in the chat's bar. */}
+          <Stack.Screen name="bot/[profile]/call" dangerouslySingular options={{ animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
           <Stack.Screen name="bot/[profile]/dashboard" />
           <Stack.Screen name="bot/[profile]/view" />
           <Stack.Screen name="bot/[profile]/record" />

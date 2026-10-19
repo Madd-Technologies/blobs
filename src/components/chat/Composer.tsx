@@ -43,6 +43,8 @@ interface Props {
   onFilesChange?: (files: PendingFile[]) => void
   /** Whose speech recognition turns a voice message into words. */
   voiceProfile?: string
+  /** The bot takes voice calls: the mic button becomes Call (a call does what a voice message did, and talks back). */
+  onCall?: () => void
   /** The commands and skills a slash opens a picker of. Leave out where there are none (rooms). */
   commands?: SlashOption[]
   /** A row inside the tray, above the field (a room's @mention chips). */
@@ -54,9 +56,10 @@ interface Props {
 /**
  * One raised tray: attach, the message field, and one right-hand button that is the next thing to do: the mic (pressed in)
  * when the field is empty, send (the white primary) when you have typed or attached something, stop (the primary) while the
- * bot works. The mic records a voice message and puts what you said in the field, where you can fix it before sending.
+ * bot works. The mic records a voice message and puts what you said in the field, where you can fix it before sending; for a
+ * bot that takes calls it is Call instead.
  */
-export function Composer({ botName, running, initialText, value, onChangeText, files, onFilesChange, voiceProfile, commands, above, onSend, onStop }: Props) {
+export function Composer({ botName, running, initialText, value, onChangeText, files, onFilesChange, voiceProfile, onCall, commands, above, onSend, onStop }: Props) {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
   // With the keyboard up it already covers the home-indicator / nav-bar area, so the inset would only leave a gap.
@@ -277,6 +280,8 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
               <IconCircle icon="arrow-up" label="Send" diameter={44} filled onPress={send} />
             ) : running ? (
               <IconCircle icon="square" label="Stop" diameter={44} filled onPress={onStop} />
+            ) : onCall ? (
+              <IconCircle icon="phone" label={`Call ${botName}`} diameter={44} onPress={onCall} />
             ) : (
               <IconCircle icon="mic" label="Voice message" diameter={44} onPress={() => void record()} />
             )}

@@ -1,0 +1,6 @@
+{
+  "name": "duplex-audio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Full-duplex call audio for voice calls with a bot: the microphone with echo cancellation and PCM playback, both at 24 kHz."
+}

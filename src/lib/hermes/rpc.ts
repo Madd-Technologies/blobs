@@ -94,7 +94,11 @@ export interface RpcMethods {
   'pdf.attach': { params: { session_id: string; content_base64: string; filename?: string }; result: AttachedPdfResult }
   /** Stages any other file in the session's workspace; `ref_text` goes into the message. */
   'file.attach': { params: { session_id: string; name?: string; data_url: string }; result: AttachedFileResult }
-  'prompt.submit': { params: { session_id: string; text: string }; result: PromptSubmitResult }
+  /**
+   * `surface: 'voice-live'` marks a turn handed over by a voice call: the server adds a note asking for a short, speakable reply,
+   * and `voice_context` (the recent spoken turns) goes to the model only. Hermes keeps the first 6000 characters of it.
+   */
+  'prompt.submit': { params: { session_id: string; text: string; surface?: 'voice-live'; voice_context?: string }; result: PromptSubmitResult }
 
   /** Slash commands and skills for the session (its profile and workspace decide which skills exist). */
   'commands.catalog': { params: { session_id?: string }; result: CommandsCatalog }

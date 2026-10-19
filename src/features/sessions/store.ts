@@ -16,7 +16,7 @@ import { historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter,
 import { routineDelivery } from '../transcript/injected.ts'
 import { withLists } from '../transcript/jobs.ts'
 import { chipOf, messageFor, refusal, uploadAttachment, type PendingFile, type Uploaded } from '../../lib/hermes/attachments.ts'
-import { answerPrompt, appendError, appendOutput, appendUser, dropPendingUser, expirePrompt, failUser, finishOutput, initialTranscript, reduceEvent, revealLastReply, startOutput } from '../transcript/reduce.ts'
+import { answerPrompt, appendError, appendNote, appendOutput, appendUser, dropPendingUser, expirePrompt, failUser, finishOutput, initialTranscript, reduceEvent, revealLastReply, startOutput } from '../transcript/reduce.ts'
 import { skillInvocation } from '../transcript/userContent.ts'
 import { dispatchOf, parseSlash, REWRITES_CHAT, stripAnsi } from '../../lib/hermes/slash.ts'
 import type { Item, TranscriptState } from '../transcript/types.ts'
@@ -747,9 +747,10 @@ export function createSessions(deps: SessionsDeps) {
    * Sends your message, with any picked files uploaded first. Returns whether it went: when it did not (a file the
    * server refused, a dropped connection), the bubble is replaced by the reason and the caller gives you your words
    * and files back. `wire` is what the server receives when it differs from the bubble (a skill: the bubble says
-   * `/work fix the leak`, the server gets the skill and your words).
+   * `/work fix the leak`, the server gets the skill and your words). `voiceContext` marks a task a voice call handed over,
+   * with the recent spoken turns for the model.
    */
-  async function send(profile: string, text: string, files: PendingFile[] = [], options: { wire?: string } = {}): Promise<boolean> {
+  async function send(profile: string, text: string, files: PendingFile[] = [], options: { wire?: string; voiceContext?: string } = {}): Promise<boolean> {
     const trimmed = text.trim()
 
     if (!trimmed && !files.length) {
@@ -792,7 +793,9 @@ export function createSessions(deps: SessionsDeps) {
           uploads.push(await uploadAttachment(deps.client, liveId, file, await (deps.readBase64 as (uri: string) => Promise<string>)(file.uri)))
         }
 
-        await call(deps.client, 'prompt.submit', { session_id: liveId, text: options.wire ?? messageFor(trimmed, uploads) })
+        const voice = options.voiceContext === undefined ? {} : { surface: 'voice-live' as const, voice_context: options.voiceContext }
+
+        await call(deps.client, 'prompt.submit', { session_id: liveId, text: options.wire ?? messageFor(trimmed, uploads), ...voice })
 
         return true
       } catch (error) {
@@ -966,6 +969,11 @@ export function createSessions(deps: SessionsDeps) {
   /** Shows text in the chat as a command's output (for answers the app gives itself, such as /help). */
   function showOutput(profile: string, command: string, text: string, groups?: { title: string; names: string[] }[]) {
     patchTranscript(profile, transcript => appendOutput(transcript, command, text, groups))
+  }
+
+  /** A quiet line the app adds for itself, between turns ("Call started 10:41"). */
+  function showNote(profile: string, text: string) {
+    patchTranscript(profile, transcript => appendNote(transcript, text))
   }
 
   async function stop(profile: string): Promise<void> {
@@ -1149,7 +1157,7 @@ export function createSessions(deps: SessionsDeps) {
     queues.clear()
   }
 
-  return { store, open, openChat, openLinked, newChat, leaveSide, forget, listChats, findInbox, deleteChat, loadOlder, send, runCommand, showOutput, stop, respondApproval, respondClarify, respondSecret, respondSudo, reattachAll, knownLiveIds, refreshJobs, dispose }
+  return { store, open, openChat, openLinked, newChat, leaveSide, forget, listChats, findInbox, deleteChat, loadOlder, send, runCommand, showOutput, showNote, stop, respondApproval, respondClarify, respondSecret, respondSudo, reattachAll, knownLiveIds, refreshJobs, dispose }
 }
 
 export type Sessions = ReturnType<typeof createSessions>

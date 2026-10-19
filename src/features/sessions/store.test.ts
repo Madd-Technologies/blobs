@@ -428,6 +428,16 @@ describe('streaming a turn', () => {
     assert.equal(bot(h)?.transcript.running, true)
   })
 
+  it('a task a voice call hands over is your bubble, sent as a voice-live turn with the recent spoken turns', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    await h.sessions.send('bot', 'Book the dentist for Thursday.', [], { voiceContext: 'You: Book the dentist.\nVoice: On it.' })
+    assert.deepEqual(h.calls.at(-1), {
+      method: 'prompt.submit',
+      params: { session_id: 'live-1', text: 'Book the dentist for Thursday.', surface: 'voice-live', voice_context: 'You: Book the dentist.\nVoice: On it.' },
+    })
+  })
+
   it('opens the chat first when it is not open yet', async () => {
     const h = harness()
     await h.sessions.send('bot', 'hello')

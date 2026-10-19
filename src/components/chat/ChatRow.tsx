@@ -3,19 +3,16 @@ import { useRouter } from 'expo-router'
 import { memo, useMemo } from 'react'
 import { StyleSheet, View } from 'react-native'
 
-import { BotFace } from '@/components/bots/BotFace'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import type { DisplayItem } from '@/features/transcript/display'
 import { useBrowserShows } from '@/stores/display'
-import { useRoster } from '@/stores/roster'
-import { sessions } from '@/stores/sessions'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 
-import { ApprovalCard, QuestionCard, SecretCard, SudoCard } from './ActionCards'
 import { ActivityLine } from './ActivityLine'
 import { AssistantBubble, TeammateBubble, UserBubble } from './Bubble'
+import { PromptCard } from './PromptCard'
 import { ReplyActions } from './ReplyActions'
 import { RowContext } from './RowContext'
 import { ServerPicture } from './ServerPicture'
@@ -66,13 +63,6 @@ export const ChatRow = memo(function ChatRow({ list, ...props }: Props) {
   )
 }, sameRow)
 
-/** The bot's face before a card's title: who is asking. */
-function CardFace({ profile }: { profile: string }) {
-  const meta = useRoster(state => state.rows.find(row => row.name === profile)?.ui_meta?.['hermes-bots'])
-
-  return <BotFace name={profile} meta={meta} size={22} />
-}
-
 const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit<Props, 'list'>) {
   const { c } = useTheme()
   const router = useRouter()
@@ -106,10 +96,10 @@ const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit
       return <TeammateBubble handle={item.handle} text={item.text} />
 
     case 'note':
-      // A routine that ran in this chat leads with a clock, as one quiet line above the bot's summary of it.
+      // A routine that ran in this chat leads with a clock, as one quiet line above the bot's summary of it; a call's start, a phone.
       return (
         <View style={styles.note}>
-          {/^(Routine “|A routine ran)/.test(item.text) ? <Feather name="clock" size={14} color={c.text2} /> : null}
+          {/^(Routine “|A routine ran)/.test(item.text) ? <Feather name="clock" size={14} color={c.text2} /> : /^Call started /.test(item.text) ? <Feather name="phone" size={14} color={c.text2} /> : null}
           <T variant="label" color="text2" numberOfLines={2} style={styles.noteText}>
             {item.text}
           </T>
@@ -173,39 +163,12 @@ const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit
       )
 
     case 'approval':
-      return (
-        <View style={styles.card}>
-          <ApprovalCard
-            lead={<CardFace profile={profile} />}
-            riseKey={item.requestId}
-            command={item.command}
-            description={item.description}
-            choices={item.choices}
-            state={item.state}
-            choice={item.choice}
-            onChoose={choice => sessions.respondApproval(profile, item.requestId, choice)}
-          />
-        </View>
-      )
-
     case 'question':
-      return (
-        <View style={styles.card}>
-          <QuestionCard lead={<CardFace profile={profile} />} riseKey={item.requestId} questions={item.questions} state={item.state} answer={item.answer} onAnswer={answers => sessions.respondClarify(profile, item.requestId, answers)} />
-        </View>
-      )
-
     case 'secret':
-      return (
-        <View style={styles.card}>
-          <SecretCard lead={<CardFace profile={profile} />} riseKey={item.requestId} prompt={item.prompt} envVar={item.envVar} botName={botName} state={item.state} onSubmit={value => sessions.respondSecret(profile, item.requestId, value)} />
-        </View>
-      )
-
     case 'sudo':
       return (
         <View style={styles.card}>
-          <SudoCard lead={<CardFace profile={profile} />} riseKey={item.requestId} botName={botName} state={item.state} onSubmit={password => sessions.respondSudo(profile, item.requestId, password)} />
+          <PromptCard item={item} profile={profile} botName={botName} />
         </View>
       )
 

@@ -61,7 +61,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Blobs uses the microphone to record voice messages you send to your bots."
+          "microphonePermission": "Blobs uses the microphone for voice messages and calls with your bots."
         }
       ],
       [
@@ -69,7 +69,7 @@
         {
           "photosPermission": "Blobs lets you pick photos to send to your bots.",
           "cameraPermission": "Blobs uses the camera to take photos you send to your bots.",
-          "microphonePermission": "Blobs uses the microphone to record voice messages you send to your bots."
+          "microphonePermission": "Blobs uses the microphone for voice messages and calls with your bots."
         }
       ],
       [

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, KeyboardAvoidingView, StyleSheet, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 
 import { TapFace } from '@/components/bots/TapFace'
+import { CallBar } from '@/components/call/CallBar'
 import { ChatHeader } from '@/components/chat/ChatHeader'
 import { ChatRow } from '@/components/chat/ChatRow'
 import { Composer } from '@/components/chat/Composer'
@@ -22,11 +23,14 @@ import { jobsLine, runningJobs } from '@/features/transcript/jobs'
 import { ageLabel } from '@/features/roster/derive'
 import type { PendingFile } from '@/lib/hermes/attachments'
 import { classify, helpGroups, helpText, type SlashAction } from '@/lib/hermes/slash'
+import { canCall } from '@/lib/duplexAudio'
 import { useNow, useNowMs } from '@/lib/useNow'
 import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useViewableRows } from '@/lib/useViewableRows'
 import { useBotView, useFaceColor } from '@/stores/bots'
+import { useCall } from '@/stores/call'
 import { useCommands } from '@/stores/commands'
+import { useConnection } from '@/stores/connection'
 import { useSpeech } from '@/stores/speech'
 import { useDrafts } from '@/stores/drafts'
 import { useOpenChat } from '@/stores/inbox'
@@ -35,6 +39,7 @@ import { useSeen } from '@/stores/seen'
 import { useOnScreen } from '@/stores/presence'
 import { sessions, useBotSession, useChosenChat } from '@/stores/sessions'
 import { toast } from '@/stores/toast'
+import { useVoice } from '@/stores/voice'
 import { BotTint } from '@/theme/ThemeProvider'
 
 /**
@@ -299,6 +304,55 @@ export default function BotChat() {
   const name = view?.name ?? profile
   // The chat is on the bot's own paper.
   const tint = useFaceColor(profile)
+
+  // Voice calls (the hermes-voice plugin): for a bot that takes them, the mic becomes Call. A call has its own screen over the
+  // chat; behind it, the chat's bar holds the call.
+  const online = useConnection(state => state.status === 'online')
+  const voice = useVoice(state => state.byBot[profile]?.voice)
+  const callHere = useCall(state => (state.profile === profile ? state.call : null))
+  const description = view?.meta?.description
+
+  useEffect(() => {
+    if (online) {
+      void useVoice.getState().load(profile)
+    }
+  }, [online, profile])
+
+  // A call belongs to its chat: leaving the chat hangs up.
+  useEffect(
+    () => () => {
+      if (useCall.getState().profile === profile) {
+        useCall.getState().hangUp()
+      }
+    },
+    [profile],
+  )
+
+  const startCall = useCallback(() => {
+    const current = useCall.getState().call
+
+    if (current && current.phase !== 'ended') {
+      toast('You’re already on a call.')
+
+      return
+    }
+
+    if (!voice?.ready) {
+      toast(voice?.account === 'key' ? `${name} has no xAI key yet: add one, or use the Grok sign-in.` : 'This server has no Grok sign-in: choose the bot’s own key.')
+      router.push({ pathname: '/bot/[profile]/voice', params: { profile } })
+
+      return
+    }
+
+    useSpeech.getState().stop()
+    useCall.getState().start(profile, { name, about: description })
+    router.push({ pathname: '/bot/[profile]/call', params: { profile } })
+  }, [voice, name, description, profile, router])
+  const openCall = useCallback(() => router.push({ pathname: '/bot/[profile]/call', params: { profile } }), [router, profile])
+  const callable = canCall() && !!voice?.enabled
+  const waiting = transcript ? pendingPrompts(transcript).length > 0 : view?.attention.state === 'needsYou'
+  // During a call the header says so, unless the chat has something more pressing to say.
+  const onCall = !!callHere && callHere.phase !== 'ended' && !waiting && !transcript?.running
   const opening = !session || session.phase === 'idle' || (session.phase === 'opening' && itemCount === 0)
   const failed = session?.phase === 'error' && itemCount === 0
 
@@ -308,8 +362,8 @@ export default function BotChat() {
         <ChatHeader
           profile={profile}
           view={view}
-          status={chatStatus(statusLine(view, session, nowS, jobsRunning ? jobNowMs : nowS * 1000), !!chosen, itemCount)}
-          waiting={transcript ? pendingPrompts(transcript).length > 0 : view?.attention.state === 'needsYou'}
+          status={chatStatus(onCall ? 'On a call' : statusLine(view, session, nowS, jobsRunning ? jobNowMs : nowS * 1000), !!chosen, itemCount)}
+          waiting={waiting}
           working={!!transcript?.running}
         />
 
@@ -370,7 +424,11 @@ export default function BotChat() {
             </View>
           )}
 
-          <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} commands={commands?.options} onSend={text => void send(text)} onStop={() => void sessions.stop(profile)} />
+          {callHere ? (
+            <CallBar profile={profile} botName={name} meta={view?.meta} call={callHere} waiting={!!transcript && pendingPrompts(transcript).length > 0} onOpen={openCall} />
+          ) : (
+            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} onSend={text => void send(text)} onStop={() => void sessions.stop(profile)} />
+          )}
         </KeyboardAvoidingView>
 
         <ConfirmSheet

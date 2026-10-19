@@ -6,6 +6,7 @@ import type { PluginCheck } from '@/features/plugins/view'
 import { getDashboardStatus } from '@/lib/hermes/dashboard'
 import { getDriveStatus, getPaperlessStatus } from '@/lib/hermes/plugins'
 import { pushStatusFrom, type PushStatus } from '@/lib/hermes/push-api'
+import { getVoiceStatus } from '@/lib/hermes/voice'
 import type { ServerConfig } from '@/lib/hermes/server'
 import { useConnection } from '@/stores/connection'
 
@@ -117,6 +118,15 @@ export const SERVER_PLUGINS: ServerPlugin[] = [
         needsSetup: false,
       }
     },
+  },
+  {
+    name: 'hermes-voice',
+    title: 'Voice',
+    about: 'Optional. Grok voice calls with your bots: you talk, and the bot does the real work in its chat.',
+    version: RELEASES['hermes-voice'],
+    setup: installMessage(['hermes-voice']),
+    optional: true,
+    probe: async config => (await getVoiceStatus(config)) ? { detail: 'Ready for calls. Each bot’s Voice settings choose its voice and which xAI account pays.', needsSetup: false } : null,
   },
 ]
 
