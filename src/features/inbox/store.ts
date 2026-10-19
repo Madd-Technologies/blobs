@@ -1,7 +1,8 @@
 /**
- * Polls what is going on across all bots: `session.active_list` for status, the open requests of sessions
- * that are working or waiting but not open in the app (their approval prompts were never sent to this
- * connection), and `delegation.status` for helpers still running after their bot's turn.
+ * What is going on across all bots: `session.active_list` for status and `delegation.status` for helpers still running
+ * after their bot's turn, polled; and what waits on the person, pushed by the server (hermes-bot-mobile 0.1.6+, see
+ * `pushed.ts`). On a server that does not push it, the open requests of sessions that are working or waiting but not
+ * open in the app (their prompts were never sent to this connection) are polled instead.
  * Framework-free with injected dependencies; the app wires the real one.
  */
 
@@ -9,6 +10,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 
 import type { ActiveSessionRow, ApprovalChoice, ApprovalRequestPayload, DelegationStatusRow } from '../../lib/hermes/protocol.ts'
 import { call, type RpcClient } from '../../lib/hermes/rpc.ts'
+import { parseNeedsYou, type PushedRequest } from './pushed.ts'
 
 export interface InboxState {
   active: ActiveSessionRow[]
@@ -16,6 +18,8 @@ export interface InboxState {
   polled: Record<string, ApprovalRequestPayload[]>
   /** Every helper running on the server (`delegation.status`), each with the chat whose bot sent it off. */
   background: DelegationStatusRow[]
+  /** What the server pushes as waiting on you, or null when it does not push it. Sensitive: memory only. */
+  pushed: PushedRequest[] | null
   loadedAt: number | null
   error: string | null
 }
@@ -26,6 +30,8 @@ export interface InboxDeps {
   openLiveIds: () => ReadonlySet<string>
   /** The server lists running helpers (Hermes 0.21.5+). Absent or false, none are asked for. */
   liveHelpers?: () => boolean
+  /** Reads `GET …/hermes-bot-mobile/needs-you`; null when the server has no such route. Absent, nothing is pushed. */
+  readNeedsYou?: () => Promise<unknown>
   now?: () => number
 }
 
@@ -65,7 +71,7 @@ export function approvalsFrom(open: unknown): ApprovalRequestPayload[] {
 
 export function createInbox(deps: InboxDeps) {
   const now = deps.now ?? Date.now
-  const store: StoreApi<InboxState> = createStore<InboxState>(() => ({ active: [], polled: {}, background: [], loadedAt: null, error: null }))
+  const store: StoreApi<InboxState> = createStore<InboxState>(() => ({ active: [], polled: {}, background: [], pushed: null, loadedAt: null, error: null }))
   let refreshing: Promise<void> | null = null
 
   async function doRefresh() {
@@ -77,8 +83,9 @@ export function createInbox(deps: InboxDeps) {
       ])
       const open = deps.openLiveIds()
       // A session holding an approval reads `working` on older servers and `waiting` on 0.21.6, so ask both. A `waiting`
-      // session that is asking a question, a sudo or a secret answers with an empty list.
-      const candidates = sessions.filter(row => (row.status === 'working' || row.status === 'waiting') && !open.has(row.id))
+      // session that is asking a question, a sudo or a secret answers with an empty list. A server that pushes what waits
+      // on you is never asked.
+      const candidates = store.getState().pushed ? [] : sessions.filter(row => (row.status === 'working' || row.status === 'waiting') && !open.has(row.id))
 
       // Each session's open requests, not `approval.pending`: that runs on the socket's own reader (not the server's worker
       // pool) and waits up to 30 s for a cold agent to build, holding every later request on the connection behind it.
@@ -106,6 +113,43 @@ export function createInbox(deps: InboxDeps) {
     }
   }
 
+  /**
+   * Reads what waits on you from the server, when it connects or comes back to the front (pushed events are not replayed
+   * after a reconnect). A server without the route, or one that cannot push, leaves the app on its own check.
+   */
+  async function loadPushed(): Promise<void> {
+    if (!deps.readNeedsYou) {
+      return
+    }
+
+    try {
+      const pushed = parseNeedsYou(await deps.readNeedsYou())
+      const before = store.getState().pushed
+      store.setState({ pushed })
+
+      if (before && !pushed) {
+        // The server stopped pushing (the plugin was removed or disabled): check the busy chats again at once.
+        void refresh()
+      }
+    } catch {
+      // A failed read keeps the last list: the next event or connection brings a fresh one.
+    }
+  }
+
+  /** The server's `plugin.hermes-bot-mobile.needs_you.changed`: the whole list, as it is now. */
+  function applyPushed(payload: unknown) {
+    const pushed = parseNeedsYou(payload)
+
+    if (pushed) {
+      store.setState({ pushed })
+    }
+  }
+
+  /** Takes an answered prompt off the pushed list at once, before the server's next push confirms it. */
+  function dropPushed(frameId: string) {
+    store.setState(state => (state.pushed ? { pushed: state.pushed.filter(request => request.id !== frameId) } : state))
+  }
+
   /** Refreshes now; concurrent calls share one run. */
   function refresh(): Promise<void> {
     refreshing ??= doRefresh().finally(() => {
@@ -129,13 +173,13 @@ export function createInbox(deps: InboxDeps) {
         delete polled[liveId]
       }
 
-      return { polled }
+      return { polled, pushed: state.pushed?.filter(row => row.sessionId !== liveId || row.method !== 'approval' || row.params.request_id !== requestId) ?? null }
     })
 
     return resolved > 0
   }
 
-  return { store, refresh, respondApproval }
+  return { store, refresh, respondApproval, loadPushed, applyPushed, dropPushed }
 }
 
 export type Inbox = ReturnType<typeof createInbox>
