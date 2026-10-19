@@ -184,7 +184,7 @@ describe('handing work to the bot', () => {
     const h = harness()
 
     await live(h)
-    for (const transcript of ['Hi, please Escal', 'Hi, please ask Orion the time', 'Hi, please ask Orion the time in Tokyo.']) {
+    for (const transcript of ['Hi, please ask Or', 'Hi, please ask Orion the time', 'Hi, please ask Orion the time in Tokyo.']) {
       h.socket().emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'item-1', transcript })
     }
     h.socket().emit({ type: 'response.function_call_arguments.done', name: 'hermes_task', call_id: 'call-1', arguments: '{"request":"What time is it in Tokyo?"}' })
