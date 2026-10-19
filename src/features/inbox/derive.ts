@@ -1,6 +1,6 @@
 /**
  * The "Needs you" list and each bot's attention state. Prompts in chats the app has open come from those chats. The rest
- * come from what the server pushes (hermes-bot-mobile 0.1.6+), or on a server without it from approvals polled for
+ * come from what the server pushes (hermes-bot-mobile 0.1.7+), or on a server without it from approvals polled for
  * sessions the app has not opened and the server's own `waiting` status. Pure.
  */
 

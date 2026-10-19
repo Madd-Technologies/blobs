@@ -33,7 +33,7 @@ export const inbox = createInbox({
     try {
       return await restJson(config, NEEDS_YOU_PATH, {}, { timeoutMs: 8_000 })
     } catch (error) {
-      // No hermes-bot-mobile, or one older than 0.1.6: the app keeps its own check.
+      // No hermes-bot-mobile, or one older than 0.1.7: the app keeps its own check.
       if (error instanceof HermesHttpError && error.status === 404) {
         return null
       }

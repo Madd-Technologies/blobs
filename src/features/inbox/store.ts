@@ -1,6 +1,6 @@
 /**
  * What is going on across all bots: `session.active_list` for status and `delegation.status` for helpers still running
- * after their bot's turn, polled; and what waits on the person, pushed by the server (hermes-bot-mobile 0.1.6+, see
+ * after their bot's turn, polled; and what waits on the person, pushed by the server (hermes-bot-mobile 0.1.7+, see
  * `pushed.ts`). On a server that does not push it, the open requests of sessions that are working or waiting but not
  * open in the app (their prompts were never sent to this connection) are polled instead.
  * Framework-free with injected dependencies; the app wires the real one.

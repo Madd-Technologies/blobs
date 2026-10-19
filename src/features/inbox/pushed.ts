@@ -1,5 +1,5 @@
 /**
- * Needs you as the server pushes it (hermes-bot-mobile 0.1.6+): every prompt waiting on the person across the bots the
+ * Needs you as the server pushes it (hermes-bot-mobile 0.1.7+): every prompt waiting on the person across the bots the
  * dashboard serves, sent over `/api/ws` as `plugin.hermes-bot-mobile.needs_you.changed` whenever it changes, and read
  * from `GET /api/plugins/hermes-bot-mobile/needs-you` when the app connects. With it the app no longer asks every busy
  * chat what it is waiting on. Pure.
