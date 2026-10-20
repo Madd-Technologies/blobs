@@ -97,7 +97,7 @@ describe('clock and numbers', () => {
   it('writes US numbers as people do and leaves others alone', () => {
     assert.equal(formatNumber('+12025550141'), '(202) 555-0141')
     assert.equal(formatNumber('2025550141'), '(202) 555-0141')
-    assert.equal(formatNumber('+442071234567'), '+442071234567')
+    assert.equal(formatNumber('+442079460123'), '+442079460123')
   })
 })
 
