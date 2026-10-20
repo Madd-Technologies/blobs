@@ -5,7 +5,7 @@ import { useShallow } from 'zustand/react/shallow'
 
 import { matchActiveToBots, type Attention } from '@/features/attention/derive'
 import { attentionFor, deriveInbox, type InboxEntry } from '@/features/inbox/derive'
-import { NEEDS_YOU_EVENT, NEEDS_YOU_PATH } from '@/features/inbox/pushed'
+import { KANBAN_APPROVALS_PATH, NEEDS_YOU_EVENT, NEEDS_YOU_PATH } from '@/features/inbox/pushed'
 import { visibleState } from '@/features/roster/visible'
 import { createInbox } from '@/features/inbox/store'
 import { supportsLiveHelpers } from '@/lib/hermes/capabilities'
@@ -36,6 +36,26 @@ export const inbox = createInbox({
       // No hermes-bot-mobile, or one older than 0.1.7: the app keeps its own check.
       if (error instanceof HermesHttpError && error.status === 404) {
         return null
+      }
+
+      throw error
+    }
+  },
+  answerKanban: async (id, choice) => {
+    const config = useConnection.getState().config
+
+    if (!config) {
+      throw new Error('Not connected')
+    }
+
+    try {
+      await restJson(config, `${KANBAN_APPROVALS_PATH}/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify({ choice }) }, { timeoutMs: 10_000 })
+
+      return 'answered'
+    } catch (error) {
+      // No longer waiting (timed out, its worker stopped) or answered already, from here or another phone.
+      if (error instanceof HermesHttpError && (error.status === 404 || error.status === 409)) {
+        return 'expired'
       }
 
       throw error
@@ -75,7 +95,7 @@ export function startInboxSync(): () => void {
   const stopConnection = useConnection.subscribe((state, previous) => {
     if (!state.config && previous.config) {
       // Signed out: nothing of that server's is kept.
-      inbox.store.setState({ pushed: null, polled: {} })
+      inbox.store.setState({ pushed: null, polled: {}, kanban: [] })
     } else if (state.status === 'online' && previous.status !== 'online') {
       void inbox.loadPushed()
     }
@@ -102,14 +122,14 @@ export function startInboxSync(): () => void {
 export function useInbox() {
   const roster = useRoster(state => state.rows)
   const bots = useStore(sessions.store, state => state.bots)
-  const { active, polled, pushed } = useStore(inbox.store, useShallow(state => ({ active: state.active, polled: state.polled, pushed: state.pushed })))
+  const { active, polled, pushed, kanban } = useStore(inbox.store, useShallow(state => ({ active: state.active, polled: state.polled, pushed: state.pushed, kanban: state.kanban })))
 
   return useMemo(() => {
     const knownLiveIds = sessions.knownLiveIds()
-    const derived = deriveInbox({ roster, sessions: bots, active, polled, pushed, knownLiveIds })
+    const derived = deriveInbox({ roster, sessions: bots, active, polled, pushed, kanban, knownLiveIds })
 
     return { ...derived, activeByBot: matchActiveToBots(roster, active, knownLiveIds) }
-  }, [roster, bots, active, polled, pushed])
+  }, [roster, bots, active, polled, pushed, kanban])
 }
 
 /** How many things are waiting on the user. */

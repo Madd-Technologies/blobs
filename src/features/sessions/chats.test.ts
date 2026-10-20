@@ -44,9 +44,14 @@ describe('chat list', () => {
     )
   })
 
-  it('leaves out routines, and the main chat if the server lists it too', () => {
+  it('leaves out routines, kanban workers, and the main chat if the server lists it too', () => {
     const entries = buildChatEntries({
-      listed: [chat('cron-run', 50, { source: 'cron', title: 'Nightly' }), chat('bot-chat', 40, { title: 'Bot Chat' }), chat('keep', 5, { title: 'Keep' })],
+      listed: [
+        chat('cron-run', 50, { source: 'cron', title: 'Nightly' }),
+        chat('kanban-run', 45, { source: 'kanban', title: 'Clear the build cache' }),
+        chat('bot-chat', 40, { title: 'Bot Chat' }),
+        chat('keep', 5, { title: 'Keep' }),
+      ],
       main: { id: 'tip', resolvedId: 'bot-chat' },
       openId: 'tip',
       elsewhere: false,

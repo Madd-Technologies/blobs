@@ -1061,11 +1061,11 @@ describe('choosing a chat', () => {
   })
 
   describe('the history', () => {
-    it('lists the bot’s stored chats a page at a time, without routines', async () => {
+    it('lists the bot’s stored chats a page at a time, without routines or kanban workers', async () => {
       const h = withChats()
       h.setChats(({ offset }) => ({ sessions: offset ? [] : [{ id: 'stored-2', title: 'Deploy', preview: 'Deploying', started_at: 20, message_count: 6, source: 'tui' }], total: 31 }))
       const first = await h.sessions.listChats('bot')
-      assert.deepEqual(h.chatQueries[0], { offset: 0, limit: 30, excludeSources: ['cron'] })
+      assert.deepEqual(h.chatQueries[0], { offset: 0, limit: 30, excludeSources: ['cron', 'kanban', 'tool', 'oneshot'] })
       assert.deepEqual(first, { chats: [{ id: 'stored-2', title: 'Deploy', preview: 'Deploying', startedAt: 20, messageCount: 6, source: 'tui' }], total: 31, next: 30 })
       await h.sessions.listChats('bot', 30)
       assert.equal(h.chatQueries[1]?.offset, 30)

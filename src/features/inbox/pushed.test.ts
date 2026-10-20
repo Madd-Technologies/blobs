@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { isRoomChat, parseNeedsYou, promptOf, type PushedRequest } from './pushed.ts'
+import { isRoomChat, kanbanAbout, kanbanForChat, parseKanban, parseNeedsYou, promptOf, type KanbanApproval, type PushedRequest } from './pushed.ts'
 
 const request = (partial: Partial<PushedRequest>): PushedRequest => ({ id: 'srq-1', method: 'approval', sessionId: 's', profile: 'orion', title: 'Bot Chat', createdAt: 1, params: {}, ...partial })
 
@@ -48,5 +48,36 @@ describe('promptOf', () => {
   it('knows a group room member’s chat', () => {
     assert.equal(isRoomChat(request({ title: 'Group: r-1' })), true)
     assert.equal(isRoomChat(request({ title: 'Group chat ideas' })), false)
+  })
+})
+
+const kanbanRow = { id: 'k1', profile: 'orion', chat: '20261020_101500_0dc184', task: { id: 't_1', title: 'Clear the build cache', board: 'default', created_by: 'orion' }, command: 'rm -r build', description: 'recursive delete', allow_session: true, allow_permanent: false, created_at: 9 }
+
+describe('kanban workers’ approvals', () => {
+  it('reads them from the list, with choices from the allow flags', () => {
+    assert.deepEqual(parseKanban({ live: true, version: 1, requests: [], kanban: [kanbanRow, { id: '', profile: 'x' }, 'junk'] }), [
+      { id: 'k1', profile: 'orion', chat: '20261020_101500_0dc184', task: { id: 't_1', title: 'Clear the build cache', board: 'default', createdBy: 'orion' }, command: 'rm -r build', description: 'recursive delete', choices: ['once', 'session', 'deny'], createdAt: 9 },
+    ])
+    assert.deepEqual(parseKanban({ live: true, version: 1, requests: [] }), [], 'none from an older plugin')
+  })
+
+  it('shows each in the chat the card came from, or the bot’s main chat', () => {
+    const [own] = parseKanban({ kanban: [kanbanRow] }) as [KanbanApproval]
+    const main = { ...own, id: 'k2', chat: '' }
+    const list = [own, main, { ...own, id: 'k3', profile: 'juniper' }]
+
+    assert.deepEqual(kanbanForChat(list, 'orion', ['20261020_101500_0dc184'], false).map(a => a.id), ['k1'])
+    assert.deepEqual(kanbanForChat(list, 'orion', ['20261019_090000_aa11bb', 'canon'], true).map(a => a.id), ['k2'])
+    assert.deepEqual(kanbanForChat(list, 'orion', ['20261019_090000_aa11bb'], false), [], 'a side chat shows neither')
+  })
+
+  it('says which card it is for, and who asked when another bot did', () => {
+    const [own] = parseKanban({ kanban: [kanbanRow] }) as [KanbanApproval]
+    const names: Record<string, string> = { juniper: 'Juniper', orion: 'Orion' }
+    const nameOf = (profile: string) => names[profile] ?? null
+
+    assert.equal(kanbanAbout(own, nameOf), 'For the task “Clear the build cache”.')
+    assert.equal(kanbanAbout({ ...own, task: { ...own.task, createdBy: 'juniper' } }, nameOf), 'For the task “Clear the build cache”, which Juniper asked for.')
+    assert.equal(kanbanAbout({ ...own, task: { ...own.task, createdBy: 'dashboard', title: '' } }, nameOf), 'For a kanban task.')
   })
 })

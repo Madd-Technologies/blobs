@@ -19,6 +19,10 @@ function openIn(entry: InboxEntry): boolean {
 }
 
 export async function answerApproval(entry: InboxEntry, choice: ApprovalChoice): Promise<RespondResult> {
+  if (entry.kanban) {
+    return answerKanban(entry.kanban.id, choice)
+  }
+
   if (!entry.requestId) {
     return 'failed'
   }
@@ -36,6 +40,15 @@ export async function answerApproval(entry: InboxEntry, choice: ApprovalChoice):
     void inbox.refresh()
 
     return resolved ? 'answered' : 'expired'
+  } catch {
+    return 'failed'
+  }
+}
+
+/** A kanban worker's approval, from Needs you or the chat it shows in. */
+export async function answerKanban(id: string, choice: ApprovalChoice): Promise<RespondResult> {
+  try {
+    return await inbox.answerKanban(id, choice)
   } catch {
     return 'failed'
   }

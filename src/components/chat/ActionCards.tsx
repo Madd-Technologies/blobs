@@ -118,13 +118,15 @@ interface ApprovalProps extends CardProps {
   command: string
   /** Why it was flagged, from the server. */
   description?: string
+  /** What it is for, when that isn't the chat's own turn (a kanban card). */
+  about?: string
   choices: ApprovalChoice[]
   state: PromptState
   choice?: ApprovalChoice
   onChoose: Responder<ApprovalChoice>
 }
 
-export function ApprovalCard({ command, description, choices, state, choice, framed = true, size = 'card', lead, riseKey, onChoose }: ApprovalProps) {
+export function ApprovalCard({ command, description, about, choices, state, choice, framed = true, size = 'card', lead, riseKey, onChoose }: ApprovalProps) {
   const { c, block } = useFills()
   const [busy, setBusy] = useState(false)
   const [more, setMore] = useState(false)
@@ -153,6 +155,11 @@ export function ApprovalCard({ command, description, choices, state, choice, fra
 
   return (
     <Frame framed={framed} size={size} lead={lead} riseKey={riseKey} title="Run this command?">
+      {about ? (
+        <T variant="secondary" color="text2">
+          {about}
+        </T>
+      ) : null}
       <View style={[styles.block, { backgroundColor: block }]}>
         <T variant="mono" selectable>
           {command}

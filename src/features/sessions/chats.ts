@@ -60,13 +60,20 @@ function firstLine(text: string): string {
   return (text.split('\n').find(line => line.trim()) ?? '').replace(/[`*]/g, '').replace(/^[#>\s]+/, '').trim()
 }
 
+/**
+ * Sessions that are not chats you had: routine runs, kanban workers, tool and one-shot runs. Hermes's own `session.list`
+ * leaves out the last three; the REST list the app pages through does not, so the app asks it to (`exclude_sources`) and
+ * drops them here as well. A kanban worker's session can't be opened as a chat anyway: Hermes refuses to resume one.
+ */
+export const NOT_CHATS: readonly string[] = ['cron', 'kanban', 'tool', 'oneshot']
+
 export function buildChatEntries({ listed, main, inbox, openId, elsewhere }: ChatListInput): ChatEntry[] {
   const mainIds = new Set([main.id, main.resolvedId].filter((id): id is string => !!id))
 
   const others = listed
-    // Routines have their own place (and resuming one would disturb it); sub-agents are never listed by the server. The
-    // inbox has its own row, and is never a side chat, also before it has been found by its title.
-    .filter(chat => chat.source !== 'cron' && !mainIds.has(chat.id) && chat.id !== inbox?.id && !isInboxTitle(chat.title))
+    // Routines have their own place (and resuming one would disturb it), kanban workers theirs on the board; sub-agents are
+    // never listed by the server. The inbox has its own row, and is never a side chat, also before it has been found by its title.
+    .filter(chat => !NOT_CHATS.includes(chat.source) && !mainIds.has(chat.id) && chat.id !== inbox?.id && !isInboxTitle(chat.title))
     .sort((a, b) => b.startedAt - a.startedAt)
     .map<ChatEntry>(chat => ({
       id: chat.id,

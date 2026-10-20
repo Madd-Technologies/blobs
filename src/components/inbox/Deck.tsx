@@ -16,6 +16,7 @@ import { T } from '@/components/ui/T'
 import { botLastActive } from '@/features/attention/derive'
 import { formatTyped, recordDrafts, recordHeading } from '@/features/dashboard/view'
 import type { DeckCard } from '@/features/inbox/deck'
+import { kanbanAbout } from '@/features/inbox/pushed'
 import type { BotView } from '@/features/roster/view'
 import { ageLabel } from '@/features/roster/derive'
 import { haptic } from '@/lib/haptics'
@@ -172,7 +173,18 @@ function CardBody({ card, context }: { card: DeckCard; context: DeckContext }) {
 
   switch (entry.kind) {
     case 'approval':
-      return <ApprovalCard framed={false} size="deck" command={entry.command ?? ''} description={entry.summary} choices={entry.choices ?? ['once', 'deny']} state="pending" onChoose={choice => answerApproval(entry, choice)} />
+      return (
+        <ApprovalCard
+          framed={false}
+          size="deck"
+          command={entry.command ?? ''}
+          description={entry.summary}
+          about={entry.kanban ? kanbanAbout(entry.kanban, profile => context.views.find(view => view.profile === profile)?.name ?? null) : undefined}
+          choices={entry.choices ?? ['once', 'deny']}
+          state="pending"
+          onChoose={choice => answerApproval(entry, choice)}
+        />
+      )
     case 'question':
       return <QuestionCard framed={false} size="deck" questions={entry.questions ?? []} state="pending" onAnswer={answers => answerQuestion(entry, answers)} />
     case 'secret':

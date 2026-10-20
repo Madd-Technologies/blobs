@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { ActiveSessionRow, ApprovalRequestPayload, DelegationStatusRow } from '../../lib/hermes/protocol.ts'
+import type { ActiveSessionRow, ApprovalChoice, ApprovalRequestPayload, DelegationStatusRow } from '../../lib/hermes/protocol.ts'
 import { approvalsFrom, createInbox } from './store.ts'
 
-function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string, ApprovalRequestPayload[]>; open?: string[]; fail?: string; helpers?: DelegationStatusRow[]; needsYou?: () => Promise<unknown> } = {}) {
+function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string, ApprovalRequestPayload[]>; open?: string[]; fail?: string; helpers?: DelegationStatusRow[]; needsYou?: () => Promise<unknown>; answerKanban?: (id: string, choice: ApprovalChoice) => Promise<'answered' | 'expired'> } = {}) {
   const calls: { method: string; params: Record<string, unknown>; timeoutMs?: number }[] = []
   const state = { active: options.active ?? [], approvals: options.approvals ?? {} }
   const client = {
@@ -37,7 +37,7 @@ function setup(options: { active?: ActiveSessionRow[]; approvals?: Record<string
       throw new Error(`unscripted ${method}`)
     },
   }
-  const inbox = createInbox({ client, openLiveIds: () => new Set(options.open ?? []), liveHelpers: () => options.helpers !== undefined, readNeedsYou: options.needsYou, now: () => 42 })
+  const inbox = createInbox({ client, openLiveIds: () => new Set(options.open ?? []), liveHelpers: () => options.helpers !== undefined, readNeedsYou: options.needsYou, answerKanban: options.answerKanban, now: () => 42 })
 
   return { inbox, calls, state }
 }
@@ -216,5 +216,42 @@ describe('what the server pushes', () => {
     assert.deepEqual(inbox.store.getState().pushed?.map(request => request.id), ['srq-1'])
     assert.equal(await inbox.respondApproval('a', 'r1', 'once'), true)
     assert.deepEqual(inbox.store.getState().pushed, [])
+  })
+})
+
+describe('kanban workers’ approvals', () => {
+  const kanbanRow = { id: 'k1', profile: 'scout', chat: '', task: { id: 't_1', title: 'Clear the build cache' }, command: 'rm -r build', description: 'recursive delete' }
+
+  it('come with the pushed list, and go when the list says so', async () => {
+    const { inbox } = setup({ needsYou: async () => ({ ...pushedBody([]), kanban: [kanbanRow] }) })
+    await inbox.loadPushed()
+    assert.deepEqual(inbox.store.getState().kanban.map(approval => approval.id), ['k1'])
+    inbox.applyPushed(pushedBody([]))
+    assert.deepEqual(inbox.store.getState().kanban, [])
+  })
+
+  it('an answer goes to the plugin and the approval leaves the list; a failed one stays', async () => {
+    const sent: [string, ApprovalChoice][] = []
+    let fail = true
+    const { inbox } = setup({
+      needsYou: async () => ({ ...pushedBody([]), kanban: [kanbanRow, { ...kanbanRow, id: 'k2' }] }),
+      answerKanban: async (id, choice) => {
+        if (fail) {
+          throw new Error('offline')
+        }
+
+        sent.push([id, choice])
+
+        return id === 'k2' ? 'expired' : 'answered'
+      },
+    })
+    await inbox.loadPushed()
+    await assert.rejects(inbox.answerKanban('k1', 'once'))
+    assert.equal(inbox.store.getState().kanban.length, 2)
+    fail = false
+    assert.equal(await inbox.answerKanban('k1', 'once'), 'answered')
+    assert.equal(await inbox.answerKanban('k2', 'deny'), 'expired')
+    assert.deepEqual(sent, [['k1', 'once'], ['k2', 'deny']])
+    assert.deepEqual(inbox.store.getState().kanban, [])
   })
 })

@@ -6,6 +6,7 @@ import { TapFace } from '@/components/bots/TapFace'
 import { CallBar } from '@/components/call/CallBar'
 import { ChatHeader } from '@/components/chat/ChatHeader'
 import { ChatRow } from '@/components/chat/ChatRow'
+import { KanbanCards } from '@/components/chat/KanbanCards'
 import { CallTrayRow, ErrandBlock } from '@/components/phone/ErrandBlock'
 import { Composer } from '@/components/chat/Composer'
 import { ConfirmSheet } from '@/components/ui/ConfirmSheet'
@@ -310,6 +311,8 @@ export default function BotChat() {
     [allErrands, profile, chosen, session?.storedId, canonical?.id, canonical?.resolved_id],
   )
   const calling = callingErrand(errands)
+  // Approvals the bot's kanban workers wait on, in the chat the card came from (else the main chat), at the newest end.
+  const kanban = <KanbanCards profile={profile} ids={chosen ? [session?.storedId, chosen] : [session?.storedId, canonical?.id, canonical?.resolved_id]} isMain={!chosen} />
 
   // Newest first, for the inverted list.
   const data = useMemo<ChatEntry[]>(
@@ -405,6 +408,7 @@ export default function BotChat() {
                   {view.row.description}
                 </T>
               ) : null}
+              {kanban}
             </View>
           ) : (
             <View style={styles.fill}>
@@ -423,6 +427,8 @@ export default function BotChat() {
                 onEndReachedThreshold={0.5}
                 onEndReached={() => void sessions.loadOlder(profile)}
                 ListFooterComponent={session?.loadingOlder ? <Spinner size={14} /> : null}
+                // The newest end of an inverted list.
+                ListHeaderComponent={kanban}
                 onScroll={onScroll}
                 onScrollBeginDrag={stick.onScrollBeginDrag}
                 onScrollEndDrag={stick.onScrollEndDrag}
