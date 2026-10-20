@@ -6,7 +6,7 @@ import { matchActiveToBots } from '../attention/derive.ts'
 import { blankSession, type BotSession } from '../sessions/store.ts'
 import { appendUser, initialTranscript, reduceEvent } from '../transcript/reduce.ts'
 import { attentionFor, deriveInbox, type InboxEntry } from './derive.ts'
-import type { PushedRequest } from './pushed.ts'
+import type { KanbanApproval, PushedRequest } from './pushed.ts'
 
 const NOW = 2_000_000
 
@@ -177,5 +177,18 @@ describe('attentionFor', () => {
   it('working, then idle', () => {
     assert.equal(run('forge', { active: [active({ session_key: 'stored-forge', status: 'working' })] }).state, 'working')
     assert.equal(run('forge').state, 'idle')
+  })
+})
+
+describe('kanban workers’ approvals', () => {
+  const kanban = (id: string, profile: string): KanbanApproval => ({ id, profile, chat: '', task: { id: 't_1', title: 'Clear the build cache', board: 'default', createdBy: 'scout' }, command: 'rm -r build', description: 'recursive delete', choices: ['once', 'deny'], createdAt: 1 })
+
+  it('are the working bot’s, answerable from Needs you', () => {
+    const { entries, byBot } = deriveInbox(input({ pushed: [], kanban: [kanban('k1', 'forge'), kanban('k2', 'nobody')] }))
+    assert.deepEqual(
+      entries.map(entry => [entry.key, entry.kind, entry.requestId, entry.summary, entry.inline, entry.kanban?.id]),
+      [['forge:kanban:k1', 'approval', 'k1', 'recursive delete', true, 'k1']],
+    )
+    assert.equal(byBot.get('forge')?.length, 1)
   })
 })

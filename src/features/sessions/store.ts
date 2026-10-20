@@ -20,7 +20,7 @@ import { answerPrompt, appendError, appendNote, appendOutput, appendUser, dropPe
 import { skillInvocation } from '../transcript/userContent.ts'
 import { dispatchOf, parseSlash, REWRITES_CHAT, stripAnsi } from '../../lib/hermes/slash.ts'
 import type { Item, TranscriptState } from '../transcript/types.ts'
-import { INBOX_TITLE } from './chats.ts'
+import { INBOX_TITLE, NOT_CHATS } from './chats.ts'
 import { createEventQueue, realTimers, type EventQueue, type QueueTimers } from './queue.ts'
 
 /** Rows fetched per page; the chat opens on the newest page and pages back from there. */
@@ -639,7 +639,7 @@ export function createSessions(deps: SessionsDeps) {
   }
 
   /**
-   * A page of the bot's stored chats, newest started first, without routines. `total` is how many there are in all and
+   * A page of the bot's stored chats, newest started first, without routines or kanban workers. `total` is how many there are in all and
    * `next` the offset of the page after this one.
    */
   async function listChats(profile: string, offset = 0): Promise<{ chats: ChatSummary[]; total: number; next: number }> {
@@ -649,7 +649,7 @@ export function createSessions(deps: SessionsDeps) {
       throw new Error('Not connected to a server.')
     }
 
-    const page = await (deps.listSessions ?? listSessionsPage)(config, { profile, limit: CHATS_PAGE, offset, excludeSources: ['cron'] })
+    const page = await (deps.listSessions ?? listSessionsPage)(config, { profile, limit: CHATS_PAGE, offset, excludeSources: [...NOT_CHATS] })
 
     return {
       // The server adds every pinned chat the page missed after the page itself (Hermes 0.21.5 list_sessions_rich
