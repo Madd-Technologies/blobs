@@ -104,7 +104,7 @@ export function installMessage(names: readonly PluginName[], commit: string = PL
   }
 
   if (chosen.includes('hermes-phone')) {
-    steps.push('Phone check, without showing any secret: are TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER set in ~/.hermes/.env (yes or no for each)? Does ~/.hermes/auth.json have an xai-oauth entry with tokens, under providers or credential_pool (yes/no)? What does `systemctl --user is-active hermes-phone.service` say? Never ask me to paste a Twilio key into this chat: I add them to ~/.hermes/.env myself. If the call service is not set up yet, show me the Install steps for the call service and the public address from ~/.hermes/plugins/hermes-phone/README.md, and set nothing up until I say so.')
+    steps.push('Phone check, without showing any secret: are HERMES_PHONE_TWILIO_ACCOUNT_SID, HERMES_PHONE_TWILIO_AUTH_TOKEN and HERMES_PHONE_TWILIO_PHONE_NUMBER set in ~/.hermes/.env (yes or no for each)? Is the plain TWILIO_ACCOUNT_SID set there too (yes/no: Hermes’s own SMS channel turns on from that one, so tell me if it is)? Does ~/.hermes/auth.json have an xai-oauth entry with tokens, under providers or credential_pool (yes/no)? What does `systemctl --user is-active hermes-phone.service` say? Never ask me to paste a Twilio key into this chat: I add them myself, in the app (the default bot’s Details, Keys) or in ~/.hermes/.env. If the call service is not set up yet, show me the Install steps for the call service and the public address from ~/.hermes/plugins/hermes-phone/README.md, and set nothing up until I say so.')
   }
 
   steps.push(

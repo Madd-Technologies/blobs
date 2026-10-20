@@ -521,7 +521,10 @@ export function hoursLabel(hours: PhoneSettings['hours']): string {
 /** Settings → Server plugins' line for hermes-phone: what is still to set up on the server, in the order it is needed, or the line ready. */
 export function phonePluginLine(status: Pick<PhoneStatus, 'line' | 'service' | 'public_url' | 'stage'>): ProbeAnswer {
   if (!status.line.set) {
-    return { detail: 'No Twilio line yet: your Twilio keys go in the server’s ~/.hermes/.env, added there by you. The setup message walks your bot through the rest.', needsSetup: true }
+    return {
+      detail: 'No Twilio line yet: add your keys in the default bot’s Details, Keys, as HERMES_PHONE_TWILIO_ACCOUNT_SID, HERMES_PHONE_TWILIO_AUTH_TOKEN and HERMES_PHONE_TWILIO_PHONE_NUMBER (never Hermes’s plain TWILIO_ names, which turn on its SMS channel).',
+      needsSetup: true,
+    }
   }
 
   if (!status.public_url) {

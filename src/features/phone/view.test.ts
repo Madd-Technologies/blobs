@@ -286,7 +286,7 @@ describe('settings', () => {
 
     assert.deepEqual(phonePluginLine(ready), { detail: 'Line ending …09, in the test stage: calls go only to your test numbers.', needsSetup: false })
     assert.match(phonePluginLine({ ...ready, stage: 'live' }).detail, /live: approved calls go to the numbers a brief names/)
-    assert.match(phonePluginLine({ ...ready, line: { set: false, number: '' }, public_url: false }).detail, /^No Twilio line yet/)
+    assert.match(phonePluginLine({ ...ready, line: { set: false, number: '' }, public_url: false }).detail, /^No Twilio line yet: .*HERMES_PHONE_TWILIO_ACCOUNT_SID/)
     assert.match(phonePluginLine({ ...ready, public_url: false, service: { running: false, live: 0 } }).detail, /^No public address yet/)
     assert.equal(phonePluginLine({ ...ready, service: { running: false, live: 0 } }).needsSetup, true)
   })
