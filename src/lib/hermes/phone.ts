@@ -168,6 +168,11 @@ export interface NeverShare {
 export interface PhoneSettings {
   /** The name the voice gives ("calling for Alex"). */
   name: string
+  /**
+   * The call's first sentence, spoken word for word before the reason for the call; "" for the standard one (it says it
+   * is an AI and, with transcripts, that the call is transcribed). hermes-phone 0.1.3+; older ones leave it out.
+   */
+  opener?: string
   never_share: NeverShare[]
   do_not_call: string[]
   /** Profiles that may make calls. */

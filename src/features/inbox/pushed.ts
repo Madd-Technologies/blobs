@@ -117,3 +117,80 @@ export function promptOf(request: PushedRequest): PushedPrompt {
       return { kind: 'waiting', requestId: request.id, summary: 'Waiting for your answer' }
   }
 }
+
+// ── kanban workers' approvals ────────────────────────────────────────────────────────────────────
+
+export const KANBAN_APPROVALS_PATH = '/api/plugins/hermes-bot-mobile/kanban-approvals'
+
+/**
+ * An approval a kanban worker waits on (hermes-bot-mobile 0.1.9+). The worker runs headless in its own process, so the
+ * approval is not a session's prompt: it comes with Needs you under `kanban` and is answered through the plugin's route.
+ */
+export interface KanbanApproval {
+  /** Hermes's request id: what the answer names. */
+  id: string
+  /** The bot working the card, whose chat shows it. */
+  profile: string
+  /** The chat to show it in: the one the card was created from, or '' for the bot's main chat. */
+  chat: string
+  task: { id: string; title: string; board: string; createdBy: string }
+  /** Already redacted by Hermes. Sensitive: show it, never log or persist it. */
+  command: string
+  description: string
+  choices: ApprovalChoice[]
+  createdAt: number
+}
+
+/** The kanban workers' approvals in the route's body or the event; none from a plugin older than 0.1.9. */
+export function parseKanban(body: unknown): KanbanApproval[] {
+  const list = body && typeof body === 'object' ? (body as { kanban?: unknown }).kanban : null
+
+  if (!Array.isArray(list)) {
+    return []
+  }
+
+  return list.flatMap(entry => {
+    if (!entry || typeof entry !== 'object') {
+      return []
+    }
+
+    const row = entry as Record<string, unknown>
+    const task = row.task && typeof row.task === 'object' ? (row.task as Record<string, unknown>) : {}
+
+    if (!text(row.id) || !text(row.profile)) {
+      return []
+    }
+
+    return [
+      {
+        id: text(row.id),
+        profile: text(row.profile),
+        chat: text(row.chat),
+        task: { id: text(task.id), title: text(task.title), board: text(task.board), createdBy: text(task.created_by) },
+        command: text(row.command),
+        description: text(row.description),
+        choices: choicesOf(row),
+        createdAt: typeof row.created_at === 'number' ? row.created_at : 0,
+      },
+    ]
+  })
+}
+
+/**
+ * The kanban approvals one chat shows: those of its bot that go to this chat (`ids`: the chat's own ids), or with no chat
+ * of their own, to the bot's main chat when this is it.
+ */
+export function kanbanForChat(approvals: readonly KanbanApproval[], profile: string, ids: readonly (string | null | undefined)[], isMain: boolean): KanbanApproval[] {
+  return approvals.filter(approval => approval.profile === profile && (approval.chat ? ids.includes(approval.chat) : isMain))
+}
+
+/**
+ * The line under the card's title: which card it is for, and who asked for it when another bot did. `nameOf` gives a bot's
+ * name, or null for something that isn't a bot (the dashboard, the CLI).
+ */
+export function kanbanAbout(approval: KanbanApproval, nameOf: (profile: string) => string | null): string {
+  const asker = approval.task.createdBy && approval.task.createdBy !== approval.profile ? nameOf(approval.task.createdBy) : null
+  const card = approval.task.title ? `For the task “${approval.task.title}”` : 'For a kanban task'
+
+  return asker ? `${card}, which ${asker} asked for.` : `${card}.`
+}

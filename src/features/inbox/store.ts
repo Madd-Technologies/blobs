@@ -10,7 +10,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 
 import type { ActiveSessionRow, ApprovalChoice, ApprovalRequestPayload, DelegationStatusRow } from '../../lib/hermes/protocol.ts'
 import { call, type RpcClient } from '../../lib/hermes/rpc.ts'
-import { parseNeedsYou, type PushedRequest } from './pushed.ts'
+import { parseKanban, parseNeedsYou, type KanbanApproval, type PushedRequest } from './pushed.ts'
 
 export interface InboxState {
   active: ActiveSessionRow[]
@@ -20,6 +20,8 @@ export interface InboxState {
   background: DelegationStatusRow[]
   /** What the server pushes as waiting on you, or null when it does not push it. Sensitive: memory only. */
   pushed: PushedRequest[] | null
+  /** Approvals kanban workers wait on (hermes-bot-mobile 0.1.9+), pushed with the rest. Sensitive: memory only. */
+  kanban: KanbanApproval[]
   loadedAt: number | null
   error: string | null
 }
@@ -32,6 +34,8 @@ export interface InboxDeps {
   liveHelpers?: () => boolean
   /** Reads `GET …/hermes-bot-mobile/needs-you`; null when the server has no such route. Absent, nothing is pushed. */
   readNeedsYou?: () => Promise<unknown>
+  /** Answers a kanban worker's approval through the plugin: `expired` when it no longer waits (or was answered already). */
+  answerKanban?: (id: string, choice: ApprovalChoice) => Promise<'answered' | 'expired'>
   now?: () => number
 }
 
@@ -71,7 +75,7 @@ export function approvalsFrom(open: unknown): ApprovalRequestPayload[] {
 
 export function createInbox(deps: InboxDeps) {
   const now = deps.now ?? Date.now
-  const store: StoreApi<InboxState> = createStore<InboxState>(() => ({ active: [], polled: {}, background: [], pushed: null, loadedAt: null, error: null }))
+  const store: StoreApi<InboxState> = createStore<InboxState>(() => ({ active: [], polled: {}, background: [], pushed: null, kanban: [], loadedAt: null, error: null }))
   let refreshing: Promise<void> | null = null
 
   async function doRefresh() {
@@ -123,9 +127,10 @@ export function createInbox(deps: InboxDeps) {
     }
 
     try {
-      const pushed = parseNeedsYou(await deps.readNeedsYou())
+      const body = await deps.readNeedsYou()
+      const pushed = parseNeedsYou(body)
       const before = store.getState().pushed
-      store.setState({ pushed })
+      store.setState({ pushed, kanban: pushed ? parseKanban(body) : [] })
 
       if (before && !pushed) {
         // The server stopped pushing (the plugin was removed or disabled): check the busy chats again at once.
@@ -141,8 +146,23 @@ export function createInbox(deps: InboxDeps) {
     const pushed = parseNeedsYou(payload)
 
     if (pushed) {
-      store.setState({ pushed })
+      store.setState({ pushed, kanban: parseKanban(payload) })
     }
+  }
+
+  /**
+   * Answers a kanban worker's approval. It leaves the list at once; one that no longer waits leaves it too. Throws when the
+   * answer could not be sent (it stays, to try again).
+   */
+  async function answerKanban(id: string, choice: ApprovalChoice): Promise<'answered' | 'expired'> {
+    if (!deps.answerKanban) {
+      return 'expired'
+    }
+
+    const outcome = await deps.answerKanban(id, choice)
+    store.setState(state => ({ kanban: state.kanban.filter(approval => approval.id !== id) }))
+
+    return outcome
   }
 
   /** Takes an answered prompt off the pushed list at once, before the server's next push confirms it. */
@@ -179,7 +199,7 @@ export function createInbox(deps: InboxDeps) {
     return resolved > 0
   }
 
-  return { store, refresh, respondApproval, loadPushed, applyPushed, dropPushed }
+  return { store, refresh, respondApproval, loadPushed, applyPushed, dropPushed, answerKanban }
 }
 
 export type Inbox = ReturnType<typeof createInbox>

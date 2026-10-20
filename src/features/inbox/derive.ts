@@ -8,7 +8,7 @@ import type { ActiveSessionRow, ApprovalChoice, ApprovalRequestPayload, ClarifyQ
 import { botLastActive, deriveAttention, matchActiveToBots, strongestStatus, type Attention, type AttentionContext } from '../attention/derive.ts'
 import type { BotSession } from '../sessions/store.ts'
 import { pendingPrompts } from '../transcript/reduce.ts'
-import { isRoomChat, promptOf, type PushedRequest } from './pushed.ts'
+import { isRoomChat, promptOf, type KanbanApproval, type PushedRequest } from './pushed.ts'
 
 export type InboxKind = 'approval' | 'question' | 'secret' | 'sudo' | 'waiting'
 
@@ -34,6 +34,8 @@ export interface InboxEntry {
   envVar?: string
   /** Answerable right here, or the user must open the chat first. */
   inline: boolean
+  /** A kanban worker's approval, answered through the plugin rather than a session. */
+  kanban?: KanbanApproval
 }
 
 export interface InboxInput {
@@ -44,6 +46,8 @@ export interface InboxInput {
   polled: Record<string, ApprovalRequestPayload[]>
   /** What the server pushes as waiting on you, or null when it does not push it (then `polled` and `waiting` stand in). */
   pushed?: PushedRequest[] | null
+  /** Approvals kanban workers wait on, each for the bot working the card. */
+  kanban?: readonly KanbanApproval[]
   knownLiveIds: Record<string, readonly string[]>
 }
 
@@ -108,6 +112,25 @@ export function deriveInbox(input: InboxInput): { entries: InboxEntry[]; byBot: 
           inline: prompt.kind !== 'waiting',
         })
       }
+    }
+
+    // A kanban worker's approval belongs to the bot working the card, wherever its chat is.
+    for (const approval of input.kanban ?? []) {
+      if (approval.profile !== bot.name) {
+        continue
+      }
+
+      entries.push({
+        key: `${bot.name}:kanban:${approval.id}`,
+        profile: bot.name,
+        kind: 'approval',
+        requestId: approval.id,
+        summary: approval.description || 'Needs your OK',
+        command: approval.command,
+        choices: approval.choices,
+        inline: true,
+        kanban: approval,
+      })
     }
 
     if (session?.phase === 'ready') {

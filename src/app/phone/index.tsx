@@ -13,16 +13,20 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { Spinner } from '@/components/ui/Spinner'
 import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
-import { addressLabel, formatNumber, hoursLabel } from '@/features/phone/view'
+import { addressLabel, formatNumber, hoursLabel, openerProblem, standardOpener } from '@/features/phone/view'
 import type { SettingsChange } from '@/lib/hermes/phone'
 import { useBotViews } from '@/stores/bots'
 import { usePhone } from '@/stores/phone'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
 
-type Editing = 'address' | 'name' | 'tests' | 'dnc' | 'hours' | 'cap' | 'max' | 'hold' | null
+type Editing = 'address' | 'name' | 'opener' | 'tests' | 'dnc' | 'hours' | 'cap' | 'max' | 'hold' | null
 
 const minutes = (n: number) => `${n} min`
+
+/** Shown wherever the opening line is changed: whether a call must say so is the person's to know. */
+const OPENER_LAW =
+  'The law where you are, and where the people you call are, may require a call to say that the caller is an AI, and that the call is transcribed or recorded. The standard line says both. If you write your own, making sure it meets those laws is up to you.'
 
 /**
  * Settings → Phone: the line and the call service, test or live, and everything that bounds a call (the name it gives,
@@ -134,11 +138,14 @@ export default function PhoneSettings() {
         </T>
         <GroupedList>
           <Row label="Name to use" value={settings.name || 'Not set'} onPress={() => setEditing('name')} />
+          {/* hermes-phone 0.1.3+ answers the opening line; an older one doesn't take it. */}
+          {settings.opener !== undefined ? <Row label="Opening line" value={settings.opener ? 'Your own' : 'Standard'} onPress={() => setEditing('opener')} /> : null}
           <SubRow label="Never share" sub="Needs your tick on any call" value={String(settings.never_share.length)} onPress={() => router.push('/phone/never-share')} />
           <Row label="Do not call" value={`${settings.do_not_call.length} ${settings.do_not_call.length === 1 ? 'number' : 'numbers'}`} onPress={() => setEditing('dnc')} />
         </GroupedList>
         <T variant="label" color="text2" style={styles.footnote}>
-          The name the voice gives. Never-share values stay on your server and only show their last two characters.
+          The name the voice gives{settings.opener !== undefined ? ', and the first thing it says' : ''}. Never-share values stay on your server and only show their last two characters.
+          {settings.opener ? ` Your own opening line: ${OPENER_LAW.replace(/^The law/, 'the law')}` : ''}
         </T>
 
         <T variant="label" color="text2" style={styles.caption} accessibilityRole="header">
@@ -158,7 +165,7 @@ export default function PhoneSettings() {
           During a call
         </T>
         <GroupedList>
-          <SubRow label="Transcripts" sub="Kept 30 days; the opening line says so" right={<Switch value={settings.transcripts} label="Transcripts" onValueChange={on => void save({ transcripts: on })} />} />
+          <SubRow label="Transcripts" sub={settings.opener ? 'Kept 30 days; say so in your opening line' : 'Kept 30 days; the opening line says so'} right={<Switch value={settings.transcripts} label="Transcripts" onValueChange={on => void save({ transcripts: on })} />} />
           <SubRow label="Ask me during a call" sub="Up to 3 questions; a minute to answer" right={<Switch value={settings.ask_owner} label="Ask me during a call" onValueChange={on => void save({ ask_owner: on })} />} />
         </GroupedList>
 
@@ -200,6 +207,18 @@ export default function PhoneSettings() {
         onSave={public_url => void save({ public_url })}
       />
       <TextSheet title="Name to use" note="The voice says “calling for” this name. Your first name is enough." value={settings.name} placeholder="Alex" visible={editing === 'name'} onClose={() => setEditing(null)} onSave={name => void save({ name })} />
+      <TextSheet
+        title="Opening line"
+        note="Said word for word, then why it’s calling. {name} is your name. Left empty, a call uses the standard line shown above."
+        footnote={OPENER_LAW}
+        value={settings.opener ?? ''}
+        placeholder={standardOpener(settings.name, settings.transcripts)}
+        multiline
+        check={openerProblem}
+        visible={editing === 'opener'}
+        onClose={() => setEditing(null)}
+        onSave={opener => void save({ opener })}
+      />
       <NumbersSheet title="Test numbers" note="In the test stage, these are the only numbers a call goes to." numbers={settings.test_numbers} visible={editing === 'tests'} onClose={() => setEditing(null)} onSave={test_numbers => void save({ test_numbers })} />
       <NumbersSheet title="Do not call" note="Never dialed. A number that asks not to be called again is added here by itself." numbers={settings.do_not_call} visible={editing === 'dnc'} onClose={() => setEditing(null)} onSave={do_not_call => void save({ do_not_call })} />
       <HoursSheet hours={settings.hours} visible={editing === 'hours'} onClose={() => setEditing(null)} onSave={hours => void save({ hours })} />
