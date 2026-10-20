@@ -11,6 +11,7 @@ import { installMessage } from '@/features/plugins/catalog'
 import { useBotViews } from '@/stores/bots'
 import { pluginView } from '@/features/plugins/view'
 import { useConnection } from '@/stores/connection'
+import { useRestart } from '@/stores/restart'
 import { SERVER_PLUGINS, useServerPlugins, type ServerPlugin } from '@/stores/serverPlugins'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -37,6 +38,9 @@ function PluginBlock({ plugin }: { plugin: ServerPlugin }) {
   const checking = useServerPlugins(state => state.checking)
   const view = pluginView(plugin.name, check, plugin.version, checking)
   const ready = check?.state.kind === 'ready'
+  // Installed but not loaded: one restart loads it, when this Hermes can restart itself from here.
+  const canRestart = useRestart(state => !!state.status?.supported)
+  const restartToLoad = check?.state.kind === 'restart' && canRestart
 
   return (
     <View style={[styles.block, { backgroundColor: c.sheet }]} accessible={false}>
@@ -56,8 +60,9 @@ function PluginBlock({ plugin }: { plugin: ServerPlugin }) {
           {line}
         </T>
       ))}
-      {view.action || (ready && plugin.name === 'hermes-bot-mobile' && Platform.OS === 'android') ? (
+      {view.action || restartToLoad || (ready && plugin.name === 'hermes-bot-mobile' && Platform.OS === 'android') ? (
         <View style={styles.actions}>
+          {restartToLoad ? <Pill label="Restart Hermes" icon="rotate-cw" variant="secondary" height={40} onPress={() => useRestart.getState().open('both')} /> : null}
           {view.action ? <Pill label={view.action === 'update' ? 'Copy update message' : 'Copy setup message'} icon="copy" variant="secondary" height={40} onPress={() => copySetup(plugin, bots)} /> : null}
           {ready && plugin.name === 'hermes-bot-mobile' && Platform.OS === 'android' ? <Pill label="Notification settings" variant="ghost" height={40} onPress={() => router.push('/notifications')} /> : null}
         </View>
@@ -124,7 +129,7 @@ export default function ServerPlugins() {
           />
         ) : null}
         <T variant="label" color="text2" style={styles.note}>
-          Plugins load when Hermes starts, so restart it after your bot installs or updates one. The messages ask your bot not to restart anything: that’s yours to do.
+          Plugins load when Hermes starts. Once your bot has installed or updated one, restart Hermes here (Settings → Restart Hermes); bots in the middle of something can finish first.
         </T>
       </ScrollView>
     </Screen>
