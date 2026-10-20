@@ -23,6 +23,7 @@ import {
   NO_CHOICES,
   openQuestion,
   phoneNeeds,
+  phonePluginLine,
   placeErrands,
   quietNote,
   requestLine,
@@ -280,6 +281,16 @@ describe('what waits on you', () => {
 })
 
 describe('settings', () => {
+  it('says on Server plugins what the server still needs, in order, or that the line is ready', () => {
+    const ready = { line: { set: true, number: '…09' }, service: { running: true, live: 0 }, public_url: true, stage: 'test' as const }
+
+    assert.deepEqual(phonePluginLine(ready), { detail: 'Line ending …09, in the test stage: calls go only to your test numbers.', needsSetup: false })
+    assert.match(phonePluginLine({ ...ready, stage: 'live' }).detail, /live: approved calls go to the numbers a brief names/)
+    assert.match(phonePluginLine({ ...ready, line: { set: false, number: '' }, public_url: false }).detail, /^No Twilio line yet/)
+    assert.match(phonePluginLine({ ...ready, public_url: false, service: { running: false, live: 0 } }).detail, /^No public address yet/)
+    assert.equal(phonePluginLine({ ...ready, service: { running: false, live: 0 } }).needsSetup, true)
+  })
+
   it('writes calling hours', () => {
     assert.equal(hoursLabel([8, 21]), '8 AM – 9 PM')
     assert.equal(hoursLabel([0, 24]), '12 AM – midnight')

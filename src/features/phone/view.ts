@@ -3,7 +3,8 @@
  * results side by side, a call's transcript, and what waits on you. Pure.
  */
 
-import type { ApproveEdits, Brief, Call, CallAnswer, CallQuestion, Errand, ErrandStatus, Flag, PhoneSettings, RecordField } from '../../lib/hermes/phone.ts'
+import type { ApproveEdits, Brief, Call, CallAnswer, CallQuestion, Errand, ErrandStatus, Flag, PhoneSettings, PhoneStatus, RecordField } from '../../lib/hermes/phone.ts'
+import type { ProbeAnswer } from '../plugins/check.ts'
 
 /** How long a live call holds a question for your answer (the service's QUESTION_WAIT_S). */
 export const QUESTION_S = 60
@@ -515,6 +516,23 @@ export function hourLabel(hour: number): string {
 
 export function hoursLabel(hours: PhoneSettings['hours']): string {
   return `${hourLabel(hours[0])} – ${hourLabel(hours[1])}`
+}
+
+/** Settings → Server plugins' line for hermes-phone: what is still to set up on the server, in the order it is needed, or the line ready. */
+export function phonePluginLine(status: Pick<PhoneStatus, 'line' | 'service' | 'public_url' | 'stage'>): ProbeAnswer {
+  if (!status.line.set) {
+    return { detail: 'No Twilio line yet: your Twilio keys go in the server’s ~/.hermes/.env, added there by you. The setup message walks your bot through the rest.', needsSetup: true }
+  }
+
+  if (!status.public_url) {
+    return { detail: 'No public address yet: Twilio needs an https address that reaches the call service. Set it in Settings, Phone.', needsSetup: true }
+  }
+
+  if (!status.service.running) {
+    return { detail: 'The call service isn’t running on the server, so approved calls wait. The setup message walks your bot through starting it.', needsSetup: true }
+  }
+
+  return { detail: `Line ending ${status.line.number}, ${status.stage === 'live' ? 'live: approved calls go to the numbers a brief names.' : 'in the test stage: calls go only to your test numbers.'}`, needsSetup: false }
 }
 
 /** The public address without its scheme, for a row's value. */
