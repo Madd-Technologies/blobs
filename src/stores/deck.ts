@@ -1,9 +1,11 @@
 import { useEffect, useMemo } from 'react'
 
 import { buildDeck, type DeckCard } from '@/features/inbox/deck'
+import { phoneNeeds } from '@/features/phone/view'
 import { useNow } from '@/lib/useNow'
 import { useDashboards } from '@/stores/dashboards'
 import { useInbox } from '@/stores/inbox'
+import { usePhone } from '@/stores/phone'
 import { useRoomViews } from '@/stores/rooms'
 
 /**
@@ -16,6 +18,12 @@ export function useDeck(): { cards: DeckCard[]; waiting: number } {
   const summary = useDashboards(state => state.summary)
   const held = useDashboards(state => state.needsYou)
   const nowS = useNow()
+  const errands = usePhone(state => state.errands)
+  const dismissed = usePhone(state => state.dismissed)
+  // A live call's question is on a one-minute clock: read the time more often while one waits.
+  const asking = Object.values(errands).some(errand => errand.status === 'running' && errand.calls.some(call => call.question && !call.question.answer))
+  const phoneNowS = useNow(asking ? 5 : 30)
+  const phone = useMemo(() => phoneNeeds(Object.values(errands), dismissed, phoneNowS), [errands, dismissed, phoneNowS])
   // Keyed by bot and count, so a poll that changes nothing loads nothing.
   const counts = Object.keys(summary)
     .filter(profile => (summary[profile]?.needs_you ?? 0) > 0)
@@ -30,10 +38,10 @@ export function useDeck(): { cards: DeckCard[]; waiting: number } {
   }, [waitingBots])
 
   return useMemo(() => {
-    const cards = buildDeck({ entries, waitingBots, held, rooms, nowS })
+    const cards = buildDeck({ entries, waitingBots, held, rooms, phone, nowS })
     const dashboardCount = waitingBots.reduce((sum, profile) => sum + (summary[profile]?.needs_you ?? 0), 0)
     const loaded = cards.filter(card => card.kind === 'board').length
 
     return { cards, waiting: cards.length + Math.max(0, dashboardCount - loaded) }
-  }, [entries, waitingBots, held, rooms, nowS, summary])
+  }, [entries, waitingBots, held, rooms, phone, nowS, summary])
 }

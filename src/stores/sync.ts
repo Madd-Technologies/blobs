@@ -1,5 +1,6 @@
 import { startDashboardsSync } from '@/stores/dashboards'
 import { inbox, startInboxSync } from '@/stores/inbox'
+import { startPhoneSync } from '@/stores/phone'
 import { startPresenceSync } from '@/stores/presence'
 import { startPushSync } from '@/stores/push'
 import { startRestartSync } from '@/stores/restart'
@@ -20,6 +21,7 @@ export function startSessionSync(): () => void {
   const stopInbox = startInboxSync()
   const stopRooms = startRoomsSync()
   const stopDashboards = startDashboardsSync()
+  const stopPhone = startPhoneSync()
   const stopVisible = startVisibleSync()
   const stopPush = startPushSync()
   const stopPresence = startPresenceSync()
@@ -49,6 +51,7 @@ export function startSessionSync(): () => void {
     stopInbox()
     stopRooms()
     stopDashboards()
+    stopPhone()
     stopVisible()
     stopPush()
     stopPresence()

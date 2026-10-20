@@ -13,6 +13,7 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
 import { useConnection } from '@/stores/connection'
+import { usePhone } from '@/stores/phone'
 import { useRestart } from '@/stores/restart'
 import { usePrefs, type ThemePref } from '@/stores/prefs'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -41,6 +42,8 @@ export default function Settings() {
   const setShowThinking = usePrefs(state => state.setShowThinking)
   const showBotChatter = usePrefs(state => state.showBotChatter)
   const setShowBotChatter = usePrefs(state => state.setShowBotChatter)
+  // Phone errands (the hermes-phone plugin): its settings, only on a server that has it.
+  const phone = usePhone(state => state.available)
   const [pickTheme, setPickTheme] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const { c } = useTheme()
@@ -68,6 +71,7 @@ export default function Settings() {
             </View>
           </View>
           <Row label="Server plugins" onPress={() => router.push('/plugins')} />
+          {phone ? <Row label="Phone" onPress={() => router.push('/phone')} /> : null}
           {status === 'online' || restartPhase === 'restarting' ? <RestartRow /> : null}
         </GroupedList>
         {status === 'offline' && lastError ? (

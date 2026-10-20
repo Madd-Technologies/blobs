@@ -96,10 +96,11 @@ const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit
       return <TeammateBubble handle={item.handle} text={item.text} />
 
     case 'note':
-      // A routine that ran in this chat leads with a clock, as one quiet line above the bot's summary of it; a call's start, a phone.
+      // A routine that ran in this chat leads with a clock, as one quiet line above the bot's summary of it; a call's start and a
+      // finished phone errand, a phone.
       return (
         <View style={styles.note}>
-          {/^(Routine “|A routine ran)/.test(item.text) ? <Feather name="clock" size={14} color={c.text2} /> : /^Call started /.test(item.text) ? <Feather name="phone" size={14} color={c.text2} /> : null}
+          {/^(Routine “|A routine ran)/.test(item.text) ? <Feather name="clock" size={14} color={c.text2} /> : /^(Call started |Phone errand finished )/.test(item.text) ? <Feather name="phone" size={14} color={c.text2} /> : null}
           <T variant="label" color="text2" numberOfLines={2} style={styles.noteText}>
             {item.text}
           </T>

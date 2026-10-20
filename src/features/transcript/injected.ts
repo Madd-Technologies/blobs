@@ -142,6 +142,19 @@ function helpersFromText(text: string): string | null {
 }
 
 /**
+ * `[Phone errand finished · "Septic pump-out quotes" · e_ab12 · 2 quoted, 1 call back] Read the details with
+ * phone_call_report.`: the fixed line hermes-phone gives the bot's main chat when an errand's calls are done. It carries no
+ * words from the calls, only the title the bot wrote and the counts.
+ */
+const PHONE_FINISHED = /^\[Phone errand finished · "([^"\n]*)" · (\S+) · ([^\]\n]*)\]/
+
+export function phoneFinished(text: string): { title: string; errand: string; summary: string } | null {
+  const match = PHONE_FINISHED.exec(text.trim())
+
+  return match ? { title: (match[1] ?? '').trim(), errand: match[2] ?? '', summary: (match[3] ?? '').trim() } : null
+}
+
+/**
  * A kanban event Hermes wakes the chat that queued the task with (tui_gateway/session_notifications.py): a mark, maybe
  * `[board]` and `@bot`, then `Kanban t_…` and what happened ("✔ @scribe Kanban t_ab12 done — Write the release notes").
  */
@@ -156,6 +169,12 @@ function injectedLine(text: string): string | null {
 
   if (fixed) {
     return fixed[1]
+  }
+
+  const phone = phoneFinished(text)
+
+  if (phone) {
+    return `Phone errand finished · ${phone.title}${phone.summary ? ` · ${phone.summary}` : ''}`
   }
 
   const helpers = helpersFromText(text)
