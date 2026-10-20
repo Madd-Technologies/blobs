@@ -169,6 +169,16 @@ describe('a call’s line', () => {
     assert.equal(callLine(call({ status: 'skipped', error: 'Not on the test numbers list.' }), 0).status, 'skipped: not a test number')
   })
 
+  it('tells a call turned away before it rang, and one a call screener took, from no answer', () => {
+    const ended = (notes: string) => callLine(call({ status: 'done', started: 0, ended: 3, outcome: { status: 'no_answer', notes } }), 0)
+
+    assert.deepEqual(ended('Turned away before it rang (603): they declined, or their carrier screened it as possible spam.'), { icon: 'slash', status: 'turned away · 0:03', live: false })
+    assert.equal(ended('They marked the call as unwanted (607).').status, 'marked unwanted · 0:03')
+    assert.equal(ended('Their carrier blocked it as possible spam (608).').status, 'blocked as spam · 0:03')
+    assert.deepEqual(ended('A call screener took the message; nobody came on the line.'), { icon: 'voicemail', status: 'a call screener took it · 0:03', live: false })
+    assert.equal(ended('Nobody answered.').status, 'no answer · 0:03')
+  })
+
   it('holds a question for 60 seconds at most, and none once answered or off the line', () => {
     const asked = { text: 'How deep?', asked: 100, answer: null }
 
@@ -201,6 +211,10 @@ describe('results', () => {
     assert.equal(headline(done), '2 quotes, 1 call back')
     assert.equal(headline(errand({ calls: [call({ status: 'failed' }), call({ status: 'waiting' })] })), '1 couldn’t be placed')
     assert.equal(headline(errand({ calls: [call({ status: 'done', hangup: true, outcome: { status: 'call_back', notes: 'Hung up from the app.' } }), call({ id: 'c_2', status: 'cancelled' })] })), '1 hung up, 1 not called')
+    assert.equal(
+      headline(errand({ calls: [call({ status: 'done', outcome: { status: 'quoted' } }), call({ id: 'c_2', status: 'done', outcome: { status: 'no_answer', notes: 'Their carrier blocked it as possible spam (608).' } }), call({ id: 'c_3', status: 'done', outcome: { status: 'no_answer', notes: 'Nobody answered.' } })] })),
+      '1 quote, 1 turned away before it rang, 1 no answer',
+    )
   })
 
   it('lines the answers up by field, with a dash for none', () => {

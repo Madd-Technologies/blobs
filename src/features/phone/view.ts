@@ -171,6 +171,22 @@ export function openQuestion(call: Pick<Call, 'question' | 'status'>, nowS: numb
 /** A call you hung up from the app: the service records it as a call back with this note. */
 const hungUpByYou = (call: Pick<Call, 'outcome' | 'hangup'>): boolean => call.hangup && call.outcome?.notes === 'Hung up from the app.'
 
+/**
+ * A call turned away before it rang, by the SIP code the service puts in its note: 603 declined (or screened by their
+ * carrier as possible spam), 607 marked unwanted, 608 blocked as spam by their carrier.
+ */
+function turnedAway(call: Pick<Call, 'outcome'>): '603' | '607' | '608' | null {
+  if (call.outcome?.status !== 'no_answer') {
+    return null
+  }
+
+  const code = /\((60[378])\)/.exec(String(call.outcome.notes ?? ''))?.[1]
+
+  return code === '603' || code === '607' || code === '608' ? code : null
+}
+
+const TURNED_AWAY = { '603': 'turned away', '607': 'marked unwanted', '608': 'blocked as spam' } as const
+
 /** What a finished call came to, in a few words. */
 export function outcomeWords(call: Pick<Call, 'outcome' | 'hangup'>): { icon: LineIcon; text: string } {
   const outcome = call.outcome
@@ -198,12 +214,20 @@ export function outcomeWords(call: Pick<Call, 'outcome' | 'hangup'>): { icon: Li
       return { icon: 'x', text: 'said no' }
     case 'wrong_number':
       return { icon: 'x', text: 'wrong number' }
-    case 'no_answer':
-      return outcome.notes === 'Left a voicemail.'
-        ? { icon: 'voicemail', text: 'left a voicemail' }
-        : outcome.notes === 'The line was busy.'
-          ? { icon: 'x', text: 'busy' }
-          : { icon: 'x', text: 'no answer' }
+    case 'no_answer': {
+      const away = turnedAway(call)
+
+      if (away) {
+        return { icon: 'slash', text: TURNED_AWAY[away] }
+      }
+
+      // A call screener (Google Voice, Pixel, iPhone) heard the opening, and nobody came on the line after it.
+      if (/^A call screener took the message/.test(String(outcome.notes ?? ''))) {
+        return { icon: 'voicemail', text: 'a call screener took it' }
+      }
+
+      return outcome.notes === 'Left a voicemail.' ? { icon: 'voicemail', text: 'left a voicemail' } : outcome.notes === 'The line was busy.' ? { icon: 'x', text: 'busy' } : { icon: 'x', text: 'no answer' }
+    }
     default:
       return { icon: 'check', text: 'done' }
   }
@@ -278,6 +302,7 @@ const HEADLINE: Record<string, [string, string]> = {
   booked: ['booking', 'bookings'],
   call_back: ['call back', 'call backs'],
   hung_up: ['hung up', 'hung up'],
+  turned_away: ['turned away before it rang', 'turned away before they rang'],
   declined: ['said no', 'said no'],
   no_answer: ['no answer', 'no answers'],
   wrong_number: ['wrong number', 'wrong numbers'],
@@ -292,7 +317,7 @@ export function headline(errand: Pick<Errand, 'calls'>): string {
   const counts = new Map<string, number>()
 
   for (const call of errand.calls) {
-    const key = call.status === 'done' ? (hungUpByYou(call) ? 'hung_up' : String(call.outcome?.status ?? 'done')) : call.status === 'failed' || call.status === 'cancelled' || call.status === 'skipped' ? call.status : 'waiting'
+    const key = call.status === 'done' ? (hungUpByYou(call) ? 'hung_up' : turnedAway(call) ? 'turned_away' : String(call.outcome?.status ?? 'done')) : call.status === 'failed' || call.status === 'cancelled' || call.status === 'skipped' ? call.status : 'waiting'
 
     if (key !== 'waiting') {
       counts.set(key, (counts.get(key) ?? 0) + 1)
