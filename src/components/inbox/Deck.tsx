@@ -6,6 +6,7 @@ import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming
 
 import { BotFace } from '@/components/bots/BotFace'
 import { ApprovalCard, QuestionCard, SecretCard, SudoCard } from '@/components/chat/ActionCards'
+import { PhoneDeckBody, PhoneQuestionHeader, phoneCardAge, phoneCardLine } from '@/components/phone/PhoneDeck'
 import { RoomActions } from '@/components/rooms/RoomActions'
 import { RoomFaces } from '@/components/rooms/RoomFaces'
 import { Pill } from '@/components/ui/Pill'
@@ -42,6 +43,10 @@ export function cardAge(card: DeckCard, context: DeckContext): string {
     return card.view.age
   }
 
+  if (card.kind === 'phone') {
+    return phoneCardAge(card, context.nowS)
+  }
+
   const view = context.views.find(candidate => candidate.profile === card.profile)
 
   return view ? ageLabel(botLastActive(view.row), context.nowS) : ''
@@ -51,6 +56,10 @@ export function cardAge(card: DeckCard, context: DeckContext): string {
 export function cardLine(card: DeckCard): string {
   if (card.kind === 'entry') {
     return card.entry.summary
+  }
+
+  if (card.kind === 'phone') {
+    return phoneCardLine(card)
   }
 
   if (card.kind === 'board') {
@@ -115,12 +124,18 @@ export function TopCard({ card, context }: { card: DeckCard; context: DeckContex
       <Raised radius={radius.deck} rise style={styles.top} accessibilityLabel={`${cardName(card, context)}, top card`}>
         <View style={styles.who}>
           <Face card={card} context={context} size={28} />
-          <T variant="rowTitle" numberOfLines={1} style={styles.flex}>
-            {cardName(card, context)}
-          </T>
-          <T variant="meta" color="text2">
-            {cardAge(card, context)}
-          </T>
+          {card.kind === 'phone' && card.need === 'question' ? (
+            <PhoneQuestionHeader card={card} botName={cardName(card, context)} />
+          ) : (
+            <>
+              <T variant="rowTitle" numberOfLines={1} style={styles.flex}>
+                {cardName(card, context)}
+              </T>
+              <T variant="meta" color="text2">
+                {cardAge(card, context)}
+              </T>
+            </>
+          )}
         </View>
         <CardBody card={card} context={context} />
       </Raised>
@@ -146,6 +161,10 @@ function CardBody({ card, context }: { card: DeckCard; context: DeckContext }) {
 
   if (card.kind === 'board') {
     return <RecordBody card={card} />
+  }
+
+  if (card.kind === 'phone') {
+    return <PhoneDeckBody card={card} botName={cardName(card, context)} />
   }
 
   const { entry } = card

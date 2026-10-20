@@ -58,4 +58,18 @@ describe('plugin install messages', () => {
     assert.match(message, /Voice check, without showing any token/)
     assert.doesNotMatch(message, /Drive check|Dashboard check/)
   })
+
+  it('hermes-phone goes in the default profile, updates only copies other bots have, and never asks for the Twilio keys', () => {
+    const message = installMessage(['hermes-phone'], PLUGINS_COMMIT, ['default', 'concierge'])
+    assert.match(message, new RegExp(`hermes-phone ${RELEASES['hermes-phone']}`))
+    assert.match(message, new RegExp(`   hermes plugins install Madd-Technologies/blobs-hermes-bot-plugins/hermes-phone --ref ${PLUGINS_COMMIT} --force --enable`))
+    assert.doesNotMatch(message, /-p concierge/)
+    assert.match(message, /already shows hermes-phone, update that copy/)
+    assert.match(message, /Phone check, without showing any secret/)
+    assert.match(message, /Never ask me to paste a Twilio key/)
+    assert.match(message, /set nothing up until I say so/)
+    assert.match(message, /hermes-phone\.service, if it runs/)
+    assert.doesNotMatch(message, /Voice check|Drive check|Dashboard check/)
+    assert.ok(message.length < 4000, `short enough to paste anywhere (${message.length})`)
+  })
 })

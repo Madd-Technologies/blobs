@@ -1,10 +1,13 @@
 /**
- * Needs you as a deck: everything waiting on you, one card at a time. Bots' prompts first, then what their dashboards hold
- * for you, then rooms holding something for you (the order the list had). Cards you skip go to the back, in the order you
- * skipped them. Pure: `useDeck` feeds it from the stores.
+ * Needs you as a deck: everything waiting on you, one card at a time. A live call's question first (it waits a minute at
+ * most), then bots' prompts, calls waiting for your OK, what dashboards hold for you, what a finished call asked of you, and
+ * rooms holding something for you. Cards you skip go to the back, in the order you skipped them. Pure: `useDeck` feeds it
+ * from the stores.
  */
 
 import type { NeedsYouRecord } from '../../lib/hermes/dashboard.ts'
+import type { Call, Errand } from '../../lib/hermes/phone.ts'
+import type { PhoneNeeds } from '../phone/view.ts'
 import type { RoomView } from '../rooms/view.ts'
 import type { InboxEntry } from './derive.ts'
 
@@ -12,6 +15,8 @@ export type DeckCard =
   | { kind: 'entry'; key: string; profile: string; entry: InboxEntry }
   | { kind: 'board'; key: string; profile: string; record: NeedsYouRecord; nowS: number }
   | { kind: 'room'; key: string; view: RoomView }
+  /** A phone errand: calls waiting for your OK, a live call's question, or what a finished call asked of you. */
+  | { kind: 'phone'; key: string; profile: string; need: 'request' | 'question' | 'asked'; errand: Errand; call?: Call }
 
 export interface DeckInput {
   entries: InboxEntry[]
@@ -20,15 +25,20 @@ export interface DeckInput {
   /** The records each of those dashboards flags, with the server's clock when they were read. */
   held: Record<string, { records: NeedsYouRecord[]; now: number } | undefined>
   rooms: RoomView[]
+  /** What phone errands hold for you (none without hermes-phone). */
+  phone?: PhoneNeeds
   nowS: number
 }
 
-export function buildDeck({ entries, waitingBots, held, rooms, nowS }: DeckInput): DeckCard[] {
+export function buildDeck({ entries, waitingBots, held, rooms, phone, nowS }: DeckInput): DeckCard[] {
   return [
+    ...(phone?.questions ?? []).map(({ errand, call }): DeckCard => ({ kind: 'phone', key: `phone:ask:${errand.id}:${call.id}`, profile: errand.profile, need: 'question', errand, call })),
     ...entries.map((entry): DeckCard => ({ kind: 'entry', key: entry.key, profile: entry.profile, entry })),
+    ...(phone?.requests ?? []).map((errand): DeckCard => ({ kind: 'phone', key: `phone:ok:${errand.id}`, profile: errand.profile, need: 'request', errand })),
     ...waitingBots.flatMap(profile =>
       (held[profile]?.records ?? []).map((record): DeckCard => ({ kind: 'board', key: `board:${profile}:${record.row.id}`, profile, record, nowS: held[profile]?.now || nowS })),
     ),
+    ...(phone?.asked ?? []).map((errand): DeckCard => ({ kind: 'phone', key: `phone:asked:${errand.id}`, profile: errand.profile, need: 'asked', errand })),
     ...rooms.filter(view => view.needsYou).map((view): DeckCard => ({ kind: 'room', key: `room:${view.id}`, view })),
   ]
 }

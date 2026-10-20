@@ -6,6 +6,7 @@ import { TapFace } from '@/components/bots/TapFace'
 import { CallBar } from '@/components/call/CallBar'
 import { ChatHeader } from '@/components/chat/ChatHeader'
 import { ChatRow } from '@/components/chat/ChatRow'
+import { CallTrayRow, ErrandBlock } from '@/components/phone/ErrandBlock'
 import { Composer } from '@/components/chat/Composer'
 import { ConfirmSheet } from '@/components/ui/ConfirmSheet'
 import { IconCircle } from '@/components/ui/IconCircle'
@@ -13,6 +14,7 @@ import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
+import { callingErrand, errandsForChat, placeErrands, type Placed } from '@/features/phone/view'
 import type { BotView } from '@/features/roster/view'
 import type { BotSession } from '@/features/sessions/store'
 import { pendingPrompts } from '@/features/transcript/reduce'
@@ -22,6 +24,7 @@ import { runningLine } from '@/features/transcript/display'
 import { jobsLine, runningJobs } from '@/features/transcript/jobs'
 import { ageLabel } from '@/features/roster/derive'
 import type { PendingFile } from '@/lib/hermes/attachments'
+import type { Errand } from '@/lib/hermes/phone'
 import { classify, helpGroups, helpText, type SlashAction } from '@/lib/hermes/slash'
 import { canCall } from '@/lib/duplexAudio'
 import { useNow, useNowMs } from '@/lib/useNow'
@@ -34,6 +37,7 @@ import { useConnection } from '@/stores/connection'
 import { useSpeech } from '@/stores/speech'
 import { useDrafts } from '@/stores/drafts'
 import { useOpenChat } from '@/stores/inbox'
+import { usePhone } from '@/stores/phone'
 import { usePrefs } from '@/stores/prefs'
 import { useSeen } from '@/stores/seen'
 import { useOnScreen } from '@/stores/presence'
@@ -174,7 +178,7 @@ export default function BotChat() {
   // Leaving the chat: everything up to now was seen, so nothing in it shows as unread afterwards.
   useEffect(() => () => markSeen(profile, Date.now() / 1000), [profile, markSeen])
 
-  const list = useRef<FlatList<DisplayItem>>(null)
+  const list = useRef<FlatList<ChatEntry>>(null)
   // Only what is on screen loads its pictures.
   const viewable = useViewableRows(`chat:${profile}`)
   // On the newest message while you are there (a streaming reply stays in view); let go the moment you scroll.
@@ -298,8 +302,21 @@ export default function BotChat() {
     void sessions.runCommand(profile, run.name, run.arg, run.run, '/retry')
   }, [profile, toLatest])
 
+  // Phone errands the bot made in this chat, each at the end of the turn it was made in.
+  const allErrands = usePhone(state => state.errands)
+  const canonical = view?.row.canonical_session
+  const errands = useMemo(
+    () => errandsForChat(Object.values(allErrands), profile, chosen ? [session?.storedId, chosen] : [session?.storedId, canonical?.id, canonical?.resolved_id], !chosen),
+    [allErrands, profile, chosen, session?.storedId, canonical?.id, canonical?.resolved_id],
+  )
+  const calling = callingErrand(errands)
+
   // Newest first, for the inverted list.
-  const data = useMemo<DisplayItem[]>(() => buildDisplay(transcript?.items ?? [], { now: nowS * 1000, showThinking, showChatter, chatterFrom: transcript?.chatterFrom, running: transcript?.running }).reverse(), [transcript?.items, transcript?.chatterFrom, transcript?.running, nowS, showThinking, showChatter])
+  const data = useMemo<ChatEntry[]>(
+    () => placeErrands(buildDisplay(transcript?.items ?? [], { now: nowS * 1000, showThinking, showChatter, chatterFrom: transcript?.chatterFrom, running: transcript?.running }), errands, turnStart).reverse(),
+    [transcript?.items, transcript?.chatterFrom, transcript?.running, nowS, showThinking, showChatter, errands],
+  )
+  const newestRow = data.findIndex(entry => entry.kind !== 'errand')
 
   const name = view?.name ?? profile
   // The chat is on the bot's own paper.
@@ -395,8 +412,10 @@ export default function BotChat() {
                 ref={list}
                 inverted
                 data={data}
-                keyExtractor={entry => (entry.kind === 'date' ? entry.id : entry.item.id)}
-                renderItem={({ item, index }) => <ChatRow entry={item} list={`chat:${profile}`} profile={profile} botName={name} latest={index === 0} onRetry={retry} />}
+                keyExtractor={entry => (entry.kind === 'item' ? entry.item.id : entry.id)}
+                renderItem={({ item, index }) =>
+                  item.kind === 'errand' ? <ErrandBlock errand={item.errand} botName={name} meta={view?.meta} /> : <ChatRow entry={item} list={`chat:${profile}`} profile={profile} botName={name} latest={index === newestRow} onRetry={retry} />
+                }
                 {...viewable}
                 contentContainerStyle={styles.list}
                 keyboardShouldPersistTaps="handled"
@@ -427,7 +446,7 @@ export default function BotChat() {
           {callHere ? (
             <CallBar profile={profile} botName={name} meta={view?.meta} call={callHere} waiting={!!transcript && pendingPrompts(transcript).length > 0} onOpen={openCall} />
           ) : (
-            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} onSend={text => void send(text)} onStop={() => void sessions.stop(profile)} />
+            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} above={calling ? <CallTrayRow errand={calling} /> : undefined} onSend={text => void send(text)} onStop={() => void sessions.stop(profile)} />
           )}
         </KeyboardAvoidingView>
 
@@ -459,6 +478,20 @@ export default function BotChat() {
       </Screen>
     </BotTint>
   )
+}
+
+/** A row of the chat: the transcript's own, or a phone errand placed among them. */
+type ChatEntry = DisplayItem | Placed<Errand>
+
+/** Where a turn starts, for placing errands: your message, something that woke the bot, or a day's date line. */
+function turnStart(entry: DisplayItem): { ts?: number } | null {
+  if (entry.kind === 'date') {
+    return {}
+  }
+
+  const { item } = entry
+
+  return item.kind === 'user' || item.kind === 'note' || item.kind === 'teammate' ? { ts: item.ts } : null
 }
 
 const styles = StyleSheet.create({

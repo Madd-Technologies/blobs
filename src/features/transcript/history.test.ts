@@ -5,7 +5,7 @@ import { describe, it } from 'node:test'
 import type { MessagesPage, StoredMessage } from '../../lib/hermes/rest.ts'
 import { summarizeActivity } from './activity.ts'
 import { assistantTexts, historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter } from './history.ts'
-import { dashboardButton, deliveryTarget, noteFor, profileOfHandle, routineDelivery, routineNote, teammateMessage } from './injected.ts'
+import { dashboardButton, deliveryTarget, noteFor, phoneFinished, profileOfHandle, routineDelivery, routineNote, teammateMessage } from './injected.ts'
 import type { Item } from './types.ts'
 
 const page = JSON.parse(readFileSync(new URL('../../../docs/protocol-captures/messages.json', import.meta.url), 'utf8')) as MessagesPage
@@ -243,6 +243,14 @@ describe('messages stored as user turns that you did not write', () => {
     assert.deepEqual(itemsFromHistory([done]).map(item => item.kind), ['note'])
     // Words you typed about a card are yours.
     assert.equal(noteFor(row({ content: 'Is Kanban t_ab12 done yet?' })), null)
+  })
+
+  it('shows a finished phone errand as one quiet line with its title and counts', () => {
+    const line = '[Phone errand finished · "Septic pump-out quotes" · e_ab12 · 2 quoted, 1 call back] Read the details with phone_call_report.'
+    assert.equal(noteFor(row({ content: line })), 'Phone errand finished · Septic pump-out quotes · 2 quoted, 1 call back')
+    assert.deepEqual(phoneFinished(line), { title: 'Septic pump-out quotes', errand: 'e_ab12', summary: '2 quoted, 1 call back' })
+    // Words you typed about it are yours.
+    assert.equal(noteFor(row({ content: 'Did the phone errand finish?' })), null)
   })
 
   it('draws another bot’s message from the sender, without the delivery prefix', () => {

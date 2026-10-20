@@ -38,11 +38,14 @@ export function restHeaders(config: ServerConfig): Record<string, string> {
 
 export class HermesHttpError extends Error {
   readonly status: number
+  /** The whole answer, for a plugin whose refusal (a JSON `detail`) can run past what the message keeps. */
+  readonly body: string
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body = '') {
     super(message)
     this.name = 'HermesHttpError'
     this.status = status
+    this.body = body
   }
 }
 
@@ -79,7 +82,7 @@ export async function restJson<T>(config: ServerConfig, path: string, init: Requ
   }, options.timeoutMs)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new HermesHttpError(res.status, `${init.method ?? 'GET'} ${path} → ${res.status} ${text.slice(0, 200)}`)
+    throw new HermesHttpError(res.status, `${init.method ?? 'GET'} ${path} → ${res.status} ${text.slice(0, 200)}`, text.slice(0, 4000))
   }
   return (await res.json()) as T
 }

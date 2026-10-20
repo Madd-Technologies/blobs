@@ -54,6 +54,8 @@ function RootStack() {
           <Stack.Screen name="settings" />
           <Stack.Screen name="notifications" />
           <Stack.Screen name="plugins" />
+          <Stack.Screen name="phone/index" />
+          <Stack.Screen name="phone/never-share" />
           <Stack.Screen name="screens/index" />
           <Stack.Screen name="screens/[profile]" />
           {/* One screen per bot (and per room): opening a bot that is already open brings that screen up instead of a second copy
@@ -74,6 +76,8 @@ function RootStack() {
           <Stack.Screen name="bot/[profile]/tools" />
           <Stack.Screen name="bot/[profile]/runs-on" />
           <Stack.Screen name="bot/[profile]/past" />
+          <Stack.Screen name="bot/[profile]/errand" />
+          <Stack.Screen name="bot/[profile]/errand-call" />
           <Stack.Screen name="room/new" />
           <Stack.Screen name="room/[id]" dangerouslySingular />
           <Stack.Screen name="bot/new" />

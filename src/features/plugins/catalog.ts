@@ -16,6 +16,7 @@ export const RELEASES = {
   'hermes-drive': '0.1.0',
   'hermes-dashboard': '0.5.2',
   'hermes-voice': '0.1.1',
+  'hermes-phone': '0.1.0',
 } as const
 
 export type PluginName = keyof typeof RELEASES
@@ -28,6 +29,8 @@ const ABOUT: Record<PluginName, string> = {
   'hermes-drive': 'streams Google Drive files to my phone’s viewer (Google Docs, Sheets and Slides as PDF) with the google-workspace skill’s sign-in, read only, and a read-only skill for bots.',
   'hermes-dashboard': 'a dashboard for each bot on my phone: collections the bot designs (fields, statuses, drafts and buttons) and panels kept up to date by code wherever possible (panels that read a live source, panels computed from records, script feeds through its write.py), a Background work panel of the bot’s kanban cards (a note on a blocked card answers it), waking the bot only when something needs judgment, through four dashboard_* tools and a skill. It keeps one SQLite database under ~/.hermes/hermes-dashboard/.',
   'hermes-voice': 'Grok voice calls with my bots from my phone. The phone talks to xAI directly with a one-time secret this server makes from its xAI Grok sign-in or a bot’s own XAI_API_KEY (the token and keys never leave the server), and the Grok voice hands real work to the bot through its normal chat. Routes only (no hooks, tools or skills), so it goes in the default profile only. It keeps each bot’s call settings in ~/.hermes/hermes-voice/bots.json and nothing about calls.',
+  'hermes-phone':
+    'phone errands for my bots through my own Twilio number (US and Canada): a bot researches and writes a call brief with its phone_call tool, I approve every call in the app, and a separate Grok voice that knows only the approved brief makes the calls and reports back to the bot. It dials only my test numbers until I switch it to live. Its routes serve the app from the default profile, which also gives the default bot its phone_call and phone_call_report tools; the calls themselves run in its own call service (hermes-phone.service), because the dashboard cannot hold Twilio’s audio stream. It keeps its settings, errands and transcripts under ~/.hermes/hermes-phone/.',
 }
 
 /**
@@ -76,6 +79,11 @@ export function installMessage(names: readonly PluginName[], commit: string = PL
     steps.push('hermes-bot-mobile replaces the older hermes-push plugin. If `hermes plugins list` shows hermes-push, run `hermes plugins disable hermes-push` (do not remove it: its folder is the rollback, and hermes-bot-mobile copies its registered phones from ~/.hermes/hermes-push/ on first start).')
   }
 
+  if (chosen.includes('hermes-phone')) {
+    // Another bot's copy gives that bot the tools; which bots may call is the plugin's own setting, made in the app.
+    steps.push(`hermes-phone goes in the default profile only: do not add it to any other profile now (a bot that should make calls gets its own copy later, when I ask). But for every profile in \`hermes profile list\` whose \`hermes -p <profile> plugins list\` already shows hermes-phone, update that copy the same way: \`${installCommand('hermes-phone', commit, '<profile>')}\`.`)
+  }
+
   steps.push(`Show me the rows of \`hermes plugins list\` for ${chosen.join(', ')}${chosen.includes('hermes-bot-mobile') ? ' and hermes-push' : ''}${perBot.length && named.length ? `, and of \`hermes -p <profile> plugins list\` for ${perBot.join(', ')} in each of ${named.join(', ')}` : ''}.`)
   steps.push(`Run \`hermes plugins validate ~/.hermes/plugins/<name>\` for ${chosen.length > 1 ? 'each one' : 'it'} and show me the last line ("Validation passed" or what failed).`)
 
@@ -95,7 +103,13 @@ export function installMessage(names: readonly PluginName[], commit: string = PL
     steps.push('Voice check, without showing any token: does ~/.hermes/auth.json have an xai-oauth entry with tokens, under providers or credential_pool (yes/no)? Its routes answer only after the restart.')
   }
 
-  steps.push('Finish with a short table: each plugin, its version before and after, the validate result and the check result. Then tell me Hermes needs a restart: the dashboard (and the messaging gateway, if one runs here) load plugins when they start. Do not restart anything.')
+  if (chosen.includes('hermes-phone')) {
+    steps.push('Phone check, without showing any secret: are TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER set in ~/.hermes/.env (yes or no for each)? Does ~/.hermes/auth.json have an xai-oauth entry with tokens, under providers or credential_pool (yes/no)? What does `systemctl --user is-active hermes-phone.service` say? Never ask me to paste a Twilio key into this chat: I add them to ~/.hermes/.env myself. If the call service is not set up yet, show me the Install steps for the call service and the public address from ~/.hermes/plugins/hermes-phone/README.md, and set nothing up until I say so.')
+  }
+
+  steps.push(
+    `Finish with a short table: each plugin, its version before and after, the validate result and the check result. Then tell me Hermes needs a restart: the dashboard (and the messaging gateway, if one runs here) load plugins when they start${chosen.includes('hermes-phone') ? ', and hermes-phone.service, if it runs, runs the plugin’s own code' : ''}. Do not restart anything.`,
+  )
 
   return [
     `Hermes: please install or update ${chosen.length > 1 ? 'these HermesBot plugins' : 'this HermesBot plugin'} on this Hermes server from GitHub (github.com/${PLUGINS_REPO}), pinned to one exact commit: ${listed}. Follow the steps in order, show me the output of each, and stop and tell me if anything fails. Change nothing else: no other plugins, profiles, bots or config keys. Do NOT restart Hermes or the gateway; I will do that myself. Never print, quote or send me any token, key or secret.`,

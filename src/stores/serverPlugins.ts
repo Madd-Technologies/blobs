@@ -1,9 +1,11 @@
 import { create } from 'zustand'
 
+import { phonePluginLine } from '@/features/phone/view'
 import { installMessage, RELEASES, type PluginName } from '@/features/plugins/catalog'
 import { checkPlugins, type ProbeAnswer } from '@/features/plugins/check'
 import type { PluginCheck } from '@/features/plugins/view'
 import { getDashboardStatus } from '@/lib/hermes/dashboard'
+import { getPhoneStatus } from '@/lib/hermes/phone'
 import { getDriveStatus, getPaperlessStatus } from '@/lib/hermes/plugins'
 import { pushStatusFrom, type PushStatus } from '@/lib/hermes/push-api'
 import { getVoiceStatus } from '@/lib/hermes/voice'
@@ -127,6 +129,19 @@ export const SERVER_PLUGINS: ServerPlugin[] = [
     setup: installMessage(['hermes-voice']),
     optional: true,
     probe: async config => (await getVoiceStatus(config)) ? { detail: 'Ready for calls. Each bot’s Voice settings choose its voice and which xAI account pays.', needsSetup: false } : null,
+  },
+  {
+    name: 'hermes-phone',
+    title: 'Phone',
+    about: 'Optional. Phone errands: a bot writes a call brief, you approve every call here, and a voice that knows only the brief makes them through your own Twilio number.',
+    version: RELEASES['hermes-phone'],
+    setup: installMessage(['hermes-phone']),
+    optional: true,
+    probe: async config => {
+      const status = await getPhoneStatus(config)
+
+      return status ? phonePluginLine(status) : null
+    },
   },
 ]
 
