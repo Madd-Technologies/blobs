@@ -8,15 +8,15 @@
 
 export const PLUGINS_REPO = 'Madd-Technologies/blobs-hermes-bot-plugins'
 /** `hermes plugins install --ref` takes an exact 40-character commit, so what installs is what was checked. */
-export const PLUGINS_COMMIT = '98e132ea25bad7e5141f36580f0fa291690bb816'
+export const PLUGINS_COMMIT = '9f83eec056731a0598dde52083f800849cf3fbc9'
 
 export const RELEASES = {
-  'hermes-bot-mobile': '0.1.8',
+  'hermes-bot-mobile': '0.1.9',
   'hermes-paperless': '0.3.0',
   'hermes-drive': '0.1.0',
   'hermes-dashboard': '0.5.2',
   'hermes-voice': '0.1.1',
-  'hermes-phone': '0.1.0',
+  'hermes-phone': '0.1.3',
 } as const
 
 export type PluginName = keyof typeof RELEASES
@@ -24,7 +24,7 @@ export type PluginName = keyof typeof RELEASES
 /** What each one is, in a sentence the bot reads before installing it. */
 const ABOUT: Record<PluginName, string> = {
   'hermes-bot-mobile':
-    'push notifications to my phone when a bot needs me (an approval, a question, a routine that broke, a background task blocked on its kanban card) and, for a bot set to Everything, the start of each reply it gives me, like a message (never that a turn finished or a routine ran), each naming the chat or routine it is about, what bots in a group room are doing right now, what waits on me pushed to the app the moment it changes, restarting the dashboard (and the gateway) from the app, and sending a file from this server to one of my devices with Taildrop. It replaces the older hermes-push plugin and copies its registered phones on first start.',
+    'push notifications to my phone when a bot needs me (an approval, a question, a routine that broke, a background task blocked on its kanban card) and, for a bot set to Everything, the start of each reply it gives me, like a message (never that a turn finished or a routine ran), each naming the chat or routine it is about, what bots in a group room are doing right now, what waits on me pushed to the app the moment it changes, restarting the dashboard (and the gateway) from the app, sending a file from this server to one of my devices with Taildrop, and asking me in the app (in the chat the card came from) before a kanban worker runs a command that needs my OK, where Hermes would otherwise refuse it. It replaces the older hermes-push plugin and copies its registered phones on first start.',
   'hermes-paperless': 'streams Paperless documents to my phone’s viewer, a read-only skill for bots, a dashboard tab and a Hermes Desktop page. It reads the Paperless address and token already in ~/.hermes/.env.',
   'hermes-drive': 'streams Google Drive files to my phone’s viewer (Google Docs, Sheets and Slides as PDF) with the google-workspace skill’s sign-in, read only, and a read-only skill for bots.',
   'hermes-dashboard': 'a dashboard for each bot on my phone: collections the bot designs (fields, statuses, drafts and buttons) and panels kept up to date by code wherever possible (panels that read a live source, panels computed from records, script feeds through its write.py), a Background work panel of the bot’s kanban cards (a note on a blocked card answers it), waking the bot only when something needs judgment, through four dashboard_* tools and a skill. It keeps one SQLite database under ~/.hermes/hermes-dashboard/.',
