@@ -50,7 +50,11 @@ export default function NeverShare() {
       return
     }
 
-    // Nothing of the value stays on the phone once it is saved.
+    close()
+  }
+
+  // Nothing of the value stays on the phone once the sheet is gone, saved or not.
+  function close() {
     setAdding(false)
     setLabel('')
     setValue('')
@@ -73,7 +77,7 @@ export default function NeverShare() {
         </GroupedList>
       </ScrollView>
 
-      <Sheet visible={adding} onClose={() => setAdding(false)} label="Add to never share" avoidKeyboard>
+      <Sheet visible={adding} onClose={close} label="Add to never share" avoidKeyboard>
         <View style={styles.sheet}>
           <T variant="sheetTitle">Add to never share</T>
           <View style={styles.field}>
@@ -101,7 +105,7 @@ export default function NeverShare() {
             />
           </View>
           <T variant="label" color="text2">
-            Saved to your server. After this you’ll see only “…{value.trim().slice(-2) || '..'}”, and any brief that holds it needs your tick.
+            Saved to your server. After this you’ll see only {value.trim() ? `“…${value.trim().slice(-2)}”` : 'its last two characters'}, and any brief that holds it needs your tick.
           </T>
           <Pill label="Add" variant="primary" height={52} disabled={!label.trim() || !value.trim()} loading={busy} onPress={() => void add()} />
         </View>

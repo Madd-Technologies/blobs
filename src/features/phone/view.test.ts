@@ -18,6 +18,7 @@ import {
   gateLine,
   headline,
   hoursLabel,
+  inMotion,
   modeLine,
   NO_CHOICES,
   openQuestion,
@@ -30,6 +31,7 @@ import {
   theyAsked,
   toggle,
   transcriptLines,
+  yourAnswers,
 } from './view.ts'
 
 const call = (over: Partial<Call> = {}): Call => ({
@@ -198,6 +200,7 @@ describe('results', () => {
   it('sums up what the calls came to', () => {
     assert.equal(headline(done), '2 quotes, 1 call back')
     assert.equal(headline(errand({ calls: [call({ status: 'failed' }), call({ status: 'waiting' })] })), '1 couldn’t be placed')
+    assert.equal(headline(errand({ calls: [call({ status: 'done', hangup: true, outcome: { status: 'call_back', notes: 'Hung up from the app.' } }), call({ id: 'c_2', status: 'cancelled' })] })), '1 hung up, 1 not called')
   })
 
   it('lines the answers up by field, with a dash for none', () => {
@@ -307,6 +310,21 @@ describe('errandsForChat', () => {
 
     assert.equal(callingErrand([errand(), calling])?.id, 'r')
     assert.equal(callingErrand([errand({ status: 'running', calls: [call({ status: 'waiting' })] })]), undefined)
+  })
+
+  it('shows an answer you just sent before the call service has read it, once', () => {
+    const asked = { text: 'Any trees over the roof?', asked: 100, answer: 'Yes, two oaks.' }
+
+    assert.deepEqual(yourAnswers(call({ answers: [{ question: 'Two stories?', answer: 'Yes.', asked: 40 }], question: asked })).map(a => a.answer), ['Yes.', 'Yes, two oaks.'])
+    assert.equal(yourAnswers(call({ answers: [{ question: asked.text, answer: asked.answer, asked: 100 }], question: asked })).length, 1)
+    assert.deepEqual(yourAnswers(call({ answers: [{ question: 'Gate code?', answer: null, asked: 10 }], question: { ...asked, answer: null } })), [])
+  })
+
+  it('keeps a stopped errand moving until its last call is off the line', () => {
+    assert.equal(inMotion(errand({ status: 'cancelled', calls: [call({ status: 'live', hangup: true }), call({ id: 'c_2', status: 'cancelled' })] })), true)
+    assert.equal(inMotion(errand({ status: 'cancelled', calls: [call({ status: 'done' }), call({ id: 'c_2', status: 'cancelled' })] })), false)
+    assert.equal(inMotion(errand({ status: 'approved', calls: [call({ status: 'waiting' })] })), true)
+    assert.equal(inMotion(errand({ status: 'pending' })), false)
   })
 })
 

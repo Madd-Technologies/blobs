@@ -3,7 +3,7 @@
  * results side by side, a call's transcript, and what waits on you. Pure.
  */
 
-import type { ApproveEdits, Brief, Call, CallQuestion, Errand, ErrandStatus, Flag, PhoneSettings, RecordField } from '../../lib/hermes/phone.ts'
+import type { ApproveEdits, Brief, Call, CallAnswer, CallQuestion, Errand, ErrandStatus, Flag, PhoneSettings, RecordField } from '../../lib/hermes/phone.ts'
 
 /** How long a live call holds a question for your answer (the service's QUESTION_WAIT_S). */
 export const QUESTION_S = 60
@@ -168,6 +168,9 @@ export function openQuestion(call: Pick<Call, 'question' | 'status'>, nowS: numb
   return { ...question, left: Math.max(0, Math.min(QUESTION_S, Math.round(question.asked + QUESTION_S - nowS))) }
 }
 
+/** A call you hung up from the app: the service records it as a call back with this note. */
+const hungUpByYou = (call: Pick<Call, 'outcome' | 'hangup'>): boolean => call.hangup && call.outcome?.notes === 'Hung up from the app.'
+
 /** What a finished call came to, in a few words. */
 export function outcomeWords(call: Pick<Call, 'outcome' | 'hangup'>): { icon: LineIcon; text: string } {
   const outcome = call.outcome
@@ -180,7 +183,7 @@ export function outcomeWords(call: Pick<Call, 'outcome' | 'hangup'>): { icon: Li
     return { icon: 'slash', text: 'asked not to be called again' }
   }
 
-  if (call.hangup && outcome.notes === 'Hung up from the app.') {
+  if (hungUpByYou(call)) {
     return { icon: 'hangup', text: 'you hung up' }
   }
 
@@ -252,6 +255,14 @@ export function activeCall(errand: Pick<Errand, 'calls'>): Call | undefined {
   return errand.calls.find(call => call.status === 'dialing' || call.status === 'ringing' || call.status === 'live')
 }
 
+/**
+ * Whether an errand can still change without you: its calls are being made, or it was stopped and its last call is still
+ * on the line until the call service hangs up. Such errands are read on every refresh and their clocks tick.
+ */
+export function inMotion(errand: Pick<Errand, 'status' | 'calls'>): boolean {
+  return errand.status === 'approved' || errand.status === 'running' || !!activeCall(errand)
+}
+
 /** The tray's second line for the active call: "Live 2:14 · call 1 of 3". */
 export function barLine(errand: Pick<Errand, 'calls'>, call: Call, nowS: number): string {
   const line = callLine(call, nowS)
@@ -266,6 +277,7 @@ const HEADLINE: Record<string, [string, string]> = {
   quoted: ['quote', 'quotes'],
   booked: ['booking', 'bookings'],
   call_back: ['call back', 'call backs'],
+  hung_up: ['hung up', 'hung up'],
   declined: ['said no', 'said no'],
   no_answer: ['no answer', 'no answers'],
   wrong_number: ['wrong number', 'wrong numbers'],
@@ -280,7 +292,7 @@ export function headline(errand: Pick<Errand, 'calls'>): string {
   const counts = new Map<string, number>()
 
   for (const call of errand.calls) {
-    const key = call.status === 'done' ? String(call.outcome?.status ?? 'done') : call.status === 'failed' || call.status === 'cancelled' || call.status === 'skipped' ? call.status : 'waiting'
+    const key = call.status === 'done' ? (hungUpByYou(call) ? 'hung_up' : String(call.outcome?.status ?? 'done')) : call.status === 'failed' || call.status === 'cancelled' || call.status === 'skipped' ? call.status : 'waiting'
 
     if (key !== 'waiting') {
       counts.set(key, (counts.get(key) ?? 0) + 1)
@@ -351,6 +363,21 @@ export function resultsLine(errand: Pick<Errand, 'calls'>): string {
 /** Who picked up, as the report says it. */
 export function answeredBy(call: Pick<Call, 'answered_by'>): string {
   return call.answered_by === 'human' ? 'a person answered' : call.answered_by === 'machine' ? 'voicemail answered' : ''
+}
+
+/**
+ * The answers you gave on a call, in order: those the call has used, then one you just sent that still sits on its open
+ * question (the call service moves it over when it reads it).
+ */
+export function yourAnswers(call: Pick<Call, 'answers' | 'question'>): CallAnswer[] {
+  const given = call.answers.filter(answer => answer.answer)
+  const pending = call.question?.answer ? call.question : null
+
+  if (!pending || given.some(answer => answer.question === pending.text && answer.asked === pending.asked)) {
+    return given
+  }
+
+  return [...given, { question: pending.text, answer: pending.answer, asked: pending.asked }]
 }
 
 /** What happened during a call besides its fields: your answers, what is still open, and what they asked you to do. */

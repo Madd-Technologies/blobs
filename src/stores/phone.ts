@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
+import { inMotion } from '@/features/phone/view'
 import { describeError } from '@/features/sessions/store'
 import {
   answerCall,
@@ -55,8 +56,11 @@ interface PhoneState {
   reset: () => void
 }
 
-/** Errands whose state can move without you: read in full on every refresh. */
-const moving = (status: string) => status === 'approved' || status === 'running'
+/**
+ * Errands whose state can move without you: read in full on every refresh. The list row has no call states, so a stopped
+ * errand whose last call is still on the line is known only from the copy already read.
+ */
+const moving = (row: ErrandRow, known: Errand | undefined) => row.status === 'approved' || row.status === 'running' || (!!known && inMotion(known))
 
 /** A refusal said for the person: the plugin's own words, with a hint where a retry won't help. */
 function refusalText(error: unknown): string {
@@ -137,7 +141,7 @@ export const usePhone = create<PhoneState>()(
 
             // Read in full what is new, what changed, and what is calling now.
             const known = get().errands
-            const stale = rows.filter(row => moving(row.status) || known[row.id]?.status !== row.status || known[row.id]?.calls.length !== row.calls)
+            const stale = rows.filter(row => moving(row, known[row.id]) || known[row.id]?.status !== row.status || known[row.id]?.calls.length !== row.calls)
 
             for (const row of stale) {
               try {
@@ -233,8 +237,8 @@ export function startPhoneSync(): () => void {
   let last = 0
   const online = () => useConnection.getState().status === 'online'
   const tick = () => {
-    const { rows } = usePhone.getState()
-    const due = rows.some(row => moving(row.status)) ? LIVE_MS : IDLE_MS
+    const { rows, errands } = usePhone.getState()
+    const due = rows.some(row => moving(row, errands[row.id])) ? LIVE_MS : IDLE_MS
 
     if (Date.now() - last >= due - 500) {
       last = Date.now()

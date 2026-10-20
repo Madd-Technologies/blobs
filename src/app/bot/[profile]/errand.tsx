@@ -17,7 +17,7 @@ import { Screen } from '@/components/ui/Screen'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { timeLabel } from '@/features/dashboard/view'
-import { activeCall, callLine, callLines, callSummary, compare, headline, isOpen, openQuestion, resultsLine, shortName, theyAsked } from '@/features/phone/view'
+import { activeCall, callLine, callLines, callSummary, compare, headline, inMotion, openQuestion, resultsLine, shortName, theyAsked } from '@/features/phone/view'
 import type { Errand } from '@/lib/hermes/phone'
 import { useNowMs } from '@/lib/useNow'
 import { useBotView } from '@/stores/bots'
@@ -36,7 +36,8 @@ export default function ErrandScreen() {
   const settings = usePhone(state => state.settings)
   const view = useBotView(profile)
   const botName = view?.name ?? profile
-  const nowS = useNowMs(!!errand && isOpen(errand), 1000) / 1000
+  // Live lines count each second while calls are being made; a request waiting for your OK needs no clock.
+  const nowS = useNowMs(!!errand && inMotion(errand), 1000) / 1000
   const back = { pathname: '/bot/[profile]', params: { profile } } as const
 
   useEffect(() => {

@@ -8,7 +8,7 @@ import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
 import { Press } from '@/components/ui/Press'
 import { T } from '@/components/ui/T'
-import { activeCall, barLine, callLine, callLines, isOpen, openQuestion } from '@/features/phone/view'
+import { activeCall, barLine, callLine, callLines, inMotion, openQuestion, yourAnswers } from '@/features/phone/view'
 import type { BotMeta } from '@/lib/hermes/identity'
 import type { Errand } from '@/lib/hermes/phone'
 import { useNowMs } from '@/lib/useNow'
@@ -42,8 +42,8 @@ function Quiet({ icon, text }: { icon: React.ComponentProps<typeof Feather>['nam
 export function ErrandBlock({ errand, botName, meta }: { errand: Errand; botName: string; meta: BotMeta | undefined }) {
   const router = useRouter()
   const settings = usePhone(state => state.settings)
-  const moving = isOpen(errand) && errand.status !== 'pending'
-  // Live lines count up each second while a call is on; settled ones need no clock.
+  const moving = inMotion(errand)
+  // Live lines count up each second while a call is on (even a stopped errand's last one); settled ones need no clock.
   const nowS = useNowMs(moving, 1000) / 1000
   const { brief } = errand
 
@@ -61,7 +61,7 @@ export function ErrandBlock({ errand, botName, meta }: { errand: Errand; botName
 
   const openErrand = () => router.push({ pathname: '/bot/[profile]/errand', params: { profile: errand.profile, id: errand.id } })
   const openCall = (callId: string) => router.push({ pathname: '/bot/[profile]/errand-call', params: { profile: errand.profile, errand: errand.id, call: callId } })
-  const answered = errand.calls.flatMap(call => call.answers.filter(answer => answer.answer).map(answer => ({ call, answer })))
+  const answered = errand.calls.flatMap(call => yourAnswers(call).map(answer => ({ call, answer })))
   const asking = errand.calls.filter(call => openQuestion(call, nowS))
 
   return (
