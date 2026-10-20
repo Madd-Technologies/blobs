@@ -160,9 +160,13 @@ interface TextProps {
   keyboardType?: KeyboardTypeOptions
   onSave: (text: string) => void
   check?: (text: string) => string | null
+  /** A sentence or two rather than a name or an address: several lines, capitals for sentences only. */
+  multiline?: boolean
+  /** Shown under the field even while `check` reports a problem (a rule that always holds). */
+  footnote?: string
 }
 
-/** One line of text in a sheet (a name, an address), then Save. */
+/** Text in a sheet (a name, an address, or with `multiline` a sentence or two), then Save. */
 export function TextSheet({ title, visible, onClose, ...body }: TextProps & { visible: boolean; onClose: () => void }) {
   return (
     <Sheet visible={visible} onClose={onClose} label={title} avoidKeyboard>
@@ -171,7 +175,7 @@ export function TextSheet({ title, visible, onClose, ...body }: TextProps & { vi
   )
 }
 
-function TextBody({ title, note, value, placeholder, keyboardType, onSave, check }: TextProps) {
+function TextBody({ title, note, value, placeholder, keyboardType, onSave, check, multiline, footnote }: TextProps) {
   const { c } = useTheme()
   const [draft, setDraft] = useState(value)
   const problem = check ? check(draft.trim()) : null
@@ -185,15 +189,21 @@ function TextBody({ title, note, value, placeholder, keyboardType, onSave, check
         placeholder={placeholder}
         placeholderTextColor={c.text2}
         autoFocus
-        autoCapitalize={keyboardType === 'url' ? 'none' : 'words'}
-        autoCorrect={false}
+        autoCapitalize={keyboardType === 'url' ? 'none' : multiline ? 'sentences' : 'words'}
+        autoCorrect={!!multiline}
         keyboardType={keyboardType}
+        multiline={multiline}
         accessibilityLabel={title}
-        style={[styles.input, { backgroundColor: c.pressedIn, color: c.text }]}
+        style={[styles.input, multiline ? styles.multiline : null, { backgroundColor: c.pressedIn, color: c.text }]}
       />
       {problem || note ? (
         <T variant="label" color="text2">
           {problem ?? note}
+        </T>
+      ) : null}
+      {footnote ? (
+        <T variant="label" color="text2">
+          {footnote}
         </T>
       ) : null}
       <Pill label="Save" variant="primary" height={52} disabled={!!problem || draft.trim() === value} onPress={() => onSave(draft.trim())} />
@@ -265,6 +275,7 @@ const styles = StyleSheet.create({
   stepperValue: { flex: 1, textAlign: 'center', fontVariant: ['tabular-nums'] },
   sheetBody: { gap: 14, paddingBottom: 16 },
   input: { height: 48, borderRadius: radius.field, paddingHorizontal: 14, fontFamily: fonts.regular, fontSize: 16 },
+  multiline: { height: undefined, minHeight: 96, paddingTop: 12, paddingBottom: 12, textAlignVertical: 'top' },
   add: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tabular: { fontVariant: ['tabular-nums'] },
 })

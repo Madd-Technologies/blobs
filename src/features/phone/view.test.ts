@@ -21,6 +21,7 @@ import {
   inMotion,
   modeLine,
   NO_CHOICES,
+  openerProblem,
   openQuestion,
   phoneNeeds,
   phonePluginLine,
@@ -29,6 +30,7 @@ import {
   requestLine,
   resultsLine,
   spokenOpening,
+  standardOpener,
   theyAsked,
   toggle,
   transcriptLines,
@@ -374,5 +376,18 @@ describe('a call’s report', () => {
       { label: 'Still open', text: 'Whether the county wants an inspection.' },
       { label: 'They asked you to', text: 'Nothing', quiet: true },
     ])
+  })
+})
+
+describe('the opening line', () => {
+  it('reads the standard line as the plugin says it', () => {
+    assert.equal(standardOpener('Alex', true), 'Hi, this is an AI assistant calling for Alex. This call is transcribed.')
+    assert.equal(standardOpener('Alex', false), 'Hi, this is an AI assistant calling for Alex.')
+  })
+
+  it('takes up to 200 characters, counting runs of spaces as one', () => {
+    assert.equal(openerProblem('Hi, I’m calling for {name}.'), null)
+    assert.equal(openerProblem(`${'word '.repeat(39)}word`), null)
+    assert.match(openerProblem('x'.repeat(201)) ?? '', /200 characters \(201 now\)/)
   })
 })

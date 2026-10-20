@@ -615,3 +615,18 @@ export function placeErrands<I, T extends { id: string; created: number }>(items
 
   return [...out, ...ordered.slice(next).map(placed)]
 }
+
+/** The longest opening line the plugin takes. */
+export const OPENER_MAX = 200
+
+/** The standard opening line, as the plugin says it (hermes-phone persona.disclosure). */
+export function standardOpener(name: string, transcripts: boolean): string {
+  return `Hi, this is an AI assistant calling for ${name.trim() || 'you'}.${transcripts ? ' This call is transcribed.' : ''}`
+}
+
+/** Why an opening line can't be saved, or null. */
+export function openerProblem(text: string): string | null {
+  const length = text.split(/\s+/).join(' ').trim().length
+
+  return length > OPENER_MAX ? `Keep it to ${OPENER_MAX} characters (${length} now).` : null
+}
