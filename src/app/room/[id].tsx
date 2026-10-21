@@ -17,11 +17,11 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { afterSheetCloses } from '@/lib/afterSheet'
-import { activityPhrase, answerPausedText, roomAttention, buildTimeline, memberName, memberOf, nameList, pausedAsk, pausedLine, replyingLine, type TimelineItem } from '@/lib/hermes/rooms'
+import { activityPhrase, answerPausedText, askHereText, roomAttention, buildTimeline, memberName, memberOf, nameList, pausedAsk, pausedLine, replyingLine, stuckOnQuestion, type TimelineItem } from '@/lib/hermes/rooms'
 import { useNow } from '@/lib/useNow'
 import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useBotMetas } from '@/stores/bots'
-import { removeRoom, sendToRoom, startRoomPoll, stopRoomWork, useRoomData } from '@/stores/rooms'
+import { removeRoom, sendToRoom, startRoomPoll, stopAndSend, stopRoomWork, useRoomData } from '@/stores/rooms'
 import { useOnScreen } from '@/stores/presence'
 import { toast } from '@/stores/toast'
 
@@ -46,6 +46,8 @@ export default function RoomScreen() {
   const attention = useMemo(() => (room && data ? roomAttention(room, data.events, data.status) : null), [room, data])
   // The server cut the bots off with a question still open: the room stays quiet until you write again.
   const paused = useMemo(() => (room && data && !working ? pausedAsk(room, data.events) : null), [room, data, working])
+  // Bots waiting on a question nobody can answer in a room (asked through clarify).
+  const stuck = working ? stuckOnQuestion(replying, data?.activity) : []
   // Newest first, for the inverted list.
   const items = useMemo<TimelineItem[]>(() => (room && data ? buildTimeline(room, data.events).reverse() : []), [room, data])
   const handles = useMemo(() => room?.members.map(member => member.handle) ?? [], [room])
@@ -173,6 +175,22 @@ export default function RoomScreen() {
                           height={40}
                           style={styles.pausedPill}
                           onPress={() => send(answerPausedText(room, paused))}
+                        />
+                      </View>
+                    ) : null}
+                    {stuck.length ? (
+                      <View style={styles.paused}>
+                        <T variant="label" color="text2">
+                          {`${nameList(stuck.map(memberId => memberName(room, memberId)))} asked a question the room can’t show, so ${stuck.length > 1 ? 'they are' : 'it is'} waiting for an answer that can’t come.`}
+                        </T>
+                        <Pill
+                          label={`Stop and ask ${nameList(stuck.map(memberId => memberName(room, memberId)))} here`}
+                          height={40}
+                          style={styles.pausedPill}
+                          onPress={() => {
+                            stick.toLatest()
+                            void stopAndSend(id, askHereText(room, stuck)).then(error => error && toast(error))
+                          }}
                         />
                       </View>
                     ) : null}

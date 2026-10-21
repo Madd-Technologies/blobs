@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import type { RoomEvent, RoomMember } from './protocol.ts'
 import {
   answerPausedText,
+  askHereText,
   approveRoomAction,
   buildMembers,
   buildTimeline,
@@ -33,6 +34,8 @@ import {
   sendRoomMessage,
   slug,
   splitMentions,
+  stopRoom,
+  stuckOnQuestion,
   whoIsReplying,
 } from './rooms.ts'
 import type { RpcClient } from './rpc.ts'
@@ -320,6 +323,15 @@ describe('calls', () => {
     assert.deepEqual(c.calls[0], { method: 'groups.send', params: { room_id: 'r1', event_id: 'e-1', payload: { text: 'hello', thread_id: MAIN_THREAD } } })
   })
 
+  it('gives every stop its own cancel id, so each one moves the room’s stop fence', async () => {
+    const c = client(() => ({ cancelled: 1 }))
+    assert.equal(await stopRoom(c, 'r1', 'stop-a'), 1)
+    await stopRoom(c, 'r1')
+    await stopRoom(c, 'r1')
+    assert.deepEqual(c.calls[0], { method: 'groups.stop', params: { room_id: 'r1', cancel_id: 'stop-a' } })
+    assert.notEqual(c.calls[1]?.params.cancel_id, c.calls[2]?.params.cancel_id)
+  })
+
   it('answers an approval with exactly the ids the server gave', async () => {
     const c = client(() => ({ approved: true }))
     await approveRoomAction(c, 'r1', { kind: 'approval', task_id: 't1', member_id: 'm-forge', execution_generation: 2, request_id: 'q9' }, 'once')
@@ -387,6 +399,17 @@ describe('who is replying in a room', () => {
     assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('approval') }), 'Forge needs your OK')
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('writing') }), 'Hermes and Forge are writing…')
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('tool', 'terminal') }), 'Hermes and Forge are working…')
+  })
+
+  it('says a bot on clarify has a question, not that it is messaging, and offers to ask it here', () => {
+    const at = (phase: string, tool: string | null = null) => ({ phase, tool, since: 100 })
+    const activity = { 'm-forge': at('tool', 'clarify'), 'm-hermes': at('writing') }
+    assert.equal(replyingLine(room, ['m-forge'], activity), 'Forge has a question…')
+    assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('tool', 'send_message') }), 'Forge is messaging…')
+    assert.deepEqual(stuckOnQuestion(['m-hermes', 'm-forge'], activity), ['m-forge'])
+    assert.deepEqual(stuckOnQuestion(['m-hermes'], activity), [])
+    assert.deepEqual(stuckOnQuestion(['m-forge'], null), [])
+    assert.equal(askHereText(room, ['m-forge']), '@forge I can’t see questions asked with clarify in this room. Ask me here in your message instead.')
   })
 })
 
