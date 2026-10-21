@@ -126,8 +126,24 @@ export function blankSession(profile: string): BotSession {
 }
 
 /** A short, human sentence for an error from the gateway or the network. */
+/**
+ * Hermes 0.22's refusals for a chat its gateway owns (`data.reason` on a 4090), in words. The gateway runs routines, kanban
+ * results and other bots' messages into chats too, and while it holds one the dashboard cannot start a turn there.
+ */
+const OWNER_REFUSALS: Record<string, string> = {
+  SESSION_OWNER_BUSY: 'Hermes is busy in this chat right now. Your message wasn’t sent; try again in a moment.',
+  SESSION_OWNER_UNCONFIRMED: 'Hermes couldn’t confirm your message was queued. Check the chat before sending it again.',
+  SESSION_NOT_OWNED: 'Hermes has unfinished work in this chat from before a restart, so it won’t take new messages here until that’s cleared on the server (`hermes sessions discard`).',
+}
+
 export function describeError(error: unknown): string {
   if (error instanceof JsonRpcGatewayError) {
+    const reason = (error.data as { reason?: unknown } | undefined)?.reason
+
+    if (error.code === RpcCode.Refused && typeof reason === 'string' && OWNER_REFUSALS[reason]) {
+      return OWNER_REFUSALS[reason]
+    }
+
     if (error.code === RpcCode.Refused) {
       return 'This chat is open on another device. Close it there, or try again.'
     }
@@ -264,12 +280,52 @@ export function createSessions(deps: SessionsDeps) {
     return queue
   }
 
+  /** Bots whose last message Hermes 0.22 handed to its gateway: their chat is read again once that turn completes. */
+  const forwarded = new Set<string>()
+
+  /**
+   * Reads a chat's latest page again and redraws it from what the server stored: after a turn that ran in the gateway, whose
+   * steps never streamed here (Hermes 0.22 relays only its start and its final reply).
+   */
+  async function reread(profile: string): Promise<void> {
+    const config = deps.getConfig()
+    const { storedId } = get(profile)
+
+    if (!config || !storedId) {
+      return
+    }
+
+    try {
+      const page = await listMessages(config, storedId, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true })
+      const bot = get(profile)
+
+      // Another chat opened, or another turn started meanwhile: what is on screen is newer.
+      if (bot.storedId !== storedId || bot.transcript.running) {
+        return
+      }
+
+      const transcript = buildTranscript(page.messages, { running: false, inflight: null, pending_approval: null, pending_clarify: null })
+      patch(profile, {
+        rows: page.messages,
+        hasOlder: page.pagination.returned >= PAGE_SIZE,
+        transcript: { ...transcript, liveWork: bot.transcript.liveWork, liveHelpers: bot.transcript.liveHelpers, jobs: bot.transcript.jobs },
+      })
+    } catch {
+      // The reply already showed with the completion; the steps just stay unseen.
+    }
+  }
+
   const stopEvents = deps.onEvent(raw => {
     const event = asHermesEvent(raw)
     const profile = event?.session_id ? liveToProfile.get(event.session_id) : undefined
 
     if (event && profile) {
       queueFor(profile).push(event)
+
+      if (event.type === 'message.complete' && forwarded.delete(profile)) {
+        // Give the gateway a moment to commit the turn's rows.
+        timers.set(() => void reread(profile), 600)
+      }
 
       // A background job's news (it finished, failed or sent a heartbeat): the list has its exit status and output.
       if (event.type === 'status.update' && event.payload.kind === 'process') {
@@ -795,7 +851,11 @@ export function createSessions(deps: SessionsDeps) {
 
         const voice = options.voiceContext === undefined ? {} : { surface: 'voice-live' as const, voice_context: options.voiceContext }
 
-        await call(deps.client, 'prompt.submit', { session_id: liveId, text: options.wire ?? messageFor(trimmed, uploads), ...voice })
+        const submitted = await call(deps.client, 'prompt.submit', { session_id: liveId, text: options.wire ?? messageFor(trimmed, uploads), ...voice })
+
+        if (submitted?.forwarded) {
+          forwarded.add(profile)
+        }
 
         return true
       } catch (error) {

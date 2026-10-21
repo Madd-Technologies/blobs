@@ -9,7 +9,7 @@ import type { RequestBridge } from '../../lib/hermes/server-requests.ts'
 import { HermesHttpError, type ServerConfig } from '../../lib/hermes/server.ts'
 import { pendingPrompts } from '../transcript/reduce.ts'
 import type { QueueTimers } from './queue.ts'
-import { createSessions, PAGE_SIZE, type Sessions } from './store.ts'
+import { createSessions, describeError, PAGE_SIZE, type Sessions } from './store.ts'
 
 const dir = new URL('../../../docs/protocol-captures/', import.meta.url)
 const config: ServerConfig = { baseUrl: 'http://x', auth: { kind: 'token', token: 't' } }
@@ -499,6 +499,36 @@ describe('streaming a turn', () => {
     await h.sessions.open('bot')
     await h.sessions.stop('bot')
     assert.deepEqual(h.calls.at(-1), { method: 'session.interrupt', params: { session_id: 'live-1' } })
+  })
+})
+
+describe('a chat the gateway owns (Hermes 0.22)', () => {
+  it('reads the chat again when a message handed to the gateway completes', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    h.handlers['prompt.submit'] = () => ({ status: 'queued', forwarded: true, admission_id: 'adm-1' })
+    assert.equal(await h.sessions.send('bot', 'any news?'), true)
+
+    // The gateway ran the turn: only its start and final reply came back, and the stored rows have the steps.
+    h.setPage(() => [...history.messages, { id: 900, role: 'user', content: 'any news?', timestamp: 1_000 }, { id: 901, role: 'assistant', content: 'The quote came back at $640.', timestamp: 1_001 }] as StoredMessage[])
+    h.emit({ type: 'message.start', session_id: 'live-1', payload: {} } as GatewayEvent)
+    h.emit({ type: 'message.complete', session_id: 'live-1', payload: { text: 'The quote came back at $640.', status: 'complete' } } as GatewayEvent)
+    h.timers.runAll()
+    await new Promise(resolve => setImmediate(resolve))
+    h.timers.runAll()
+    await new Promise(resolve => setImmediate(resolve))
+
+    const items = bot(h)!.transcript.items
+    assert.equal(bot(h)?.rows.at(-1)?.id, 901)
+    assert.equal(items.filter(item => item.kind === 'assistant' && item.text === 'The quote came back at $640.').length, 1)
+  })
+
+  it('says why Hermes would not take the message', () => {
+    const refusal = (reason: string) => new JsonRpcGatewayError('refused', { code: 4090, data: { reason } })
+    assert.match(describeError(refusal('SESSION_OWNER_BUSY')), /busy in this chat/)
+    assert.match(describeError(refusal('SESSION_NOT_OWNED')), /unfinished work in this chat/)
+    assert.match(describeError(refusal('SESSION_OWNER_UNCONFIRMED')), /couldn’t confirm/)
+    assert.match(describeError(refusal('live_owner')), /open on another device/)
   })
 })
 

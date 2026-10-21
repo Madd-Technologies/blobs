@@ -4,7 +4,7 @@
  * from the fetches.
  */
 
-import { isAbsent } from './plugins.ts'
+import { compareVersions, isAbsent } from './plugins.ts'
 import { HermesHttpError, restJson, type ServerConfig } from './server.ts'
 
 const BASE = '/api/plugins/hermes-voice'
@@ -87,12 +87,37 @@ function isBotVoice(value: unknown): value is BotVoice {
   return !!v && typeof v.enabled === 'boolean' && typeof v.voice === 'string' && (v.account === 'sign-in' || v.account === 'key') && typeof v.available === 'object' && !!v.available
 }
 
-const at = (profile: string) => `${BASE}/bot?profile=${encodeURIComponent(profile)}`
+/**
+ * The query name the server's hermes-voice takes for the bot: `bot` from 0.1.2, `profile` before. Hermes 0.22 refuses
+ * `?profile=<another bot>` on a plugin it did not ship, so 0.1.2 names the bot `bot` (and still takes `profile` on 0.21).
+ */
+export function botParamFor(version: string | null | undefined): 'bot' | 'profile' {
+  return version && compareVersions(version, '0.1.2') >= 0 ? 'bot' : 'profile'
+}
+
+/** Asked once per server and again after this long, so a plugin update is picked up without restarting the app. */
+const PARAM_TTL_MS = 10 * 60 * 1000
+const params = new Map<string, { at: number; name: Promise<'bot' | 'profile'> }>()
+
+function botParam(config: ServerConfig, now: number = Date.now()): Promise<'bot' | 'profile'> {
+  const known = params.get(config.baseUrl)
+
+  if (known && now - known.at < PARAM_TTL_MS) {
+    return known.name
+  }
+
+  const name = getVoiceStatus(config).then(status => botParamFor(status?.version), () => 'profile' as const)
+  params.set(config.baseUrl, { at: now, name })
+
+  return name
+}
+
+const at = async (config: ServerConfig, route: string, profile: string) => `${BASE}/${route}?${await botParam(config)}=${encodeURIComponent(profile)}`
 
 /** A bot's call settings, or null when the server has no hermes-voice. */
 export async function getBotVoice(config: ServerConfig, profile: string): Promise<BotVoice | null> {
   try {
-    const answer = await restJson<unknown>(config, at(profile), {}, { timeoutMs: 8000 })
+    const answer = await restJson<unknown>(config, await at(config, 'bot', profile), {}, { timeoutMs: 8000 })
 
     return isBotVoice(answer) ? answer : null
   } catch (error) {
@@ -129,7 +154,7 @@ export async function getVoiceStatus(config: ServerConfig): Promise<{ version: s
 /** Changes a bot's call settings; answers them as they are now. */
 export async function setBotVoice(config: ServerConfig, profile: string, change: VoiceChange): Promise<BotVoice> {
   try {
-    const answer = await restJson<unknown>(config, at(profile), { method: 'PUT', body: JSON.stringify(change) }, { timeoutMs: 8000 })
+    const answer = await restJson<unknown>(config, await at(config, 'bot', profile), { method: 'PUT', body: JSON.stringify(change) }, { timeoutMs: 8000 })
 
     if (!isBotVoice(answer)) {
       throw new Error('The server gave an unexpected answer.')
@@ -147,7 +172,7 @@ export async function setBotVoice(config: ServerConfig, profile: string, change:
  */
 export async function startVoiceSession(config: ServerConfig, profile: string, caller: { name?: string; about?: string }): Promise<Minted> {
   try {
-    const answer = await restJson<Minted>(config, `${BASE}/session?profile=${encodeURIComponent(profile)}`, { method: 'POST', body: JSON.stringify(caller) }, { timeoutMs: 25000 })
+    const answer = await restJson<Minted>(config, await at(config, 'session', profile), { method: 'POST', body: JSON.stringify(caller) }, { timeoutMs: 25000 })
 
     if (typeof answer?.client_secret !== 'string' || typeof answer.url !== 'string' || !answer.url.startsWith('wss://')) {
       throw new Error('The server gave an unexpected answer.')

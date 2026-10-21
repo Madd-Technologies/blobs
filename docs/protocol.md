@@ -762,3 +762,26 @@ files. The bot's home, `.env` and `.ssh` are not copied (verified: the bot's key
 - Hermes's plugin install scan (0.21.6 and 0.22.2) reads the name of SSH's trusted-keys file in a plugin's README prose as a
   critical `ssh_backdoor` and blocks the install, even with `--force`. The plugin's docs leave the name out; the app's own
   words are not scanned.
+
+## Chats the gateway owns (Hermes 0.22.4, from source at tag `v0.22.4` and verified on a local 0.22.4)
+
+From 0.22 the messaging gateway owns local sessions through a "session authority". A standalone `hermes dashboard` (what
+the app talks to) still runs chats in its own process, and every RPC and REST route the app uses is still there, with
+additive changes only. The gateway reaches the app in three places:
+
+- **A chat the gateway already has work for.** Routines, kanban results and other bots' messages are admitted into a chat
+  by the gateway. Before each turn the dashboard checks state.db; while the gateway holds a queued or running turn there,
+  `prompt.submit` is handed to the gateway's queue and answers `{status: 'queued', forwarded: true, admission_id}`. Only
+  `message.start` and `message.complete` come back for it (the final reply in `text`, no deltas or tool steps), so the
+  app reads the chat again once the forwarded turn completes. Otherwise the submit is refused with 4090 and
+  `data.reason`: `SESSION_OWNER_BUSY`, `SESSION_OWNER_UNCONFIRMED` (it may still be queued: never resend blindly) or
+  `SESSION_NOT_OWNED` (work the first gateway start marked `unknown`; only `hermes sessions discard` clears it). The app
+  says each of these in words.
+- **Plugin routes for another bot.** 0.22 reads a route's `profile` parameter (path or query) as "run as that profile" and
+  refuses it for a plugin it did not ship, or forwards it to that bot's plugin host. hermes-dashboard 0.6.1 names it
+  `bot` (URLs unchanged); hermes-voice 0.1.2 takes `?bot=`, which the app sends once the plugin's status says 0.1.2.
+- **Rooms.** The gateway's own room service drives only rooms it owns (made through its own protocol), so rooms the app
+  makes through the dashboard keep running in the dashboard, where their approvals and questions reach the app.
+
+`DELETE /api/sessions/{id}` (and REST rename/import) now needs `request_id` and `expected_revision`; the app deletes with
+the `session.delete` RPC, which is unchanged.

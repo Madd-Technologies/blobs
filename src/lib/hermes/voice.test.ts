@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 
 import type { ServerConfig } from './server.ts'
-import { accountHint, getBotVoice, setBotVoice, voiceLine, VoiceRefusal, type BotVoice } from './voice.ts'
+import { accountHint, botParamFor, getBotVoice, setBotVoice, voiceLine, VoiceRefusal, type BotVoice } from './voice.ts'
 
 const config: ServerConfig = { baseUrl: 'https://h.ts.net', auth: { kind: 'oauth', accessToken: 'tok', refreshToken: 'r', expiresAt: 0 } }
 const realFetch = globalThis.fetch
@@ -28,11 +28,23 @@ afterEach(() => {
 })
 
 describe('getBotVoice', () => {
-  it('reads a bot’s settings by profile', async () => {
-    const calls = answer(() => ({ body: ready }))
+  it('reads a bot’s settings by profile from a plugin older than 0.1.2', async () => {
+    const calls = answer(url => (url.endsWith('/status') ? { body: { version: '0.1.1', provider: 'xai', model: 'm' } } : { body: ready }))
 
     assert.deepEqual(await getBotVoice(config, 'harbor'), ready)
-    assert.equal(calls[0]?.url, 'https://h.ts.net/api/plugins/hermes-voice/bot?profile=harbor')
+    assert.equal(calls.at(-1)?.url, 'https://h.ts.net/api/plugins/hermes-voice/bot?profile=harbor')
+  })
+
+  it('names the bot `bot` for 0.1.2 and later, which Hermes 0.22 allows', async () => {
+    const newer: ServerConfig = { ...config, baseUrl: 'https://newer.ts.net' }
+    const calls = answer(url => (url.endsWith('/status') ? { body: { version: '0.1.2', provider: 'xai', model: 'm' } } : { body: ready }))
+
+    assert.deepEqual(await getBotVoice(newer, 'harbor'), ready)
+    await getBotVoice(newer, 'juniper')
+    assert.deepEqual(calls.map(call => call.url.replace('https://newer.ts.net/api/plugins/hermes-voice', '')), ['/status', '/bot?bot=harbor', '/bot?bot=juniper'])
+    assert.equal(botParamFor('0.1.10'), 'bot')
+    assert.equal(botParamFor('0.1.1'), 'profile')
+    assert.equal(botParamFor(null), 'profile')
   })
 
   it('is null when the server has no hermes-voice', async () => {
