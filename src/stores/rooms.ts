@@ -349,11 +349,6 @@ export async function stopRoomWork(id: string): Outcome {
   }
 }
 
-/** Stops the room's replies, then sends a message once the stop has gone through (a message alone waits behind the turn). */
-export async function stopAndSend(id: string, text: string): Outcome {
-  return (await stopRoomWork(id)) ?? sendToRoom(id, text)
-}
-
 export async function answerRoomApproval(id: string, action: RoomPendingAction, choice: 'once' | 'deny'): Promise<RespondResult> {
   try {
     await approveRoomAction(gateway, id, action, choice)

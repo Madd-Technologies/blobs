@@ -316,23 +316,6 @@ export function pausedAsk(room: Pick<HostedRoom, 'members'>, events: RoomEvent[]
   return { askerId: asked.get(last) as string, asked: open, reason: activity.payload.reason_code === 'max_messages' ? 'max_messages' : 'max_rounds' }
 }
 
-/**
- * Members stuck on a question asked through clarify. Hermes runs a member's turn with no app attached (often in another
- * process than the one the app talks to), so nobody can answer it and the turn waits for clarify's timeout, an hour by
- * default. hermes-bot-mobile 0.1.10 turns such a question back so the bot asks in the room instead; until then, stopping
- * the turn and asking again is the way out. Member ids, in the order given.
- */
-export function stuckOnQuestion(replying: string[], activity: Record<string, { phase?: string; tool?: string | null } | undefined> | null | undefined): string[] {
-  return replying.filter(id => activity?.[id]?.phase === 'tool' && activity[id]?.tool === 'clarify')
-}
-
-/** What to send after stopping a member stuck on a question, so it asks in the room. */
-export function askHereText(room: Pick<HostedRoom, 'members'>, memberIds: string[]): string {
-  const handles = memberIds.map(id => `@${memberOf(room, id)?.handle ?? id}`).join(' ')
-
-  return `${handles} I can’t see questions asked with clarify in this room. Ask me here in your message instead.`
-}
-
 /** "Paused after three rounds. Hermes asked Forge." */
 export function pausedLine(room: Pick<HostedRoom, 'members'>, paused: PausedAsk): string {
   const limit = paused.reason === 'max_messages' ? 'ten bot messages' : 'three rounds'
@@ -635,7 +618,7 @@ export function toolPhrase(tool: string | null | undefined): string {
 export function activityPhrase(activity: MemberActivity | null | undefined): string {
   switch (activity?.phase) {
     case 'tool':
-      // A question asked through clarify, which nobody can answer in a room (see stuckOnQuestion).
+      // A question for the person, asked through clarify: the room shows it to answer once it reaches the app.
       return activity.tool === 'clarify' ? 'has a question' : `is ${toolPhrase(activity.tool)}`
     case 'thinking':
       return 'is thinking'

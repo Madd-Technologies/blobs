@@ -4,7 +4,6 @@ import { describe, it } from 'node:test'
 import type { RoomEvent, RoomMember } from './protocol.ts'
 import {
   answerPausedText,
-  askHereText,
   approveRoomAction,
   buildMembers,
   buildTimeline,
@@ -35,7 +34,6 @@ import {
   slug,
   splitMentions,
   stopRoom,
-  stuckOnQuestion,
   whoIsReplying,
 } from './rooms.ts'
 import type { RpcClient } from './rpc.ts'
@@ -401,15 +399,10 @@ describe('who is replying in a room', () => {
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('tool', 'terminal') }), 'Hermes and Forge are working…')
   })
 
-  it('says a bot on clarify has a question, not that it is messaging, and offers to ask it here', () => {
+  it('says a bot on clarify has a question, not that it is messaging', () => {
     const at = (phase: string, tool: string | null = null) => ({ phase, tool, since: 100 })
-    const activity = { 'm-forge': at('tool', 'clarify'), 'm-hermes': at('writing') }
-    assert.equal(replyingLine(room, ['m-forge'], activity), 'Forge has a question…')
+    assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('tool', 'clarify') }), 'Forge has a question…')
     assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('tool', 'send_message') }), 'Forge is messaging…')
-    assert.deepEqual(stuckOnQuestion(['m-hermes', 'm-forge'], activity), ['m-forge'])
-    assert.deepEqual(stuckOnQuestion(['m-hermes'], activity), [])
-    assert.deepEqual(stuckOnQuestion(['m-forge'], null), [])
-    assert.equal(askHereText(room, ['m-forge']), '@forge I can’t see questions asked with clarify in this room. Ask me here in your message instead.')
   })
 })
 
