@@ -238,10 +238,96 @@ export function buildTimeline(room: Pick<HostedRoom, 'members'>, events: RoomEve
       items.push({ kind: 'note', id: `e-${event.seq}`, text: `${memberName(room, memberId)} couldn’t reply`, detail: error || undefined, tone: 'danger' })
     } else if (event.kind === 'room.stop_requested') {
       items.push({ kind: 'note', id: `e-${event.seq}`, text: 'Stopped', tone: 'quiet' })
+    } else if (event.kind === 'turn.cancelled' && event.payload.reason === SUPERSEDED) {
+      // The reply was written but thrown away: only the newest message in the thread counts, and it starts the discussion over.
+      const memberId = typeof event.payload.member_id === 'string' ? event.payload.member_id : ''
+
+      items.push({ kind: 'note', id: `e-${event.seq}`, text: `${memberName(room, memberId)}’s reply was set aside for your newer message`, tone: 'quiet' })
     }
   }
 
   return items
+}
+
+/** Why the server threw a reply away: you sent a newer message while the bot was still writing it. */
+const SUPERSEDED = 'superseded_by_newer_user_event'
+
+/** The room's members a message @mentions (`@all` or `@everyone` is all of them). Member ids, in room order. */
+function askedIn(room: Pick<HostedRoom, 'members'>, text: string): string[] {
+  if (AT_EVERYONE.test(text)) {
+    return room.members.map(member => member.member_id)
+  }
+
+  const byHandle = new Map(room.members.map(member => [member.handle.toLowerCase(), member.member_id]))
+  const named = new Set(splitMentions(text, [...byHandle.keys()]).flatMap(part => (part.mention === 'member' ? [byHandle.get(part.text.slice(1).toLowerCase())] : [])))
+
+  return room.members.filter(member => named.has(member.member_id)).map(member => member.member_id)
+}
+
+export interface PausedAsk {
+  /** The bot whose question was left hanging. */
+  askerId: string
+  /** The bots it asked that never got a turn to answer. Member ids, in room order. */
+  asked: string[]
+  /** Why the server stopped: after three rounds, or after ten bot messages for one message of yours. */
+  reason: 'max_rounds' | 'max_messages'
+}
+
+/**
+ * A bot conversation the server cut off with a question still open. The server lets bots go on for at most three rounds (and
+ * ten messages) per message of yours, and a bot @mentioned in the last round is never asked. Then the room just goes quiet
+ * until you write again. Null when the room's latest discussion ended any other way, nobody was left asked, or you have
+ * written since.
+ */
+export function pausedAsk(room: Pick<HostedRoom, 'members'>, events: RoomEvent[]): PausedAsk | null {
+  const end = events.findLastIndex(event => event.kind === 'room.activity')
+  const activity = events[end]
+
+  if (!activity || activity.payload.status !== 'bounded' || events.slice(end + 1).some(event => event.kind === 'message.user')) {
+    return null
+  }
+
+  const discussion = activity.payload.discussion_event_id
+  // Member id → who asked it. A bot that posts afterwards has answered.
+  const asked = new Map<string, string>()
+
+  for (const event of events.slice(0, end)) {
+    if (event.kind !== 'message.member' || event.payload.discussion_event_id !== discussion) {
+      continue
+    }
+
+    const author = typeof event.payload.member_id === 'string' ? event.payload.member_id : event.actor.id
+    asked.delete(author)
+
+    for (const id of askedIn(room, textOf(event))) {
+      if (id !== author) {
+        asked.set(id, author)
+      }
+    }
+  }
+
+  const open = room.members.map(member => member.member_id).filter(id => asked.has(id))
+  const last = open.at(-1)
+
+  if (!last) {
+    return null
+  }
+
+  return { askerId: asked.get(last) as string, asked: open, reason: activity.payload.reason_code === 'max_messages' ? 'max_messages' : 'max_rounds' }
+}
+
+/** "Paused after three rounds. Hermes asked Forge." */
+export function pausedLine(room: Pick<HostedRoom, 'members'>, paused: PausedAsk): string {
+  const limit = paused.reason === 'max_messages' ? 'ten bot messages' : 'three rounds'
+
+  return `Paused after ${limit}. ${memberName(room, paused.askerId)} asked ${nameList(paused.asked.map(id => memberName(room, id)))}.`
+}
+
+/** What to send so the bots left asked answer: their handles, and who asked them. */
+export function answerPausedText(room: Pick<HostedRoom, 'members'>, paused: PausedAsk): string {
+  const handles = paused.asked.map(id => `@${memberOf(room, id)?.handle ?? id}`).join(' ')
+
+  return `${handles}, ${memberName(room, paused.askerId)} asked you above.`
 }
 
 export interface RoomAttention {
@@ -387,15 +473,7 @@ export function replyingFromLog(room: Pick<HostedRoom, 'members'>, events: RoomE
   }
 
   const everyone = room.members.map(member => member.member_id)
-  const byHandle = new Map(room.members.map(member => [member.handle.toLowerCase(), member.member_id]))
-  const named = (text: string): string[] =>
-    AT_EVERYONE.test(text)
-      ? everyone
-      : splitMentions(text, [...byHandle.keys()]).flatMap(part => {
-          const id = part.mention === 'member' ? byHandle.get(part.text.slice(1).toLowerCase()) : undefined
-
-          return id ? [id] : []
-        })
+  const named = (text: string): string[] => askedIn(room, text)
   /** Member id → the index of the event that last asked it. */
   const asked = new Map<string, number>()
   const spoke = new Set<string>()

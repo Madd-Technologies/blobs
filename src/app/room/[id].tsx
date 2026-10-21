@@ -11,12 +11,13 @@ import { TypingRow } from '@/components/rooms/TypingRow'
 import { ConfirmSheet } from '@/components/ui/ConfirmSheet'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { IconCircle } from '@/components/ui/IconCircle'
+import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
 import { Sheet } from '@/components/ui/Sheet'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { afterSheetCloses } from '@/lib/afterSheet'
-import { activityPhrase, roomAttention, buildTimeline, memberName, memberOf, nameList, replyingLine, type TimelineItem } from '@/lib/hermes/rooms'
+import { activityPhrase, answerPausedText, roomAttention, buildTimeline, memberName, memberOf, nameList, pausedAsk, pausedLine, replyingLine, type TimelineItem } from '@/lib/hermes/rooms'
 import { useNow } from '@/lib/useNow'
 import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useBotMetas } from '@/stores/bots'
@@ -43,6 +44,8 @@ export default function RoomScreen() {
   const working = data?.status?.working === true
   const replying = data?.replying ?? []
   const attention = useMemo(() => (room && data ? roomAttention(room, data.events, data.status) : null), [room, data])
+  // The server cut the bots off with a question still open: the room stays quiet until you write again.
+  const paused = useMemo(() => (room && data && !working ? pausedAsk(room, data.events) : null), [room, data, working])
   // Newest first, for the inverted list.
   const items = useMemo<TimelineItem[]>(() => (room && data ? buildTimeline(room, data.events).reverse() : []), [room, data])
   const handles = useMemo(() => room?.members.map(member => member.handle) ?? [], [room])
@@ -140,7 +143,7 @@ export default function RoomScreen() {
               onContentSizeChange={stick.onContentSizeChange}
               // Sits at the bottom of the inverted list: what the room is holding for you, or that bots are replying.
               ListHeaderComponent={
-                attention?.actions.length || data.questions?.length || working ? (
+                attention?.actions.length || data.questions?.length || working || paused ? (
                   <View style={styles.footer}>
                     {attention?.actions.length || data.questions?.length ? <RoomActions room={room} actions={attention?.actions ?? []} questions={data.questions} framed /> : null}
                     {working && replying.length
@@ -160,6 +163,19 @@ export default function RoomScreen() {
                           )
                         })
                       : null}
+                    {paused ? (
+                      <View style={styles.paused}>
+                        <T variant="label" color="text2">
+                          {pausedLine(room, paused)}
+                        </T>
+                        <Pill
+                          label={`Let ${nameList(paused.asked.map(memberId => memberName(room, memberId)))} answer`}
+                          height={40}
+                          style={styles.pausedPill}
+                          onPress={() => send(answerPausedText(room, paused))}
+                        />
+                      </View>
+                    ) : null}
                     {working && !replying.length ? (
                       <T variant="label" color="text2" style={styles.replying}>
                         Replying…
@@ -223,4 +239,6 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8, gap: 20 },
   footer: { gap: 14, paddingTop: 4 },
   replying: {},
+  paused: { gap: 10, alignItems: 'flex-start' },
+  pausedPill: { paddingHorizontal: 18 },
 })
