@@ -62,6 +62,9 @@ describe('records', () => {
     const fields = [STATUS, { key: 'reply_by', label: 'Reply by', type: 'date' } as Field]
     assert.equal(historyLine({ at: now, by_kind: 'bot', by: 'concierge', field: '_created', old: null, new: null }, fields, name).text, 'Concierge added this')
     assert.equal(historyLine({ at: now, by_kind: 'person', by: 'you', field: 'status', old: 'New', new: 'Replied' }, fields, name).text, 'You set status to Replied')
+    assert.equal(historyLine({ at: now, by_kind: 'person', by: 'you', field: '_approved', old: null, new: 'f'.repeat(64) }, fields, name).text, 'You approved exactly this version')
+    assert.equal(historyLine({ at: now, by_kind: 'script', by: 'sender', field: '_sent', old: null, new: 'Sent through Proton' }, fields, name).text, 'Sent: Sent through Proton')
+    assert.equal(historyLine({ at: now, by_kind: 'bot', by: 'concierge', field: '_refused', old: null, new: null }, fields, name).text, 'Not sent')
     assert.equal(historyLine({ at: now, by_kind: 'person', by: 'you', field: 'reply_by', old: null, new: '2026-10-14' }, fields, name).text, 'You set reply by to Tomorrow')
     assert.deepEqual(historyLine({ at: now, by_kind: 'person', by: 'you', field: '_note', old: null, new: 'Offer 1 PM' }, fields, name), { who: 'You', text: 'Offer 1 PM', note: true })
   })

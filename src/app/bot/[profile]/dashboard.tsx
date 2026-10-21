@@ -72,6 +72,9 @@ export default function BotDashboard() {
 
   const openDetails = () => router.push({ pathname: '/bot/[profile]/details', params: { profile } })
   const openRecord = (id: string) => router.push({ pathname: '/bot/[profile]/record', params: { profile, id } })
+  /** A count, a chart's bar or a stat's metric opens a page of the records behind it (dashboard, page, record). */
+  const openPage = (view: string, options: { bucket?: string; metric?: number } = {}) =>
+    router.push({ pathname: '/bot/[profile]/page', params: { profile, view, ...(options.bucket ? { bucket: options.bucket } : {}), ...(options.metric !== undefined ? { metric: String(options.metric) } : {}) } })
   const openFull = (target: DashboardView) => router.push({ pathname: '/bot/[profile]/view', params: { profile, id: target.id } })
 
   async function onPull() {
@@ -120,9 +123,9 @@ export default function BotDashboard() {
         <ScrollView style={styles.flex} contentContainerStyle={styles.body} refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => void onPull()} tintColor={c.text2} />}>
           {groupNumbers(views).map(entry =>
             Array.isArray(entry) ? (
-              <NumbersBlock key={entry.map(item => item.id).join('+')} views={entry} onMenu={setMenu} />
+              <NumbersBlock key={entry.map(item => item.id).join('+')} views={entry} onMenu={setMenu} onOpenPage={panel => openPage(panel.id)} />
             ) : (
-              <ViewBlock key={entry.id} view={entry} nowS={nowS} raised={entry.id === raisedPanel} onOpenRecord={openRecord} onToggle={(id, done) => rows.toggle(profile, id, done)} onMute={entry.collection ? row => rows.mute(profile, row) : undefined} onMenu={() => setMenu(entry)} onOpenFull={() => openFull(entry)} />
+              <ViewBlock key={entry.id} view={entry} nowS={nowS} raised={entry.id === raisedPanel} onOpenRecord={openRecord} onToggle={(id, done) => rows.toggle(profile, id, done)} onMute={entry.collection ? row => rows.mute(profile, row) : undefined} onMenu={() => setMenu(entry)} onOpenFull={() => openFull(entry)} onOpenPage={options => openPage(entry.id, options)} />
             ),
           )}
 

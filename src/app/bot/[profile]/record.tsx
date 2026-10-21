@@ -3,23 +3,26 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 
+import { LaidOutRecord } from '@/components/dashboard/LaidOutRecord'
+import { ApprovalLine, DraftCard, EntryList, FieldRows, FileList, HistoryList, LinkCards } from '@/components/dashboard/RecordBlocks'
+import { approvalDraftOf, settled, useApprovals } from '@/components/dashboard/useApprovals'
+import { entriesOf, filesOf, listOf } from '@/features/dashboard/layout'
+import { haptic } from '@/lib/haptics'
+
 import { BotPaper } from '@/components/bots/BotPaper'
 import { AttentionDot } from '@/components/bots/AttentionDot'
 import { BotFace } from '@/components/bots/BotFace'
 import { Markdown } from '@/components/chat/Markdown'
 import { FieldSheet } from '@/components/dashboard/FieldSheet'
-import { openAction } from '@/components/dashboard/openAction'
 import { useRowActions } from '@/components/dashboard/useRowActions'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
-import { Press } from '@/components/ui/Press'
 import { Raised } from '@/components/ui/Raised'
 import { Screen } from '@/components/ui/Screen'
 import { Sheet } from '@/components/ui/Sheet'
 import { Spinner } from '@/components/ui/Spinner'
-import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
-import { actionFor, askAboutRecord, fileCard, formatTyped, historyLine, longLabel, nextStage, recordDrafts, recordHeading, timeLabel, typedOf, untilLabel } from '@/features/dashboard/view'
+import { askAboutRecord, fileCard, longLabel, nextStage, recordDrafts, recordHeading, timeLabel, untilLabel } from '@/features/dashboard/view'
 import type { Field } from '@/lib/hermes/dashboard'
 import { useNow } from '@/lib/useNow'
 import { useBotView, useBotViews } from '@/stores/bots'
@@ -28,26 +31,6 @@ import { useDrafts } from '@/stores/drafts'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
-
-const ACTION_ICON = { tel: 'phone', mailto: 'mail', web: 'external-link', viewer: 'file-text' } as const
-
-/** A file card's icon by what the document is: a sheet, a deck, a picture, a web page, or a document. */
-function fileIcon(card: { kind: string; where: string }): 'grid' | 'monitor' | 'image' | 'globe' | 'file-text' {
-  if (card.kind === 'Google Sheet') {
-    return 'grid'
-  }
-
-  if (card.kind === 'Google Slides') {
-    return 'monitor'
-  }
-
-  if (card.where === 'opens in the browser') {
-    return 'globe'
-  }
-
-  return /\.(png|jpe?g|gif|webp|heic)$/i.test(card.kind) ? 'image' : 'file-text'
-}
-
 
 /** One record a bot keeps for you: its fields (yours to change), notes and history, and what to do next. */
 export default function DashboardRecord() {
@@ -68,6 +51,9 @@ export default function DashboardRecord() {
   const name = botName(profile)
   const clock = useNow(60)
   const rows = useRowActions(detail?.now ?? clock, botName)
+  const approvals = useApprovals(detail)
+  /** A bot's name when it is one of yours (an "asked by" byline names only those). */
+  const nameOf = (who: string) => bots.find(bot => bot.profile === who)?.name ?? null
 
   useFocusEffect(
     useCallback(() => {
@@ -131,7 +117,9 @@ export default function DashboardRecord() {
   // The bot's buttons this record offers now (the first is the white pill, the rest under ⋯), and the pressed one under way.
   const buttons = detail.show?.actions ?? []
   const running = detail.show?.running ?? null
-  const button = running ? null : (buttons[0] ?? null)
+  const firstButton = running ? null : (buttons[0] ?? null)
+  // A button whose approval is done with (approved and on its way, or sent) has nothing left to do.
+  const button = firstButton && !settled(approvals, approvalDraftOf(detail, firstButton.id)) ? firstButton : null
   const primary = !running && !button && heading.needsYou && next ? next : null
   // Documents the record links to are file cards near the top; everything else is a row in the field list.
   const files = collection.fields.flatMap(field => {
@@ -139,7 +127,10 @@ export default function DashboardRecord() {
 
     return card ? [{ field, card, value: String(record.values[field.key]).trim() }] : []
   })
-  const fields = collection.fields.filter(field => !field.retired && field.type !== 'draft' && !heading.shown.includes(field.key) && !files.some(file => file.field.key === field.key))
+  // Lists, dated lines and files have their own blocks; a draft's attachments show on the draft.
+  const attached = new Set(collection.fields.flatMap(field => (field.attachments ? [field.attachments] : [])))
+  const structured = collection.fields.filter(field => !field.retired && ['list', 'entries', 'files'].includes(field.type) && !attached.has(field.key))
+  const fields = collection.fields.filter(field => !field.retired && field.type !== 'draft' && !structured.includes(field) && !attached.has(field.key) && !heading.shown.includes(field.key) && !files.some(file => file.field.key === field.key))
   // The bot's second button gets its own pill beside Ask; any more are under ⋯.
   const second = button ? (buttons[1] ?? null) : null
   const creator = record.created_by
@@ -156,7 +147,48 @@ export default function DashboardRecord() {
   async function press(action: { id: string; label: string }) {
     setMore(false)
 
+    const draft = approvalDraftOf(detail!, action.id)
+
+    if (draft) {
+      return approve(action, draft)
+    }
+
     if (!(await run('press', () => useDashboards.getState().press(profile, id, action.id)))) {
+      router.push({ pathname: '/bot/[profile]', params: { profile } })
+    }
+  }
+
+  /**
+   * A button that sends a draft you approve: it carries the digest of exactly what the screen drew. When the draft changed
+   * since, nothing is sent and the card shows the new version to look at; the white pill then says so.
+   */
+  async function approve(action: { id: string; label: string }, draft: string) {
+    if (approvals.changed[draft]) {
+      approvals.reviewed(draft)
+
+      return
+    }
+
+    const digest = approvals.drawn[draft]
+    const state = approvals.states[draft]
+
+    if (!digest || !state || (state.kind !== 'waiting' && state.kind !== 'stale')) {
+      toast('This draft can’t be approved right now. Pull down to load it again.')
+
+      return
+    }
+
+    setBusy('press')
+    const result = await useDashboards.getState().approve(profile, id, action.id, digest)
+    setBusy(null)
+
+    if (result && typeof result === 'object') {
+      haptic('reject')
+      approvals.markChanged(draft, digest, result.changed)
+    } else if (result) {
+      toast(result)
+    } else {
+      haptic('confirm')
       router.push({ pathname: '/bot/[profile]', params: { profile } })
     }
   }
@@ -199,6 +231,29 @@ export default function DashboardRecord() {
         </View>
 
         <KeyboardAvoidingView style={styles.flex} behavior="padding">
+          {collection.layout ? (
+            <LaidOutRecord
+              detail={detail}
+              nowS={nowS}
+              nameOf={nameOf}
+              ownerMeta={owner?.meta}
+              approvals={approvals}
+              busy={busy}
+              refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => void onPull()} tintColor={c.text2} />}
+              next={next}
+              onEdit={setEditing}
+              onToggle={(field, value) => void change(field, value).then(problem => problem && toast(problem))}
+              onChange={change}
+              onNote={text => run('note', () => useDashboards.getState().note(profile, id, text))}
+              onPress={action => void press(action)}
+              onApprove={(action, draft) => void approve(action, draft)}
+              onAsk={askBot}
+              onOpenJob={openJob}
+              onSetClosed={() => void run('close', () => useDashboards.getState().setClosed(profile, id, !record.closed_at))}
+              onNext={stage => status && void run('next', () => change(status, stage))}
+            />
+          ) : (
+          <>
           <ScrollView style={styles.flex} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => void onPull()} tintColor={c.text2} />}>
             <View style={styles.who}>
               <BotFace name={creator} meta={owner?.meta} size={28} />
@@ -242,94 +297,30 @@ export default function DashboardRecord() {
             ) : null}
 
             {drafts.map(draft => (
-              <View key={draft.field.key} accessibilityLabel={draft.heading} style={[styles.draft, { backgroundColor: c.sheet }]}>
-                <View style={styles.draftHead}>
-                  <T variant="label" color="text2" numberOfLines={1} style={styles.flex}>
-                    {draft.heading}
-                  </T>
-                  {running ? null : (
-                    <Press accessibilityRole="button" accessibilityLabel={`Edit the ${draft.field.label.toLowerCase()}`} hitSlop={8} onPress={() => setEditing(draft.field)} style={[styles.edit, { backgroundColor: c.canvas }]}>
-                      <T variant="label" style={styles.medium}>
-                        Edit
-                      </T>
-                    </Press>
-                  )}
-                </View>
-                <T variant="body" selectable style={styles.draftText}>
-                  {draft.text}
-                </T>
-              </View>
+              <DraftCard
+                key={draft.field.key}
+                heading={draft.heading}
+                text={draft.text}
+                format={draft.field.format}
+                editableNow={!running && !draft.field.readonly}
+                onEdit={() => setEditing(draft.field)}
+                files={draft.field.attachments ? filesOf(record.values[draft.field.attachments]) : undefined}
+                creator={creator}
+                approval={draft.field.approve && approvals.states[draft.field.key] ? <ApprovalLine state={approvals.states[draft.field.key]!} botName={name} nowS={nowS} changed={approvals.changed[draft.field.key] ?? null} /> : null}
+              />
             ))}
 
-            {files.map(({ field, card, value }) => (
-              <Pressable
-                key={field.key}
-                accessibilityRole="button"
-                accessibilityLabel={`${field.label}, ${card.kind}, ${card.where}`}
-                accessibilityHint="Long press to change the link"
-                onPress={() => openAction(card.opens === 'viewer' ? { kind: 'viewer', url: value, label: 'Open' } : { kind: 'web', url: value, label: 'Open' }, creator, field.label)}
-                onLongPress={() => setEditing(field)}
-                style={({ pressed }) => [styles.file, { backgroundColor: pressed ? c.tone : c.sheet }]}
-              >
-                <View style={[styles.fileIcon, { backgroundColor: c.tone }]}>
-                  <Feather name={fileIcon(card)} size={20} color={c.text} />
-                </View>
-                <View style={styles.flex}>
-                  <T variant="bodyMedium" numberOfLines={1}>
-                    {field.label}
-                  </T>
-                  <T variant="label" color="text2" numberOfLines={1}>
-                    {card.kind} · {card.where}
-                  </T>
-                </View>
-                <Feather name={card.opens === 'web' ? 'external-link' : 'chevron-right'} size={16} color={c.text2} />
-              </Pressable>
-            ))}
+            <LinkCards items={files} creator={creator} onEdit={setEditing} />
 
-            {fields.length ? (
-              <View style={[styles.list, { backgroundColor: c.sheet }]}>
-                {fields.map((field, index) => {
-                  const value = record.values[field.key]
-                  const typed = typedOf(field, value)
-                  const action = typed ? actionFor(typed) : null
-                  const shown = typed ? (field.type === 'date' || field.type === 'datetime' ? longLabel(typed, nowS) : formatTyped(typed, nowS)) : '–'
-                  const label = `${field.label}, ${typed ? shown : 'not set'}`
+            {structured.map(field =>
+              field.type === 'files' ? (
+                <FileList key={field.key} files={filesOf(record.values[field.key])} creator={creator} label={field.label} />
+              ) : (
+                <EntryList key={field.key} label={field.label} entries={field.type === 'entries' ? entriesOf(record.values[field.key]) : listOf(record.values[field.key]).map(label => ({ label }))} />
+              ),
+            )}
 
-                  return (
-                    <View key={field.key}>
-                      {index > 0 ? <View style={[styles.separator, { backgroundColor: c.separator }]} /> : null}
-                      {field.type === 'checkbox' ? (
-                        <View style={styles.field}>
-                          <T variant="body" style={styles.flex}>
-                            {field.label}
-                          </T>
-                          <Switch value={value === true} label={field.label} onValueChange={next => void change(field, next).then(problem => problem && toast(problem))} />
-                        </View>
-                      ) : (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={label}
-                          accessibilityHint={action ? `${action.label}. Long press to change.` : 'Change it'}
-                          accessibilityActions={action ? [{ name: 'activate' }, { name: 'longpress', label: 'Change' }] : undefined}
-                          onAccessibilityAction={event => (event.nativeEvent.actionName === 'longpress' ? setEditing(field) : action && openAction(action, creator, shown))}
-                          onPress={() => (action ? openAction(action, creator, shown) : setEditing(field))}
-                          onLongPress={() => setEditing(field)}
-                          style={({ pressed }) => [styles.field, pressed && { backgroundColor: c.tone }]}
-                        >
-                          <T variant="body" style={styles.fieldLabel} numberOfLines={1}>
-                            {field.label}
-                          </T>
-                          <T variant="body" color={field.type === 'status' ? 'text' : 'text2'} numberOfLines={1} style={styles.fieldValue}>
-                            {shown}
-                          </T>
-                          {action ? <Feather name={ACTION_ICON[action.kind]} size={15} color={c.text2} /> : field.type === 'status' || field.type === 'choice' ? <Feather name="chevron-right" size={16} color={c.text2} /> : null}
-                        </Pressable>
-                      )}
-                    </View>
-                  )
-                })}
-              </View>
-            ) : null}
+            {fields.length ? <FieldRows fields={fields} record={record} nowS={nowS} creator={creator} onEdit={setEditing} onToggle={(field, value) => void change(field, value).then(problem => problem && toast(problem))} /> : null}
 
             <View style={styles.history}>
               <T variant="label" color="text2">
@@ -349,30 +340,7 @@ export default function DashboardRecord() {
                   style={[styles.noteInput, { color: c.text }]}
                 />
               </View>
-              {history.map((entry, index) => {
-                const line = historyLine(entry, collection.fields, botName)
-
-                return (
-                  <View key={`${entry.at}:${entry.field}:${index}`} style={styles.entry}>
-                    <View style={[styles.entryDot, { backgroundColor: line.note ? c.text2 : c.track }]} />
-                    {line.note ? (
-                      <T variant="secondary" style={styles.flex}>
-                        <T variant="secondary" style={styles.medium}>
-                          {line.who}:
-                        </T>{' '}
-                        {line.text}
-                      </T>
-                    ) : (
-                      <T variant="secondary" color="text2" style={styles.flex}>
-                        {line.text}
-                      </T>
-                    )}
-                    <T variant="meta" color="text2" style={styles.entryTime}>
-                      {timeLabel(entry.at, nowS)}
-                    </T>
-                  </View>
-                )
-              })}
+              <HistoryList history={history} fields={collection.fields} botName={botName} nowS={nowS} />
             </View>
           </ScrollView>
 
@@ -404,6 +372,8 @@ export default function DashboardRecord() {
               </View>
             </Raised>
           </View>
+          </>
+          )}
         </KeyboardAvoidingView>
 
         <FieldSheet

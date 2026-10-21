@@ -22,6 +22,7 @@ import { ageLabel } from '@/features/roster/derive'
 import { haptic } from '@/lib/haptics'
 import { faceColor } from '@/lib/hermes/faceColor'
 import type { BotMeta } from '@/lib/hermes/identity'
+import { approvalDraftOf } from '@/components/dashboard/useApprovals'
 import { answerApproval, answerQuestion, answerSecret, answerSudo } from '@/stores/actions'
 import { useDashboards } from '@/stores/dashboards'
 import { toast } from '@/stores/toast'
@@ -220,6 +221,8 @@ function RecordBody({ card }: { card: Extract<DeckCard, { kind: 'board' }> }) {
   const draft = detail ? recordDrafts(detail)[0] : undefined
   const running = detail?.show?.running ?? null
   const button = running ? null : (detail?.show?.actions?.[0] ?? null)
+  // A button that sends a draft you approve is pressed on the record, where the draft is drawn exactly and its digest checked.
+  const approval = !!detail && !!button && !!approvalDraftOf(detail, button.id)
 
   async function press(action: { id: string; label: string }) {
     const error = await useDashboards.getState().press(card.profile, id, action.id)
@@ -256,14 +259,26 @@ function RecordBody({ card }: { card: Extract<DeckCard, { kind: 'board' }> }) {
               </T>
             </Press>
           </View>
-          <T variant="body" style={styles.quote} numberOfLines={8}>
-            {draft.text}
-          </T>
+          {draft.field.format === 'html' ? (
+            <T variant="body" color="text2" style={styles.quote}>
+              An email to look at before it goes out.
+            </T>
+          ) : (
+            <T variant="body" style={styles.quote} numberOfLines={8}>
+              {draft.text}
+            </T>
+          )}
         </View>
       ) : null}
       <View style={styles.buttons}>
-        {button ? <Pill label={button.label} variant="primary" height={46} flex onPress={() => void press(button)} /> : null}
-        <Pill label="Open" variant={button || running ? 'secondary' : 'primary'} height={46} flex={!button} onPress={openRecord} />
+        {approval ? (
+          <Pill label="Review and approve" variant="primary" height={46} flex onPress={openRecord} />
+        ) : (
+          <>
+            {button ? <Pill label={button.label} variant="primary" height={46} flex onPress={() => void press(button)} /> : null}
+            <Pill label="Open" variant={button || running ? 'secondary' : 'primary'} height={46} flex={!button} onPress={openRecord} />
+          </>
+        )}
       </View>
     </>
   )

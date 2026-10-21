@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { dashboardRoutines, refreshedSince } from '@/features/dashboard/view'
 import { describeError } from '@/features/sessions/store'
 import { listCronJobs, triggerCronJob, type CronJob } from '@/lib/hermes/cron'
-import { addRecordNote, changeRecord, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
+import { addRecordNote, changeRecord, DraftChanged, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
 import { startPoller } from '@/lib/poller'
 import { useConnection } from '@/stores/connection'
 import { sessions } from '@/stores/sessions'
@@ -42,6 +42,11 @@ interface DashboardsState {
   mute: (profile: string, id: string, until: number | null) => Promise<string | null>
   /** You pressed a record's button: a fresh side chat with the bot gets the job (and is then the chat the bot shows). */
   press: (profile: string, id: string, action: string) => Promise<string | null>
+  /**
+   * You approved a draft and pressed its button: like `press`, carrying the draft's digest as you saw it. `{ changed }` (its
+   * digest now) when it changed since: nothing was sent, and the record is read again for you to look at.
+   */
+  approve: (profile: string, id: string, action: string, digest: string) => Promise<string | null | { changed: string }>
   /** Runs the routines that keep this dashboard now. Returns how many started, or an error. */
   checkNow: (profile: string) => Promise<{ started: number } | { error: string }>
   /** A panel's "Refresh now" / "Check now": a live panel reads its source now, a panel with a recorded job runs that job,
@@ -233,6 +238,38 @@ export const useDashboards = create<DashboardsState>((set, get) => {
 
         return sent ? null : 'The side chat didn’t take the job. Open it and try again.'
       } catch (error) {
+        return describeError(error)
+      }
+    },
+
+    approve: async (profile, id, action, digest) => {
+      const current = config()
+
+      if (!current) {
+        return 'Not connected to the server.'
+      }
+
+      const failed = await sessions.newChat(profile)
+
+      if (failed) {
+        return failed
+      }
+
+      try {
+        const { message } = await pressAction(current, id, action, sessions.store.getState().chosen[profile] ?? null, digest)
+        const sent = await sessions.send(profile, message)
+        void after(profile, id)
+
+        return sent ? null : 'The side chat didn’t take the job. Open it and try again.'
+      } catch (error) {
+        if (error instanceof DraftChanged) {
+          // Nothing started: leave the fresh side chat and show the new version.
+          void sessions.leaveSide(profile)
+          await get().loadRecord(id)
+
+          return { changed: error.current }
+        }
+
         return describeError(error)
       }
     },

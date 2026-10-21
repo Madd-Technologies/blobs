@@ -5,11 +5,33 @@
  */
 
 import { isAbsent } from './plugins.ts'
-import { restJson, type ServerConfig } from './server.ts'
+import { HermesHttpError, restJson, type ServerConfig } from './server.ts'
 
 const BASE = '/api/plugins/hermes-dashboard'
 
-export type FieldType = 'text' | 'longtext' | 'number' | 'money' | 'percent' | 'date' | 'datetime' | 'checkbox' | 'status' | 'choice' | 'phone' | 'email' | 'url' | 'link' | 'rating' | 'draft'
+export type FieldType = 'text' | 'longtext' | 'number' | 'money' | 'percent' | 'date' | 'datetime' | 'checkbox' | 'status' | 'choice' | 'phone' | 'email' | 'url' | 'link' | 'rating' | 'draft' | 'list' | 'entries' | 'files'
+
+/** How a longtext or draft is written (hermes-dashboard 0.6+): HTML is drawn in a sealed view. */
+export type TextFormat = 'plain' | 'markdown' | 'html'
+
+/** One dated line of an `entries` field, like a task's attempt. */
+export interface Entry {
+  label: string
+  detail?: string
+  /** Server seconds. */
+  at?: number
+  tone?: 'good' | 'warn' | 'bad'
+}
+
+/** One file of a `files` field: on the server (`path`) or the web (`url`). */
+export interface FileRef {
+  name: string
+  path?: string
+  url?: string
+  mime?: string
+  size?: number
+  sha256?: string
+}
 
 export interface Field {
   key: string
@@ -25,6 +47,45 @@ export interface Field {
   currency?: string
   /** draft: the key of the field naming who it is for. */
   to?: string
+  /** longtext and draft (0.6+). */
+  format?: TextFormat
+  /** The bot keeps it: the app doesn't offer to change it (0.6+). */
+  readonly?: boolean
+  /** draft: its button is your approval of exactly this content, bound to a digest (0.6+). */
+  approve?: boolean
+  /** draft: the files field sent with it. */
+  attachments?: string
+  /** draft: other fields that are part of what is approved (the subject...). */
+  covers?: string[]
+}
+
+/** A block of a collection's record layout (0.6+), drawn by the app in its own design. */
+export type LayoutBlock =
+  | { block: 'header'; meta?: string; byline?: string }
+  | { block: 'ask'; field: string; choices?: string; answer: 'note' | string; when?: unknown }
+  | { block: 'text'; field: string; label?: string; format?: TextFormat; fold?: number }
+  | { block: 'fields'; fields: string[]; label?: string }
+  | { block: 'files'; field: string; label?: string }
+  | { block: 'draft'; field: string }
+  | { block: 'entries'; field: string; label?: string }
+  | { block: 'notes'; label?: string; history: 'notes' | 'all' }
+
+export interface RecordLayout {
+  blocks: LayoutBlock[]
+  tray?: { composer?: boolean; primary?: string; secondary?: string[]; placeholder?: string }
+}
+
+/** A draft you approve: its digest as stored now, the fields it covers, and your latest approval with what the sender did. */
+export interface DraftApproval {
+  digest: string
+  covers: string[]
+  approved?: {
+    digest: string
+    at: number
+    action: string | null
+    draft: string
+    outcome?: { outcome: 'sent' | 'refused'; digest: string | null; at: number; detail: string | null }
+  }
 }
 
 /** A button's job under way: pressed at `at` (server seconds), running in the side chat `session` until the bot writes the record. */
@@ -97,10 +158,10 @@ export type View =
   | (ViewBase & { kind: 'list' | 'checklist'; rows: ViewRow[] })
   | (ViewBase & { kind: 'table'; columns: { key: string; label: string; type: FieldType }[]; rows: { id: string; done: boolean; needs_you: boolean; signal?: RowSignal; muted_until?: number; cells: (Typed | null)[] }[] })
   | (ViewBase & { kind: 'board'; columns: { name: string; count: number; rows: ViewRow[] }[] })
-  | (ViewBase & { kind: 'number'; value: number | null; previous?: number | null; period?: 'day' | 'week' | 'month'; unit?: ValueUnit })
-  | (ViewBase & { kind: 'chart'; bucket: 'day' | 'week' | 'month'; style: 'bar' | 'line'; points: { start: string; value: number }[]; unit?: ValueUnit })
+  | (ViewBase & { kind: 'number'; value: number | null; previous?: number | null; period?: 'day' | 'week' | 'month'; unit?: ValueUnit; opens?: boolean })
+  | (ViewBase & { kind: 'chart'; bucket: 'day' | 'week' | 'month'; style: 'bar' | 'line'; points: { start: string; value: number }[]; unit?: ValueUnit; opens?: boolean })
   | (ViewBase & { kind: 'summary'; text: string })
-  | (ViewBase & { kind: 'stat'; metrics: { label: string; value: string; change?: string }[] })
+  | (ViewBase & { kind: 'stat'; metrics: { label: string; value: string; change?: string; opens?: boolean }[] })
 
 export interface BotDashboard {
   profile: string
@@ -119,11 +180,14 @@ export interface DashboardsSummary {
   now: number
 }
 
+/** A stored value: one value, or the items of a list, entries or files field. */
+export type RecordValue = string | number | boolean | null | string[] | Entry[] | FileRef[]
+
 export interface DashboardRecord {
   id: string
   collection: string
   source_key: string | null
-  values: Record<string, string | number | boolean | null>
+  values: Record<string, RecordValue>
   /** Fields you changed last, and when: bots leave them alone. */
   person_fields: Record<string, number>
   created_by: string
@@ -137,10 +201,10 @@ export interface DashboardRecord {
 
 export interface HistoryEntry {
   at: number
-  by_kind: 'bot' | 'person'
+  by_kind: 'bot' | 'person' | 'script'
   /** The bot's profile, or "you". */
   by: string
-  /** A field key, or `_created`, `_note`, `_closed`, `_reopened`. */
+  /** A field key, or `_created`, `_note`, `_closed`, `_reopened`, `_action`, `_muted`, `_approved`, `_sent`, `_refused`. */
   field: string
   old: unknown
   new: unknown
@@ -148,8 +212,10 @@ export interface HistoryEntry {
 
 export interface RecordDetail {
   record: DashboardRecord
-  collection: { key: string; owner: string; id: string; title: string; fields: Field[] }
+  collection: { key: string; owner: string; id: string; title: string; fields: Field[]; layout?: RecordLayout | null; actions?: { id: string; label: string; draft?: string }[] }
   history: HistoryEntry[]
+  /** For each draft you approve (0.6+): its digest now and your latest approval. */
+  approvals?: Record<string, DraftApproval>
   /** How to head it: the fields its first view shows, a longtext body, and whether a view's rule says it needs you. */
   show?: {
     title: string | null
@@ -162,6 +228,8 @@ export interface RecordDetail {
     actions?: { id: string; label: string }[]
     /** The pressed button it waits on, if any. */
     running?: RunningJob | null
+    /** Whether its layout's question is up (0.6+). */
+    ask?: boolean
   }
   now: number
 }
@@ -249,9 +317,78 @@ export async function muteRecord(config: ServerConfig, id: string, until: number
   return (await restJson<{ record: DashboardRecord }>(config, recordPath(id, '/mute'), json('POST', { until }), { timeoutMs: 10000 })).record
 }
 
-/** You pressed a button on a record: the server marks it under way and answers the message to send the bot in `session`. */
-export function pressAction(config: ServerConfig, id: string, action: string, session: string | null): Promise<{ message: string; running: RunningJob }> {
-  return restJson(config, recordPath(id, `/actions/${encodeURIComponent(action)}`), json('POST', { session }), { timeoutMs: 10000 })
+/** The draft you approved changed since you opened it (or this needs a digest): nothing started. `current` is its digest now. */
+export class DraftChanged extends Error {
+  current: string
+
+  constructor(message: string, current: string) {
+    super(message)
+    this.name = 'DraftChanged'
+    this.current = current
+  }
+}
+
+/** The plugin's 409 `{detail, digest}` for a changed draft, or null for any other error. */
+export function draftChangedOf(error: unknown): DraftChanged | null {
+  if (!(error instanceof HermesHttpError) || error.status !== 409) {
+    return null
+  }
+
+  const start = error.message.indexOf('{')
+
+  try {
+    const body = JSON.parse(error.message.slice(start)) as { detail?: unknown; digest?: unknown }
+
+    return typeof body.digest === 'string' ? new DraftChanged(typeof body.detail === 'string' ? body.detail : 'It changed since you opened it.', body.digest) : null
+  } catch {
+    const digest = /"digest":\s*"([0-9a-f]{64})"/.exec(error.message)?.[1]
+
+    return digest ? new DraftChanged('It changed since you opened it.', digest) : null
+  }
+}
+
+/**
+ * You pressed a button on a record: the server marks it under way and answers the message to send the bot in `session`. A
+ * button whose draft you approve sends `digest`, the digest of the draft as drawn; throws DraftChanged when it changed.
+ */
+export async function pressAction(config: ServerConfig, id: string, action: string, session: string | null, digest?: string): Promise<{ message: string; running: RunningJob; approved?: string }> {
+  try {
+    return await restJson(config, recordPath(id, `/actions/${encodeURIComponent(action)}`), json('POST', digest ? { session, digest } : { session }), { timeoutMs: 10000 })
+  } catch (error) {
+    throw draftChangedOf(error) ?? error
+  }
+}
+
+/** A row of a page: a list or board row, or a table row, with the value it is grouped by. */
+export type PageRow = ViewRow & { group?: string | number | null }
+
+/** The page a number, chart or stat opens (0.6+): the records behind it. A page holds only records. */
+export interface ViewPage {
+  id: string
+  title: string
+  kind: 'list' | 'table' | 'board'
+  panel: 'number' | 'chart' | 'stat'
+  collection: string | null
+  collection_title?: string
+  count: number
+  rows?: PageRow[]
+  columns?: { key: string; label: string; type: FieldType }[] | { name: string; count: number; rows: ViewRow[] }[]
+  /** Table rows carry cells instead of slots. */
+  next?: number | null
+  group_by?: string
+  period?: 'day' | 'week' | 'month'
+  start?: string
+  end?: string
+  metric?: string
+  fields: Field[]
+  live: boolean
+  now: number
+}
+
+export function getViewPage(config: ServerConfig, profile: string, view: string, options: { bucket?: string; metric?: number; offset?: number } = {}): Promise<ViewPage> {
+  const query = [options.bucket ? `bucket=${encodeURIComponent(options.bucket)}` : '', options.metric !== undefined ? `metric=${options.metric}` : '', options.offset ? `offset=${options.offset}` : ''].filter(Boolean).join('&')
+
+  return restJson<ViewPage>(config, `${BASE}/bots/${encodeURIComponent(profile)}/views/${encodeURIComponent(view)}/page${query ? `?${query}` : ''}`, {}, { timeoutMs: 10000 })
 }
 
 /** The plugin's own status route: whether it is loaded, and its version. Null when it is not there. */

@@ -463,6 +463,12 @@ export function historyLine(entry: HistoryEntry, fields: Field[], botName: (prof
       return { who, text: `${who} pressed ${String(entry.new ?? 'a button')}`, note: false }
     case '_muted':
       return { who, text: typeof entry.new === 'number' ? `${who} muted it until ${untilLabel(entry.new, entry.at)}` : `${who} unmuted it`, note: false }
+    case '_approved':
+      return { who, text: `${who} approved exactly this version`, note: false }
+    case '_sent':
+      return { who, text: entry.new ? `Sent: ${String(entry.new)}` : 'Sent', note: false }
+    case '_refused':
+      return { who, text: entry.new ? `Not sent: ${String(entry.new)}` : 'Not sent', note: false }
     default: {
       const label = (field?.label ?? entry.field).toLowerCase()
 

@@ -5,6 +5,7 @@ import Svg, { Polyline, Rect } from 'react-native-svg'
 import { AttentionDot } from '@/components/bots/AttentionDot'
 import { Markdown } from '@/components/chat/Markdown'
 import { SwipeRow } from '@/components/dashboard/SwipeRow'
+import { Press } from '@/components/ui/Press'
 import { Raised } from '@/components/ui/Raised'
 import { T } from '@/components/ui/T'
 import { openAction } from '@/components/dashboard/openAction'
@@ -27,6 +28,8 @@ interface Props {
   bare?: boolean
   /** The panel that needs you: raised over the paper (one per dashboard). */
   raised?: boolean
+  /** A chart's bar or a stat's metric that opens a page of its records (hermes-dashboard 0.6+). */
+  onOpenPage?: (options: { bucket?: string; metric?: number }) => void
 }
 
 /** A meta value that is a deadline today or past, on a row that needs you, reads in amber (for example "By 11 AM"). */
@@ -234,8 +237,25 @@ function Rows({ rows, nowS, checklist, fill, onOpenRecord, onToggle, onMute }: {
   )
 }
 
-/** The figures of one or more number views as tiles, three to a row (the board's "Right now" row). */
-export function NumbersBlock({ views, onMenu }: { views: DashboardView[]; onMenu: (view: DashboardView) => void }) {
+/** A tile's small label, with a chevron when tapping it opens a page of its records. */
+function TileLabel({ text, opens }: { text: string; opens: boolean }) {
+  const { c } = useTheme()
+
+  return (
+    <View style={styles.tileLabel}>
+      <T variant="meta" color="text2" numberOfLines={2} style={styles.tileLabelText}>
+        {text}
+      </T>
+      {opens ? <Feather name="chevron-right" size={12} color={c.text2} style={styles.tileChevron} /> : null}
+    </View>
+  )
+}
+
+/**
+ * The figures of one or more number views as tiles, three to a row (the board's "Right now" row). A tile that opens a page of
+ * the records it counts goes there on a tap; its panel menu is a long press. Any other tile opens its menu.
+ */
+export function NumbersBlock({ views, onMenu, onOpenPage }: { views: DashboardView[]; onMenu: (view: DashboardView) => void; onOpenPage?: (view: DashboardView) => void }) {
   const { c } = useTheme()
 
   return (
@@ -247,22 +267,22 @@ export function NumbersBlock({ views, onMenu }: { views: DashboardView[]; onMenu
 
         const change = changeLine(view.value, view.previous, view.period, view.unit)
         const value = figure(view.value, view.unit)
+        const opens = !!view.opens && !!onOpenPage
 
         return (
           <Pressable
             key={view.id}
             accessibilityRole="button"
             accessibilityLabel={`${view.title}: ${value}${change ? `, ${change}` : ''}`}
+            accessibilityHint={opens ? 'Opens the list. Long press for the panel’s options.' : undefined}
             onLongPress={() => onMenu(view)}
-            onPress={() => onMenu(view)}
+            onPress={() => (opens ? onOpenPage(view) : onMenu(view))}
             style={({ pressed }) => [styles.tile, { backgroundColor: pressed ? c.tone : c.sheet }]}
           >
             <T variant="stat" color={(view.needs_you ?? 0) > 0 ? 'needsYou' : 'text'} numberOfLines={1} adjustsFontSizeToFit>
               {value}
             </T>
-            <T variant="meta" color="text2" numberOfLines={2}>
-              {change ? `${view.title}, ${change}` : view.title}
-            </T>
+            <TileLabel text={change ? `${view.title}, ${change}` : view.title} opens={opens} />
           </Pressable>
         )
       })}
@@ -270,7 +290,7 @@ export function NumbersBlock({ views, onMenu }: { views: DashboardView[]; onMenu
   )
 }
 
-function Chart({ view }: { view: Extract<DashboardView, { kind: 'chart' }> }) {
+function Chart({ view, onOpenPage }: { view: Extract<DashboardView, { kind: 'chart' }>; onOpenPage?: (options: { bucket?: string }) => void }) {
   const { c } = useTheme()
   const width = 340
   const height = 88
@@ -299,6 +319,14 @@ function Chart({ view }: { view: Extract<DashboardView, { kind: 'chart' }> }) {
           })
         )}
       </Svg>
+      {view.opens && onOpenPage ? (
+        // Each bar opens the records in it: a row of tap targets over the bars.
+        <View style={[styles.chartTaps, { height }]}>
+          {view.points.map(point => (
+            <Pressable key={point.start} accessibilityRole="button" accessibilityLabel={`${point.start}: ${figure(point.value, view.unit)}. Opens its records`} onPress={() => onOpenPage({ bucket: point.start })} style={styles.flexOne} />
+          ))}
+        </View>
+      ) : null}
       <View style={styles.chartEnds}>
         <T variant="meta" color="text2">
           {first}
@@ -316,7 +344,7 @@ function cell(typed: Typed | null, nowS: number): string {
 }
 
 /** One panel of a bot's dashboard (number views are drawn together by `NumbersBlock`). */
-export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFull, onMute, bare, raised }: Props) {
+export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFull, onMute, bare, raised, onOpenPage }: Props) {
   const { c } = useTheme()
 
   if (view.kind === 'number') {
@@ -382,7 +410,7 @@ export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFu
         </ScrollView>
       ) : null}
 
-      {view.kind === 'chart' ? <Chart view={view} /> : null}
+      {view.kind === 'chart' ? <Chart view={view} onOpenPage={onOpenPage} /> : null}
 
       {view.kind === 'summary' ? (
         <View style={styles.summary}>
@@ -392,16 +420,23 @@ export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFu
 
       {view.kind === 'stat' ? (
         <View style={styles.stats}>
-          {view.metrics.map(metric => (
-            <View key={metric.label} style={styles.number} accessible accessibilityLabel={`${metric.label}: ${metric.value}${metric.change ? `, ${metric.change}` : ''}`}>
-              <T variant="stat" numberOfLines={1} adjustsFontSizeToFit>
-                {metric.value}
-              </T>
-              <T variant="meta" color="text2" numberOfLines={2}>
-                {metric.change ? `${metric.label}, ${metric.change}` : metric.label}
-              </T>
-            </View>
-          ))}
+          {view.metrics.map((metric, index) =>
+            metric.opens && onOpenPage ? (
+              <Press key={metric.label} accessibilityRole="button" accessibilityLabel={`${metric.label}: ${metric.value}${metric.change ? `, ${metric.change}` : ''}`} accessibilityHint="Opens the list" onPress={() => onOpenPage({ metric: index })} style={styles.number}>
+                <T variant="stat" numberOfLines={1} adjustsFontSizeToFit>
+                  {metric.value}
+                </T>
+                <TileLabel text={metric.change ? `${metric.label}, ${metric.change}` : metric.label} opens />
+              </Press>
+            ) : (
+              <View key={metric.label} style={styles.number} accessible accessibilityLabel={`${metric.label}: ${metric.value}${metric.change ? `, ${metric.change}` : ''}`}>
+                <T variant="stat" numberOfLines={1} adjustsFontSizeToFit>
+                  {metric.value}
+                </T>
+                <TileLabel text={metric.change ? `${metric.label}, ${metric.change}` : metric.label} opens={false} />
+              </View>
+            ),
+          )}
         </View>
       ) : null}
     </>
@@ -424,6 +459,11 @@ export function ViewBlock({ view, nowS, onOpenRecord, onToggle, onMenu, onOpenFu
 }
 
 const styles = StyleSheet.create({
+  tileLabel: { flexDirection: 'row', alignItems: 'flex-start', gap: 2 },
+  tileLabelText: { flexShrink: 1 },
+  tileChevron: { marginTop: 2 },
+  chartTaps: { position: 'absolute', left: 0, right: 0, top: 0, flexDirection: 'row' },
+  flexOne: { flex: 1 },
   flex: { flex: 1 },
   block: { borderRadius: radius.group, overflow: 'hidden', paddingTop: 6, paddingBottom: 12 },
   raisedBlock: { borderRadius: radius.card, overflow: 'hidden', paddingTop: 6, paddingBottom: 8 },
