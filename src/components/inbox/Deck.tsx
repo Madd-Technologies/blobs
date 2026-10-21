@@ -331,11 +331,39 @@ export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sidew
   pan = sideways ? pan.activeOffsetX([-14, 14]) : pan.failOffsetX([-12, 12])
   pan = upDown ? pan.activeOffsetY([-14, 14]) : pan.failOffsetY([-12, 12])
 
+  /** The way a swipe goes, once it has moved far enough to tell (1 sideways, 2 up and down), else 0. */
+  const wayOf = (dx: number, dy: number, far: number) => {
+    'worklet'
+
+    if (!upDown) {
+      return 1
+    }
+
+    if (!sideways) {
+      return 2
+    }
+
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < far) {
+      return 0
+    }
+
+    return Math.abs(dx) >= Math.abs(dy) ? 1 : 2
+  }
+
   pan = pan
-    .onStart(event => {
-      axis.set(!upDown || (sideways && Math.abs(event.translationX) >= Math.abs(event.translationY)) ? 1 : 2)
+    .onStart(() => {
+      // Picked from the movement, not here: Android measures a pan from where it was recognised, so it starts at zero.
+      axis.set(0)
     })
     .onUpdate(event => {
+      if (axis.get() === 0) {
+        axis.set(wayOf(event.translationX, event.translationY, 6))
+      }
+
+      if (axis.get() === 0) {
+        return
+      }
+
       const across = axis.get() === 1
       const moved = across ? event.translationX : event.translationY
       ;(across ? x : y).set(moved)
@@ -350,11 +378,13 @@ export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sidew
       }
     })
     .onEnd(event => {
-      const across = axis.get() === 1
-      const moved = across ? x.get() : y.get()
+      // Decided from the release itself, so a quick flick that gave no update in between still counts.
+      const way = axis.get() || wayOf(event.translationX + event.velocityX / 20, event.translationY + event.velocityY / 20, 1)
+      const across = way === 1
+      const moved = across ? event.translationX : event.translationY
       const velocity = across ? event.velocityX : event.velocityY
       const fling = Math.abs(velocity) > motion.flingClose
-      const direction = Math.abs(moved) > (across ? threshold : lift) || fling ? Math.sign(fling ? velocity : moved) : 0
+      const direction = way && (Math.abs(moved) > (across ? threshold : lift) || fling) ? Math.sign(fling ? velocity : moved) : 0
       side.set(0)
 
       if (direction === 0) {
@@ -365,11 +395,12 @@ export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sidew
       }
 
       if (!across) {
-        const way = direction < 0 ? 'next' : 'previous'
+        const turnWay = direction < 0 ? 'next' : 'previous'
+        x.set(withTiming(0, BACK))
         y.set(
           withTiming(direction * height * 0.9, { duration: 220 }, finished => {
             if (finished) {
-              runOnJS(onTurn)(way)
+              runOnJS(onTurn)(turnWay)
             }
           }),
         )
@@ -386,6 +417,7 @@ export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sidew
         return
       }
 
+      y.set(withTiming(0, BACK))
       x.set(
         withTiming(direction * width * 1.3, { duration: 200 }, finished => {
           if (finished) {
