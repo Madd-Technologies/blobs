@@ -58,7 +58,8 @@ interface Harness {
   handlers: Record<string, (params: Record<string, unknown>) => unknown>
   timers: ReturnType<typeof manualTimers>
   setRoster: (rows: ProfileRow[]) => void
-  setPage: (pages: (offset: number) => StoredMessage[]) => void
+  /** What the history read answers; a promise holds the read (a slow page). */
+  setPage: (pages: (offset: number) => StoredMessage[] | Promise<StoredMessage[]>) => void
   /** What the server's paged list of stored chats answers (REST, so not in `calls`). */
   setChats: (page: (query: { offset: number; limit: number; excludeSources?: string[] }) => SessionsPage) => void
   chatQueries: { offset: number; limit: number; excludeSources?: string[] }[]
@@ -70,7 +71,7 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
   const listeners = new Set<(event: GatewayEvent) => void>()
   const timers = manualTimers()
   let roster: ProfileRow[] = [row('bot', 'stored-1')]
-  let pages: (offset: number) => StoredMessage[] = () => history.messages
+  let pages: (offset: number) => StoredMessage[] | Promise<StoredMessage[]> = () => history.messages
   let chats: (query: { offset: number; limit: number; excludeSources?: string[] }) => SessionsPage = () => ({ sessions: [], total: 0 })
   const chatQueries: Harness['chatQueries'] = []
   const nextLive = { value: 1 }
@@ -106,7 +107,7 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
       return () => void listeners.delete(handler)
     },
     listMessages: async (_config, _id, _profile, query) => {
-      const messages = pages(query?.offset ?? 0)
+      const messages = await pages(query?.offset ?? 0)
       return { session_id: 'stored-1', messages, pagination: { limit: PAGE_SIZE, offset: query?.offset ?? 0, order: 'latest', returned: messages.length } }
     },
     listSessions: async (_config, { offset, limit, excludeSources }) => {
@@ -722,6 +723,121 @@ describe('reattach', () => {
     const h = harness()
     await h.sessions.reattachAll()
     assert.deepEqual(methods(h), [])
+  })
+
+  /** Holds the next history read until released (a large chat, a busy server). */
+  function slowRead(h: Harness, messages: StoredMessage[]) {
+    let release: () => void = () => undefined
+    h.setPage(() => new Promise(resolve => (release = () => resolve(messages))))
+
+    return () => release()
+  }
+
+  /** The next `session.resume` answers with `liveId`: `live-1` when the session survived the disconnect. */
+  function resumeAs(h: Harness, liveId: string) {
+    h.handlers['session.resume'] = () => ({ session_id: liveId, session_key: 'stored-1', running: false, inflight: null, info: { model: 'm', provider: 'p' } })
+  }
+
+  const settle = () => new Promise(resolve => setImmediate(resolve))
+  const answered = [...history.messages, { id: 900, role: 'user', content: 'Got the code', timestamp: 1_000 }, { id: 901, role: 'assistant', content: 'Save it in a file, then send it.', timestamp: 1_001 }] as StoredMessage[]
+
+  it('keeps a reply that streamed while the chat was read again, then shows the chat as the server stored it', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    resumeAs(h, 'live-1')
+    const release = slowRead(h, history.messages)
+    const reattach = h.sessions.reattachAll()
+    await settle()
+
+    // The page was asked for before the bot answered; the answer streams in while it is read.
+    h.emit({ type: 'message.start', session_id: 'live-1', payload: {} } as GatewayEvent)
+    h.emit({ type: 'message.complete', session_id: 'live-1', payload: { text: 'Save it in a file, then send it.', status: 'complete' } } as GatewayEvent)
+    release()
+    await reattach
+
+    const reply = () => bot(h)!.transcript.items.filter(item => item.kind === 'assistant' && item.text === 'Save it in a file, then send it.').length
+    assert.equal(reply(), 1, 'the reply that streamed is still on screen')
+    assert.equal(bot(h)?.phase, 'ready')
+
+    // Once quiet, the chat is read again and drawn from what the server stored: the reply once, now from history.
+    h.setPage(() => answered)
+    h.timers.runAll()
+    await settle()
+    assert.equal(bot(h)?.rows.at(-1)?.id, 901)
+    assert.equal(reply(), 1)
+  })
+
+  it('keeps a message you send while the chat is read again, and reads it again once that turn completes', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    resumeAs(h, 'live-1')
+    const release = slowRead(h, history.messages)
+    const reattach = h.sessions.reattachAll()
+    await settle()
+
+    assert.equal(await h.sessions.send('bot', 'Got the code'), true)
+    release()
+    await reattach
+
+    const mine = () => bot(h)!.transcript.items.filter(item => item.kind === 'user' && item.text === 'Got the code').length
+    assert.equal(mine(), 1, 'your message did not disappear')
+    assert.equal(h.timers.pending(), 0, 'nothing is read while your turn runs')
+
+    h.setPage(() => answered)
+    h.emit({ type: 'message.start', session_id: 'live-1', payload: {} } as GatewayEvent)
+    h.emit({ type: 'message.complete', session_id: 'live-1', payload: { text: 'Save it in a file, then send it.', status: 'complete' } } as GatewayEvent)
+    h.timers.runAll()
+    await settle()
+    assert.equal(bot(h)?.rows.at(-1)?.id, 901)
+    assert.equal(mine(), 1)
+  })
+
+  it('routes a re-created session’s events to the chat while its history is still being read', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    resumeAs(h, 'live-9')
+    const release = slowRead(h, history.messages)
+    const reattach = h.sessions.reattachAll()
+    await settle()
+
+    // Resumed under a new live id, and the bot is already answering on it.
+    h.emit({ type: 'message.complete', session_id: 'live-9', payload: { text: 'Here it is.', status: 'complete' } } as GatewayEvent)
+    release()
+    await reattach
+    assert.equal(bot(h)?.liveId, 'live-9')
+    assert.ok(bot(h)!.transcript.items.some(item => item.kind === 'assistant' && item.text === 'Here it is.'))
+  })
+
+  it('a re-read nothing happened during still shows the chat as the server stores it', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    h.setPage(() => answered)
+    await h.sessions.reattachAll()
+    assert.equal(bot(h)?.rows.at(-1)?.id, 901)
+    assert.ok(bot(h)!.transcript.items.some(item => item.kind === 'user' && item.text === 'Got the code'))
+  })
+
+  it('does not draw a re-read that a message landed during: it reads once more', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    resumeAs(h, 'live-1')
+    // A turn completes while the chat is read again, so the chat is read once more after it.
+    const release = slowRead(h, history.messages)
+    const reattach = h.sessions.reattachAll()
+    await settle()
+    h.emit({ type: 'message.complete', session_id: 'live-1', payload: { text: 'Done.', status: 'complete' } } as GatewayEvent)
+    release()
+    await reattach
+
+    // That follow-up read is slow too, and you send something meanwhile: it is not drawn over your message.
+    const again = slowRead(h, answered)
+    h.timers.runAll()
+    await settle()
+    h.handlers['prompt.submit'] = () => ({ status: 'streaming' })
+    assert.equal(await h.sessions.send('bot', 'one more thing'), true)
+    again()
+    await settle()
+    assert.ok(bot(h)!.transcript.items.some(item => item.kind === 'user' && item.text === 'one more thing'))
   })
 })
 

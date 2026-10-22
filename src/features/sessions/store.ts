@@ -247,8 +247,30 @@ export function createSessions(deps: SessionsDeps) {
     })
   }
 
+  /**
+   * How much has happened in each bot's chat: every live event, and every change made here (a message sent, a card answered).
+   * A read of the chat compares it before and after, because a read that something happened during is already older than
+   * what the chat shows: putting it on screen wiped the reply that had just streamed, or the message just sent, until the next
+   * time the chat was read.
+   */
+  const activity = new Map<string, number>()
+  const touch = (profile: string) => void activity.set(profile, (activity.get(profile) ?? 0) + 1)
+  const activityOf = (profile: string): number => activity.get(profile) ?? 0
+
   function patchTranscript(profile: string, change: (transcript: TranscriptState) => TranscriptState) {
+    touch(profile)
     patch(profile, bot => ({ transcript: change(bot.transcript) }))
+  }
+
+  /** Routes a chat's live events by the live id the server returned (a new one when the session had been closed). */
+  function rekey(profile: string, liveId: string) {
+    const previous = get(profile).liveId
+
+    if (previous && previous !== liveId) {
+      liveToProfile.delete(previous)
+    }
+
+    liveToProfile.set(liveId, profile)
   }
 
   // ── live events ────────────────────────────────────────────────────────────────────────────────
@@ -282,12 +304,25 @@ export function createSessions(deps: SessionsDeps) {
 
   /** Bots whose last message Hermes 0.22 handed to its gateway: their chat is read again once that turn completes. */
   const forwarded = new Set<string>()
+  /** Bots whose chat was busy while it was read, so the read was not shown: it is read again once the turn running completes. */
+  const rereadAfterTurn = new Set<string>()
+
+  /** Reads the chat again when it is quiet: now if no turn is running, else once the running one completes. */
+  function rereadWhenQuiet(profile: string, running: boolean) {
+    if (running) {
+      rereadAfterTurn.add(profile)
+    } else {
+      timers.set(() => void reread(profile), 600)
+    }
+  }
 
   /**
    * Reads a chat's latest page again and redraws it from what the server stored: after a turn that ran in the gateway, whose
-   * steps never streamed here (Hermes 0.22 relays only its start and its final reply).
+   * steps never streamed here (Hermes 0.22 relays only its start and its final reply), and after a turn that was running while
+   * the chat was read, so what it said is shown as the server keeps it. A read that the chat moved on during is not shown: it is
+   * tried again shortly, or after the turn that started meanwhile.
    */
-  async function reread(profile: string): Promise<void> {
+  async function reread(profile: string, attempt = 0): Promise<void> {
     const config = deps.getConfig()
     const { storedId } = get(profile)
 
@@ -295,12 +330,30 @@ export function createSessions(deps: SessionsDeps) {
       return
     }
 
+    const mark = activityOf(profile)
+
     try {
       const page = await listMessages(config, storedId, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true })
       const bot = get(profile)
 
-      // Another chat opened, or another turn started meanwhile: what is on screen is newer.
-      if (bot.storedId !== storedId || bot.transcript.running) {
+      // Another chat opened meanwhile.
+      if (bot.storedId !== storedId) {
+        return
+      }
+
+      // Another turn started meanwhile: read the chat when it is over.
+      if (bot.transcript.running) {
+        rereadAfterTurn.add(profile)
+
+        return
+      }
+
+      // Something else happened in the chat while it was read (a message sent, a card answered): what is on screen is newer.
+      if (activityOf(profile) !== mark) {
+        if (attempt < 3) {
+          timers.set(() => void reread(profile, attempt + 1), 1000)
+        }
+
         return
       }
 
@@ -320,11 +373,17 @@ export function createSessions(deps: SessionsDeps) {
     const profile = event?.session_id ? liveToProfile.get(event.session_id) : undefined
 
     if (event && profile) {
+      touch(profile)
       queueFor(profile).push(event)
 
-      if (event.type === 'message.complete' && forwarded.delete(profile)) {
-        // Give the gateway a moment to commit the turn's rows.
-        timers.set(() => void reread(profile), 600)
+      if (event.type === 'message.complete') {
+        const handedOff = forwarded.delete(profile)
+        const behind = rereadAfterTurn.delete(profile)
+
+        if (handedOff || behind) {
+          // Give the server a moment to commit the turn's rows.
+          timers.set(() => void reread(profile), 600)
+        }
       }
 
       // A background job's news (it finished, failed or sent a heartbeat): the list has its exit status and output.
@@ -435,7 +494,12 @@ export function createSessions(deps: SessionsDeps) {
       return
     }
 
-    if (!silent || get(profile).phase === 'idle') {
+    // What the chat showed when this open began: the same chat opened again (a reconnect, coming back to it) may be shown
+    // already, and keep being updated by its live events while it is read.
+    const shown = get(profile)
+    const mark = activityOf(profile)
+
+    if (!silent || shown.phase === 'idle') {
       patch(profile, { phase: 'opening', error: null })
     }
 
@@ -455,21 +519,36 @@ export function createSessions(deps: SessionsDeps) {
       const early = read(found)
       early.catch(() => undefined)
       const { resume: resumed, storedId } = await resume(profile, found)
-      const page = await (storedId === found ? early : read(storedId))
+      const again = shown.phase === 'ready' && shown.storedId === storedId && get(profile).storedId === storedId
 
-      // Re-key by the id the server returned: it is new if the session had been closed.
-      const previous = get(profile).liveId
-
-      if (previous && previous !== resumed.session_id) {
-        liveToProfile.delete(previous)
+      if (again) {
+        // The chat on screen carries on: its events reach it from now on, not only once the history is read (a slow read,
+        // on a large chat or a busy server, dropped what the bot said meanwhile).
+        rekey(profile, resumed.session_id)
       }
 
-      liveToProfile.set(resumed.session_id, profile)
-      queues.get(profile)?.dispose()
-      queues.delete(profile)
-
+      const page = await (storedId === found ? early : read(storedId))
       const liveWork = deps.liveWork?.() ?? false
       const liveHelpers = !liveWork && (deps.liveHelpers?.() ?? false)
+
+      if (again && activityOf(profile) !== mark) {
+        // The chat moved on while it was read (a reply streamed, you sent a message): what it shows is newer than the page,
+        // which would have wiped those until the chat was next read. Keep it, and read the chat again once it is quiet.
+        patch(profile, { phase: 'ready', error: null, liveId: resumed.session_id, info: resumed.info ?? shown.info, loadingOlder: false })
+        deps.requests?.ingest(resumed.session_id, resumed.open_requests)
+        rereadWhenQuiet(profile, resumed.running || get(profile).transcript.running)
+
+        if (liveWork || liveHelpers) {
+          void refreshJobs(profile)
+        }
+
+        return
+      }
+
+      // Re-key by the id the server returned: it is new if the session had been closed.
+      rekey(profile, resumed.session_id)
+      queues.get(profile)?.dispose()
+      queues.delete(profile)
       // The same chat opened again keeps the jobs it was following (a helper count the lists cannot give back).
       const kept = get(profile).storedId === storedId ? get(profile).transcript.jobs : undefined
 
