@@ -16,6 +16,12 @@ describe('Home list', () => {
     )
   })
 
+  it('orders pinned bots the same way, so background work does not shuffle them either (the roster’s order only breaks ties)', () => {
+    const list = homeList([bot('orion', 50, true), bot('juniper', 90, true), bot('scout', 50, true)], [] as ReturnType<typeof room>[], b => b.at, r => r.at)
+
+    assert.deepEqual(list.map(item => item.view.name), ['juniper', 'orion', 'scout'])
+  })
+
   it('puts the bot first when a bot and a room are as active as each other', () => {
     const list = homeList([bot('a', 7)], [room('r', 7)], b => b.at, r => r.at)
 
