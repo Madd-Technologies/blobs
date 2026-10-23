@@ -21,6 +21,8 @@ export const sessions = createSessions({
   readBase64: uri => readAsStringAsync(uri, { encoding: 'base64' }),
   liveWork: () => supportsLiveWork(useConnection.getState().serverVersion),
   liveHelpers: () => supportsLiveHelpers(useConnection.getState().serverVersion),
+  catchUp: liveId => gateway.catchUp(liveId),
+  follow: liveId => gateway.follow(liveId),
 })
 
 // An earlier version kept which side chat a bot was on under this key; that now lives in the prefs (`lastChats`), and only for
