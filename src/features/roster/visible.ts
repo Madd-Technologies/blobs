@@ -20,6 +20,12 @@ export interface VisibleActivity {
    * before it existed.
    */
   yours?: number
+  /**
+   * Whether the newest turn in what was read was started by a message of yours: false for one that background work began (a
+   * routine, a finished process or helper, a kanban event, another bot). A bot busy with such a turn is not shown working.
+   * Absent when no turn started in what was read.
+   */
+  lastTurnYours?: boolean
   /** The read failed: nothing is known, so Home may use the server's own preview. */
   failed?: boolean
 }
@@ -28,8 +34,8 @@ export interface VisibleActivity {
 export function lastVisible(rows: StoredMessage[], stamp: string): VisibleActivity {
   const items = itemsFromHistory(rows)
   let yours = 0
-  /** Whether the turn being read was started by a message of yours (not by a note: a routine, a wake-up, a result). */
-  let yourTurn = false
+  /** Who started the turn being read: a message of yours, or a note (a routine, a wake-up, a result) or another bot. */
+  let yourTurn: boolean | undefined
 
   for (const item of items) {
     if (item.kind === 'user') {
@@ -43,23 +49,27 @@ export function lastVisible(rows: StoredMessage[], stamp: string): VisibleActivi
     }
   }
 
+  const turn = yourTurn === undefined ? {} : { lastTurnYours: yourTurn }
+
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i]
 
     if (item && !item.chatter && (item.kind === 'user' || item.kind === 'assistant') && item.text.trim()) {
-      return { stamp, ts: item.ts ? item.ts / 1000 : 0, text: item.text, yours }
+      return { stamp, ts: item.ts ? item.ts / 1000 : 0, text: item.text, yours, ...turn }
     }
   }
 
-  return { stamp, ts: 0, text: '', yours }
+  return { stamp, ts: 0, text: '', yours, ...turn }
 }
 
 /**
- * A fresh read of a chat, keeping what the previous read knew of your last exchange when this one found none: its window can
- * be all background turns (a long routine, a busy kanban), and that must not move the bot.
+ * A fresh read of a chat, keeping what the previous read knew when this one could not tell: its window can be all background
+ * turns (a long routine, a busy kanban), which must not move the bot, and a long turn can start before the window.
  */
 export function keepYours(next: VisibleActivity, previous: VisibleActivity | undefined): VisibleActivity {
-  return next.yours || !previous?.yours ? next : { ...next, yours: previous.yours }
+  const kept = next.yours || !previous?.yours ? next : { ...next, yours: previous.yours }
+
+  return kept.lastTurnYours !== undefined || previous?.lastTurnYours === undefined ? kept : { ...kept, lastTurnYours: previous.lastTurnYours }
 }
 
 /** When you and this bot last talked, in seconds: your last exchange, or for an entry kept from before that existed, its last line. */

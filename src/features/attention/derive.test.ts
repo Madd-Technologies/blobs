@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 import type { ActiveSessionRow, ProfileRow, ProfilesListResult } from '../../lib/hermes/protocol.ts'
-import { botLastActive, deriveAttention, matchActiveToBots, strongestStatus, WORKER_ACTIVE_WINDOW_S, workerActive } from './derive.ts'
+import { botLastActive, deriveAttention, matchActiveToBots, strongestStatus } from './derive.ts'
 
 const NOW = 2_000_000
 
@@ -30,10 +30,15 @@ describe('deriveAttention', () => {
     assert.equal(deriveAttention({ ...base, activeStatus: 'idle' }, { now: NOW }).state, 'idle')
   })
 
-  it('a recent worker heartbeat means working; a stale one does not', () => {
-    assert.equal(deriveAttention({ ...base, workerLastActive: NOW - 60 }, { now: NOW }).state, 'working')
-    assert.equal(deriveAttention({ ...base, workerLastActive: NOW - WORKER_ACTIVE_WINDOW_S - 1 }, { now: NOW }).state, 'idle')
-    assert.equal(workerActive(undefined, NOW), false)
+  it('a turn background work started is not shown as working; yours is, and one not read yet is', () => {
+    assert.equal(deriveAttention({ ...base, activeStatus: 'working', turnByYou: false }, { now: NOW }).state, 'idle')
+    assert.equal(deriveAttention({ ...base, activeStatus: 'working', turnByYou: true }, { now: NOW }).state, 'working')
+    assert.equal(deriveAttention({ ...base, activeStatus: 'working' }, { now: NOW }).state, 'working')
+  })
+
+  it('still needs you when background work asks something: only the working is hidden', () => {
+    assert.equal(deriveAttention({ ...base, activeStatus: 'waiting', turnByYou: false }, { now: NOW }).state, 'needsYou')
+    assert.equal(deriveAttention({ ...base, hasPendingPrompt: true, activeStatus: 'working', turnByYou: false }, { now: NOW }).state, 'needsYou')
   })
 
   it('unread needs a seeded mark, newer activity, and a closed chat', () => {

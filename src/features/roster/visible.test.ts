@@ -10,16 +10,16 @@ const row = (role: string, content: string, timestamp: number): StoredMessage =>
 describe('what a bot’s chat shows you last', () => {
   it('is the last message when nothing happened between bots', () => {
     const rows = [row('user', 'hi', 100), row('assistant', 'Hello **there**', 160)]
-    assert.deepEqual(lastVisible(rows, '160:2'), { stamp: '160:2', ts: 160, text: 'Hello **there**', yours: 160 })
+    assert.deepEqual(lastVisible(rows, '160:2'), { stamp: '160:2', ts: 160, text: 'Hello **there**', yours: 160, lastTurnYours: true })
   })
 
   it('skips an exchange between bots at the end of the chat (Juniper’s chat, after Orion messaged it)', () => {
     const rows = [row('user', 'Another', 100), row('assistant', 'Sent. test-note', 110), row('user', 'Message from 🤖 Orion (@hermes): ping', 900), row('assistant', 'Ping received.', 910)]
-    assert.deepEqual(lastVisible(rows, '910:4'), { stamp: '910:4', ts: 110, text: 'Sent. test-note', yours: 110 })
+    assert.deepEqual(lastVisible(rows, '910:4'), { stamp: '910:4', ts: 110, text: 'Sent. test-note', yours: 110, lastTurnYours: false })
   })
 
   it('says there is nothing to show when a chat holds only bot-to-bot messages', () => {
-    assert.deepEqual(lastVisible([row('user', 'Message from 🤖 Orion (@hermes): ping', 900), row('assistant', 'pong', 910)], '910:2'), { stamp: '910:2', ts: 0, text: '', yours: 0 })
+    assert.deepEqual(lastVisible([row('user', 'Message from 🤖 Orion (@hermes): ping', 900), row('assistant', 'pong', 910)], '910:2'), { stamp: '910:2', ts: 0, text: '', yours: 0, lastTurnYours: false })
   })
 
   it('judges whether what was read still describes the chat, by its activity time or its message count', () => {
@@ -85,6 +85,16 @@ describe('when you and a bot last talked', () => {
     assert.equal(keepYours(busy, earlier).ts, 905)
     // A read that found your exchange wins over the earlier one.
     assert.equal(keepYours(lastVisible([row('user', 'hi', 990)], 'c'), earlier).yours, 990)
+  })
+
+  it('knows whether the newest turn is yours or background work’s, and keeps the last answer when the window cannot tell', () => {
+    assert.equal(lastVisible([row('user', 'Can you check the build?', 100), row('assistant', 'Checking.', 105)], 's').lastTurnYours, true)
+    assert.equal(lastVisible([row('user', 'Thanks', 100), process(900)], 's').lastTurnYours, false, 'a wake-up started the running turn')
+    assert.equal(lastVisible([row('user', 'Morning', 100), routine(700)], 's').lastTurnYours, false)
+    // A long turn whose first message is older than what was read: no start in the window, so the earlier answer stands.
+    const midTurn = lastVisible([row('assistant', 'Still deploying…', 950)], 's')
+    assert.equal(midTurn.lastTurnYours, undefined)
+    assert.equal(keepYours(midTurn, { stamp: 'a', ts: 900, text: 'x', yours: 100, lastTurnYours: false }).lastTurnYours, false)
   })
 
   it('falls back to the last line for an entry kept from before it was recorded', () => {

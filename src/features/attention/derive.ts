@@ -9,16 +9,17 @@ import type { ActiveSessionRow, ActiveStatus, ProfileRow } from '../../lib/herme
 
 export type BotState = 'idle' | 'working' | 'needsYou'
 
-/** A kanban/tool worker heartbeats at least every 60 s while running; a stamp older than this is stale. */
-export const WORKER_ACTIVE_WINDOW_S = 150
-
 export interface AttentionSignals {
   /** A prompt (approval, question, secret, sudo) is known to be waiting: seen in events, `approval.pending`, or resume. */
   hasPendingPrompt: boolean
   /** From `session.active_list`, matched to this bot. */
   activeStatus?: ActiveStatus
-  /** `worker_session.last_active` from the roster row, seconds. */
-  workerLastActive?: number
+  /**
+   * Whether the turn running in the bot's chat is one you started (`VisibleActivity.lastTurnYours`): false for one background
+   * work started (a routine, a finished process or helper, a kanban event, another bot), which is not shown as working.
+   * Unknown (not read yet): shown as before.
+   */
+  turnByYou?: boolean
   /** Latest activity on the bot's chat, seconds. */
   lastActive: number
 }
@@ -39,10 +40,6 @@ export interface AttentionContext {
   isOpen?: boolean
 }
 
-export function workerActive(workerLastActive: number | undefined, now: number): boolean {
-  return !!workerLastActive && now - workerLastActive < WORKER_ACTIVE_WINDOW_S
-}
-
 export function deriveAttention(signals: AttentionSignals, context: AttentionContext): Attention {
   const unread = !context.isOpen && context.seenAt !== undefined && signals.lastActive > context.seenAt
 
@@ -55,7 +52,9 @@ export function deriveAttention(signals: AttentionSignals, context: AttentionCon
     return { state: 'needsYou', unread, reason: 'waiting' }
   }
 
-  if (signals.activeStatus === 'working' || signals.activeStatus === 'starting' || workerActive(signals.workerLastActive, context.now)) {
+  // Busy with your turn only: work it does in the background (a routine, a wake-up) stays out of sight, and so do its kanban
+  // workers (`worker_session`), which no longer count at all.
+  if ((signals.activeStatus === 'working' || signals.activeStatus === 'starting') && signals.turnByYou !== false) {
     return { state: 'working', unread }
   }
 

@@ -200,7 +200,14 @@ export function deriveInbox(input: InboxInput): { entries: InboxEntry[]; byBot: 
 /** One bot's attention state, from its roster row, the inbox and the server's status list. */
 export function attentionFor(
   bot: ProfileRow,
-  input: { inbox: Map<string, InboxEntry[]>; activeByBot: Map<string, ActiveSessionRow[]>; /** When the chat last showed you something, if known, seconds. */ lastActive?: number },
+  input: {
+    inbox: Map<string, InboxEntry[]>
+    activeByBot: Map<string, ActiveSessionRow[]>
+    /** When the chat last showed you something, if known, seconds. */
+    lastActive?: number
+    /** Whether the chat's newest turn is one you started, if known (`VisibleActivity.lastTurnYours`). */
+    turnByYou?: boolean
+  },
   context: AttentionContext,
 ): Attention {
   const entries = input.inbox.get(bot.name) ?? []
@@ -210,7 +217,7 @@ export function attentionFor(
       // A `waiting` entry is the server's own status, which deriveAttention reads from activeStatus.
       hasPendingPrompt: entries.some(entry => entry.kind !== 'waiting'),
       activeStatus: strongestStatus(input.activeByBot.get(bot.name)),
-      workerLastActive: bot.worker_session?.last_active,
+      turnByYou: input.turnByYou,
       lastActive: input.lastActive ?? botLastActive(bot),
     },
     context,
