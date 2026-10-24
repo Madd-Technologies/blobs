@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
-import { activityStamp, isCurrent, lastVisible, type VisibleActivity } from '@/features/roster/visible'
+import { activityStamp, isCurrent, keepYours, lastVisible, type VisibleActivity } from '@/features/roster/visible'
 import { listSessionMessages } from '@/lib/hermes/rest'
 import { useConnection } from '@/stores/connection'
 import { useRoster } from '@/stores/roster'
@@ -93,7 +93,7 @@ export function startVisibleSync(): () => void {
                 visible = lastVisible((await read(true)).messages, stamp)
               }
 
-              useVisible.setState(state => ({ byBot: { ...state.byBot, [name]: visible } }))
+              useVisible.setState(state => ({ byBot: { ...state.byBot, [name]: keepYours(visible, state.byBot[name]) } }))
             } catch {
               // A bot that was read before keeps what it showed. One that never was falls back to the server's own preview.
               useVisible.setState(state => (state.byBot[name] ? state : { byBot: { ...state.byBot, [name]: { stamp, ts: 0, text: '', failed: true } } }))

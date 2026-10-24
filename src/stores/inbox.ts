@@ -153,8 +153,10 @@ export function useAttentionMap(): Record<string, Attention> {
         const known = visibleState(visible[bot.name], bot.canonical_session)
         // Until it is read, nothing counts as unread: the server's activity time also counts messages between bots.
         const lastActive = known.kind === 'known' ? known.visible.ts : known.kind === 'pending' ? 0 : undefined
+        // A turn background work started (a routine, a wake-up, another bot) is not shown as the bot working.
+        const turnByYou = known.kind === 'known' ? known.visible.lastTurnYours : undefined
 
-        return [bot.name, attentionFor(bot, { inbox: byBot as Map<string, InboxEntry[]>, activeByBot, lastActive }, { now, seenAt: seenAt[bot.name], isOpen: openProfile === bot.name })]
+        return [bot.name, attentionFor(bot, { inbox: byBot as Map<string, InboxEntry[]>, activeByBot, lastActive, turnByYou }, { now, seenAt: seenAt[bot.name], isOpen: openProfile === bot.name })]
       }),
     )
   }, [roster, byBot, activeByBot, seenAt, openProfile, visible, now])

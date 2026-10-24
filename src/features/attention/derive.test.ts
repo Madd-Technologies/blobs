@@ -36,6 +36,17 @@ describe('deriveAttention', () => {
     assert.equal(workerActive(undefined, NOW), false)
   })
 
+  it('a turn a routine or another bot started is not shown as working; yours is, and one not read yet is', () => {
+    assert.equal(deriveAttention({ ...base, activeStatus: 'working', turnByYou: false }, { now: NOW }).state, 'idle')
+    assert.equal(deriveAttention({ ...base, activeStatus: 'working', turnByYou: true }, { now: NOW }).state, 'working')
+    assert.equal(deriveAttention({ ...base, activeStatus: 'working' }, { now: NOW }).state, 'working')
+  })
+
+  it('still needs you when a routine’s turn asks something: only the working is hidden', () => {
+    assert.equal(deriveAttention({ ...base, activeStatus: 'waiting', turnByYou: false }, { now: NOW }).state, 'needsYou')
+    assert.equal(deriveAttention({ ...base, hasPendingPrompt: true, activeStatus: 'working', turnByYou: false }, { now: NOW }).state, 'needsYou')
+  })
+
   it('unread needs a seeded mark, newer activity, and a closed chat', () => {
     const busy = { ...base, lastActive: 5_000 }
     assert.equal(deriveAttention(busy, { now: NOW, seenAt: 1_000 }).unread, true)
