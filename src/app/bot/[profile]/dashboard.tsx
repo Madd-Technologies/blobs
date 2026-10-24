@@ -21,6 +21,7 @@ import type { View as DashboardView } from '@/lib/hermes/dashboard'
 import { useNow } from '@/lib/useNow'
 import { useBotView, useFaceColor } from '@/stores/bots'
 import { startDashboardPoll, useBotBoard, useDashboards } from '@/stores/dashboards'
+import { useWatch } from '@/stores/watch'
 import { useDrafts } from '@/stores/drafts'
 import { toast } from '@/stores/toast'
 import { BotTint, useTheme } from '@/theme/ThemeProvider'
@@ -56,6 +57,8 @@ export default function BotDashboard() {
 
   // Only while this dashboard is on top: a dashboard left under another screen stops asking.
   useFocusEffect(useCallback(() => startDashboardPoll(profile), [profile]))
+  // The server then reads its live panels and pushes its changes.
+  useWatch('dashboards', [profile])
   useEffect(() => {
     useDashboards
       .getState()

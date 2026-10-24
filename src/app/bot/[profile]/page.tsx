@@ -1,5 +1,5 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotPaper } from '@/components/bots/BotPaper'
@@ -17,7 +17,9 @@ import { getViewPage, type PageRow, type Typed, type ViewPage, type ViewRow } fr
 import { useNow } from '@/lib/useNow'
 import { useBotView } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
+import { useDashboards } from '@/stores/dashboards'
 import { useDrafts } from '@/stores/drafts'
+import { useWatch } from '@/stores/watch'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 
@@ -79,6 +81,19 @@ export default function PanelPage() {
     useCallback(() => {
       void load()
     }, [load]),
+  )
+
+  // Read again when the server says this bot's dashboard changed (hermes-dashboard 0.7+).
+  useWatch('dashboards', [profile])
+
+  useEffect(
+    () =>
+      useDashboards.subscribe((state, previous) => {
+        if (state.pushed[profile] && state.pushed[profile] !== previous.pushed[profile]) {
+          void load()
+        }
+      }),
+    [profile, load],
   )
 
   async function onPull() {

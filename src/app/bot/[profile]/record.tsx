@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 
 import { LaidOutRecord } from '@/components/dashboard/LaidOutRecord'
@@ -27,6 +27,7 @@ import type { Field } from '@/lib/hermes/dashboard'
 import { useNow } from '@/lib/useNow'
 import { useBotView, useBotViews } from '@/stores/bots'
 import { useDashboards } from '@/stores/dashboards'
+import { useWatch } from '@/stores/watch'
 import { useDrafts } from '@/stores/drafts'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -63,6 +64,17 @@ export default function DashboardRecord() {
         .then(problem => setError(problem))
     }, [id]),
   )
+
+  // While it is open, a change to this bot's dashboard (a bot writing the record back, your other phone) reads it again.
+  useWatch('dashboards', [profile])
+  useWatch('records', [id])
+  const pushed = useDashboards(state => state.pushed[profile])
+
+  useEffect(() => {
+    if (pushed) {
+      void useDashboards.getState().loadRecord(id)
+    }
+  }, [pushed, id])
 
   async function onPull() {
     setPulling(true)

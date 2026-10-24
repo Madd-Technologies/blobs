@@ -24,11 +24,13 @@ import {
   whoIsReplying,
   type RoomQuestion,
 } from '@/lib/hermes/rooms'
+import { parseRoomLive, parseRoomsChanged, ROOM_LIVE, ROOMS_CHANGED, type RoomLive } from '@/lib/hermes/livepush'
 import { getRoomActivity } from '@/lib/hermes/plugins'
 import { call } from '@/lib/hermes/rpc'
 import { startPoller } from '@/lib/poller'
 import { useNow } from '@/lib/useNow'
-import { gateway, requests, useConnection } from '@/stores/connection'
+import { gateway, onGatewayEvent, requests, useConnection } from '@/stores/connection'
+import { pushes } from '@/stores/watch'
 
 interface RoomsState {
   /** Whether the server can run rooms (its worker is up). Null until asked. */
@@ -38,7 +40,10 @@ interface RoomsState {
   loaded: boolean
   error: string | null
   refresh: () => Promise<void>
-  refreshRoom: (id: string) => Promise<void>
+  /** Reads one room again; `moved` when the server already said it moved (no need to look for anything new first). */
+  refreshRoom: (id: string, moved?: boolean) => Promise<void>
+  /** Each watched room's members' turns as they stream (hermes-bot-mobile 0.2+), for the room screen. */
+  live: Record<string, RoomLive | undefined>
 }
 
 /** On the first look at a room, start this far back from its newest event instead of replaying everything. */
@@ -205,6 +210,7 @@ export const useRooms = create<RoomsState>((set, get) => {
     rooms: {},
     loaded: false,
     error: null,
+    live: {},
 
     refresh: async () => {
       if (busy || useConnection.getState().status !== 'online') {
@@ -263,7 +269,7 @@ export const useRooms = create<RoomsState>((set, get) => {
       }
     },
 
-    refreshRoom: async id => {
+    refreshRoom: async (id, moved = false) => {
       const current = get().rooms[id]
 
       if (!current || reading.has(id) || useConnection.getState().status !== 'online') {
@@ -273,6 +279,12 @@ export const useRooms = create<RoomsState>((set, get) => {
       reading.add(id)
 
       try {
+        if (moved) {
+          put(id, await syncRoom(current.room, current))
+
+          return
+        }
+
         // Anything new in its log first: an idle room with nothing new needs no state read (the slow part).
         const read = await readLog(gateway, id, current.cursor, 1)
 
@@ -291,11 +303,52 @@ export const useRooms = create<RoomsState>((set, get) => {
 })
 
 /**
- * Reads the room list every 10 s in the foreground, so Home shows who said what and which room needs you; a room is read in
- * full only when it moved (roomNeedsRead).
+ * Keeps the rooms current, so Home shows who said what and which room needs you: the server pushes which rooms moved
+ * (hermes-bot-mobile 0.2+) and only those are read, with a safety read of the list every minute; without the push the list is
+ * read every 10 s. A room is read in full only when it moved (roomNeedsRead). The rooms on screen also get their members'
+ * turns as they stream.
  */
 export function startRoomsSync(): () => void {
-  const stopPoll = startPoller(() => void useRooms.getState().refresh(), 10_000, () => useConnection.getState().status === 'online')
+  const stopPoll = startPoller(() => void useRooms.getState().refresh(), () => (pushes('roomsChanged') ? 60_000 : 10_000), () => useConnection.getState().status === 'online')
+  const stopEvents = onGatewayEvent(event => {
+    const type = event.type as string
+
+    if (type === ROOM_LIVE) {
+      const live = parseRoomLive(event.payload)
+
+      if (live) {
+        useRooms.setState(state => ({ live: { ...state.live, [live.room_id]: live } }))
+      }
+
+      return
+    }
+
+    if (type !== ROOMS_CHANGED) {
+      return
+    }
+
+    const marks = parseRoomsChanged(event.payload)
+
+    if (!marks) {
+      return
+    }
+
+    const store = useRooms.getState()
+    const known = store.rooms
+
+    // A new room (or one gone) needs the list for its name and members; the others are read only if they moved.
+    if (Object.keys(marks).some(id => !known[id] && !disbanded.has(id)) || Object.keys(known).some(id => !(id in marks))) {
+      void store.refresh()
+
+      return
+    }
+
+    for (const [id, mark] of Object.entries(marks)) {
+      if (roomNeedsRead(mark, known[id])) {
+        void store.refreshRoom(id, true)
+      }
+    }
+  })
   const stopConnection = useConnection.subscribe((state, previous) => {
     if (state.status === 'online' && previous.status !== 'online') {
       void useRooms.getState().refresh()
@@ -304,13 +357,17 @@ export function startRoomsSync(): () => void {
 
   return () => {
     stopPoll()
+    stopEvents()
     stopConnection()
   }
 }
 
-/** One room, polled every 2 s while its screen is open (and the app is in front). */
+/**
+ * One room while its screen is open (and the app is in front): every 2 s, or a safety check every 15 s when the server pushes
+ * the room's changes and its members' turns as they stream.
+ */
 export function startRoomPoll(id: string): () => void {
-  return startPoller(() => void useRooms.getState().refreshRoom(id), 2_000, () => useConnection.getState().status === 'online')
+  return startPoller(() => void useRooms.getState().refreshRoom(id), () => (pushes('roomsChanged') && pushes('roomLive') ? 15_000 : 2_000), () => useConnection.getState().status === 'online')
 }
 
 /** Every room as a row, newest first. */

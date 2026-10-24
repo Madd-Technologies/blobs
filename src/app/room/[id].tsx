@@ -18,12 +18,14 @@ import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { afterSheetCloses } from '@/lib/afterSheet'
 import { activityPhrase, answerPausedText, roomAttention, buildTimeline, memberName, memberOf, nameList, pausedAsk, pausedLine, replyingLine, type TimelineItem } from '@/lib/hermes/rooms'
+import { lastMessageBy, showLiveTurn } from '@/lib/hermes/livepush'
 import { useNow } from '@/lib/useNow'
 import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useBotMetas } from '@/stores/bots'
-import { removeRoom, sendToRoom, startRoomPoll, stopRoomWork, useRoomData } from '@/stores/rooms'
+import { removeRoom, sendToRoom, startRoomPoll, stopRoomWork, useRoomData, useRooms } from '@/stores/rooms'
 import { useOnScreen } from '@/stores/presence'
 import { toast } from '@/stores/toast'
+import { useWatch } from '@/stores/watch'
 
 /** A group room: you and several bots in one conversation, run by the server so it carries on with the app closed. */
 export default function RoomScreen() {
@@ -38,12 +40,26 @@ export default function RoomScreen() {
 
   // Only while the room is on top (a room left under another screen stops reading its log).
   useFocusEffect(useCallback(() => startRoomPoll(id), [id]))
+  // The server then streams this room's turns and pushes its changes.
+  useWatch('rooms', [id])
   // While the room is open, the server pushes nothing about it to this phone.
   useOnScreen(data?.sessions ?? [])
 
   const room = data?.room
   const working = data?.status?.working === true
   const replying = data?.replying ?? []
+  // The members' turns as they stream (hermes-bot-mobile 0.2+), until each one's finished reply is in the log.
+  const live = useRooms(state => state.live[id])
+  const liveTurns = useMemo(() => {
+    if (!live || !data) {
+      return []
+    }
+
+    const posted = lastMessageBy(data.events)
+
+    return Object.entries(live.members).filter(([memberId, turn]) => showLiveTurn(turn, posted[memberId], nowS))
+  }, [live, data, nowS])
+  const streaming = new Set(liveTurns.map(([memberId]) => memberId))
   const attention = useMemo(() => (room && data ? roomAttention(room, data.events, data.status) : null), [room, data])
   // The server cut the bots off with a question still open: the room stays quiet until you write again.
   const paused = useMemo(() => (room && data && !working ? pausedAsk(room, data.events) : null), [room, data, working])
@@ -144,11 +160,27 @@ export default function RoomScreen() {
               onContentSizeChange={stick.onContentSizeChange}
               // Sits at the bottom of the inverted list: what the room is holding for you, or that bots are replying.
               ListHeaderComponent={
-                attention?.actions.length || data.questions?.length || working || paused ? (
+                attention?.actions.length || data.questions?.length || working || paused || liveTurns.length ? (
                   <View style={styles.footer}>
                     {attention?.actions.length || data.questions?.length ? <RoomActions room={room} actions={attention?.actions ?? []} questions={data.questions} framed /> : null}
+                    {liveTurns.map(([memberId, turn]) => {
+                      const profile = memberOf(room, memberId)?.profile ?? memberId
+
+                      return (
+                        <TypingRow
+                          key={memberId}
+                          name={memberName(room, memberId)}
+                          profile={profile}
+                          meta={metas[profile]}
+                          doing={activityPhrase({ phase: turn.phase, tool: turn.tool, since: turn.started })}
+                          text={turn.text}
+                          steps={turn.steps}
+                          cut={turn.cut}
+                        />
+                      )
+                    })}
                     {working && replying.length
-                      ? replying.map(memberId => {
+                      ? replying.filter(memberId => !streaming.has(memberId)).map(memberId => {
                           const profile = memberOf(room, memberId)?.profile ?? memberId
                           const activity = data.activity?.[memberId]
 
@@ -177,7 +209,7 @@ export default function RoomScreen() {
                         />
                       </View>
                     ) : null}
-                    {working && !replying.length ? (
+                    {working && !replying.length && !liveTurns.length ? (
                       <T variant="label" color="text2" style={styles.replying}>
                         Replying…
                       </T>

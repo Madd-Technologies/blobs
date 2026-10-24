@@ -3,8 +3,10 @@ import { StyleSheet, View } from 'react-native'
 import Animated, { Easing, cancelAnimation, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming, type SharedValue } from 'react-native-reanimated'
 
 import { BotFace } from '@/components/bots/BotFace'
+import { Markdown } from '@/components/chat/Markdown'
 import { T } from '@/components/ui/T'
 import type { BotMeta } from '@/lib/hermes/identity'
+import type { LiveStep } from '@/lib/hermes/livepush'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts } from '@/theme/tokens'
 
@@ -33,12 +35,18 @@ function useDotPhase(delay: number, still: boolean): SharedValue<number> {
   return phase
 }
 
+/** A tool step of a turn in progress, as one quiet line. */
+function stepLine(step: LiveStep): string {
+  return step.done ? `Ran ${step.name}${step.seconds !== undefined ? ` · ${step.seconds} s` : ''}` : `Running ${step.name}…`
+}
+
 /**
  * A bot in a room that is busy right now: its face and name, as its message will have, what it is doing when the server says
- * ("running a command · 4 min", "writing"), over a small bubble of three dots that brighten in turn (still, when the phone
- * asks for less motion).
+ * ("running a command · 4 min", "writing"), then its reply as it streams with a quiet line per tool step (hermes-bot-mobile
+ * 0.2+), or, without the words yet, a small bubble of three dots that brighten in turn (still, when the phone asks for less
+ * motion).
  */
-export function TypingRow({ name, profile, meta, doing, minutes = 0 }: { name: string; profile: string; meta?: BotMeta; doing?: string | null; minutes?: number }) {
+export function TypingRow({ name, profile, meta, doing, minutes = 0, text, steps, cut }: { name: string; profile: string; meta?: BotMeta; doing?: string | null; minutes?: number; text?: string; steps?: LiveStep[]; cut?: boolean }) {
   const still = useReducedMotion()
   const first = useDotPhase(0, still)
   const second = useDotPhase(160, still)
@@ -56,11 +64,24 @@ export function TypingRow({ name, profile, meta, doing, minutes = 0 }: { name: s
           </T>
         </T>
       </View>
-      <View style={styles.dots}>
-        <Dot phase={first} />
-        <Dot phase={second} />
-        <Dot phase={third} />
-      </View>
+      {steps?.length ? (
+        <View style={styles.steps}>
+          {steps.slice(-3).map((step, index) => (
+            <T key={`${step.id}-${index}`} variant="label" color="text2" numberOfLines={1}>
+              {stepLine(step)}
+            </T>
+          ))}
+        </View>
+      ) : null}
+      {text ? (
+        <Markdown text={cut ? `…${text}` : text} size="reply" />
+      ) : (
+        <View style={styles.dots}>
+          <Dot phase={first} />
+          <Dot phase={second} />
+          <Dot phase={third} />
+        </View>
+      )}
     </View>
   )
 }
@@ -71,5 +92,6 @@ const styles = StyleSheet.create({
   name: { fontFamily: fonts.semibold, flexShrink: 1 },
   // Where its words will be: three dots, no bubble.
   dots: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 12, paddingLeft: 2 },
+  steps: { gap: 2 },
   dot: { width: 6, height: 6, borderRadius: 3 },
 })

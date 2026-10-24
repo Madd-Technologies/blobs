@@ -4,9 +4,11 @@ import { dashboardRoutines, refreshedSince } from '@/features/dashboard/view'
 import { describeError } from '@/features/sessions/store'
 import { listCronJobs, triggerCronJob, type CronJob } from '@/lib/hermes/cron'
 import { addRecordNote, changeRecord, DraftChanged, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
+import { DASHBOARD_CHANGED, parseDashboardChanged } from '@/lib/hermes/livepush'
 import { startPoller } from '@/lib/poller'
-import { useConnection } from '@/stores/connection'
+import { onGatewayEvent, useConnection } from '@/stores/connection'
 import { sessions } from '@/stores/sessions'
+import { isShown, pushes } from '@/stores/watch'
 
 export interface BotBoard {
   dashboard: BotDashboard | null
@@ -28,6 +30,8 @@ interface DashboardsState {
   keepers: Record<string, CronJob[] | undefined>
   /** Bots whose dashboard routines were started with "Check now" and have not written yet. */
   checking: Record<string, true>
+  /** Each bot's dashboard version as the server last pushed it (hermes-dashboard 0.7+): an open record reloads when it moves. */
+  pushed: Record<string, string>
   refreshSummary: () => Promise<void>
   /** Re-reads a bot's dashboard (only what changed comes back); `fresh` reads its live panels' sources now. */
   load: (profile: string, options?: { fresh?: boolean }) => Promise<void>
@@ -116,6 +120,7 @@ export const useDashboards = create<DashboardsState>((set, get) => {
     needsYou: {},
     keepers: {},
     checking: {},
+    pushed: {},
 
     refreshSummary: async () => {
       const current = config()
@@ -350,14 +355,46 @@ export const useDashboards = create<DashboardsState>((set, get) => {
       }
     },
 
-    reset: () => set({ available: null, summary: {}, byBot: {}, records: {}, needsYou: {}, keepers: {}, checking: {} }),
+    reset: () => set({ available: null, summary: {}, byBot: {}, records: {}, needsYou: {}, keepers: {}, checking: {}, pushed: {} }),
   }
 })
 
-/** Asks every 30 s in the foreground how many things wait on each bot's dashboard, for the dots on Home. */
+/**
+ * Keeps each bot's dashboard summary current for the dots on Home: pushed by the server when anything on a dashboard moves
+ * (hermes-dashboard 0.7+), which also reloads a dashboard that is on screen; otherwise asked every 30 s in the foreground.
+ * With the push, the ask is a safety check every 2 minutes.
+ */
 export function startDashboardsSync(): () => void {
   const online = () => useConnection.getState().status === 'online'
-  const stopPoll = startPoller(() => void useDashboards.getState().refreshSummary(), 30_000, online)
+  const stopPoll = startPoller(() => void useDashboards.getState().refreshSummary(), () => (pushes('dashboardChanged') ? 120_000 : 30_000), online)
+  const stopEvents = onGatewayEvent(event => {
+    if ((event.type as string) !== DASHBOARD_CHANGED) {
+      return
+    }
+
+    const change = parseDashboardChanged(event.payload)
+
+    if (!change) {
+      return
+    }
+
+    const store = useDashboards.getState()
+
+    if (change.summary && JSON.stringify(change.summary) !== JSON.stringify(store.summary)) {
+      useDashboards.setState({ available: true, summary: change.summary })
+    }
+
+    if (Object.keys(change.versions).length) {
+      useDashboards.setState(state => ({ pushed: { ...state.pushed, ...change.versions } }))
+    }
+
+    for (const [bot, version] of Object.entries(change.versions)) {
+      // Only what is on screen loads now; a dashboard opened later loads then.
+      if (isShown('dashboards', bot) && store.byBot[bot]?.dashboard?.version !== version) {
+        void store.load(bot)
+      }
+    }
+  })
   const stopConnection = useConnection.subscribe((state, previous) => {
     // Another server: nothing of the last one's dashboards applies.
     if (state.config?.baseUrl !== previous.config?.baseUrl) {
@@ -371,17 +408,18 @@ export function startDashboardsSync(): () => void {
 
   return () => {
     stopPoll()
+    stopEvents()
     stopConnection()
   }
 }
 
 /**
- * One bot's dashboard, asked about every 5 s while it is on screen (and the app is in front). Each ask sends the version it
- * has, so the server answers "unchanged" without computing anything unless something moved, and live panels re-read their
- * sources only when their short cache has run out.
+ * One bot's dashboard while it is on screen (and the app is in front): read when it opens, then pushed by the server when it
+ * changes (hermes-dashboard 0.7+, with a safety check every minute), or asked about every 5 s without the push. Each ask sends
+ * the version it has, so the server answers "unchanged" without computing anything unless something moved.
  */
 export function startDashboardPoll(profile: string): () => void {
-  return startPoller(() => void useDashboards.getState().load(profile), 5_000, () => useConnection.getState().status === 'online')
+  return startPoller(() => void useDashboards.getState().load(profile), () => (pushes('dashboardChanged') ? 60_000 : 5_000), () => useConnection.getState().status === 'online')
 }
 
 export function useBotBoard(profile: string): BotBoard {
