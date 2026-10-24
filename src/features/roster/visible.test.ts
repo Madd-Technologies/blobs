@@ -87,10 +87,11 @@ describe('when you and a bot last talked', () => {
     assert.equal(keepYours(lastVisible([row('user', 'hi', 990)], 'c'), earlier).yours, 990)
   })
 
-  it('knows whether the newest turn is yours or background work’s, and keeps the last answer when the window cannot tell', () => {
+  it('counts a turn your work set going as yours, and a routine’s or another bot’s as not, keeping the last answer when the window cannot tell', () => {
     assert.equal(lastVisible([row('user', 'Can you check the build?', 100), row('assistant', 'Checking.', 105)], 's').lastTurnYours, true)
-    assert.equal(lastVisible([row('user', 'Thanks', 100), process(900)], 's').lastTurnYours, false, 'a wake-up started the running turn')
+    assert.equal(lastVisible([row('user', 'Thanks', 100), process(900)], 's').lastTurnYours, true, 'a process it started for you finished')
     assert.equal(lastVisible([row('user', 'Morning', 100), routine(700)], 's').lastTurnYours, false)
+    assert.equal(lastVisible([row('user', 'Morning', 100), row('user', 'Message from 🤖 Orion (@hermes): ping', 800)], 's').lastTurnYours, false)
     // A long turn whose first message is older than what was read: no start in the window, so the earlier answer stands.
     const midTurn = lastVisible([row('assistant', 'Still deploying…', 950)], 's')
     assert.equal(midTurn.lastTurnYours, undefined)

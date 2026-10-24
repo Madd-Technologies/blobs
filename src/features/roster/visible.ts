@@ -5,6 +5,7 @@
 
 import type { StoredMessage } from '../../lib/hermes/rest.ts'
 import { itemsFromHistory } from '../transcript/history.ts'
+import { deliveryTarget, routineDelivery, teammateMessage } from '../transcript/injected.ts'
 
 export interface VisibleActivity {
   /** What the roster said about this chat when this was read (`activityStamp`): stale once that changes. */
@@ -21,8 +22,8 @@ export interface VisibleActivity {
    */
   yours?: number
   /**
-   * Whether the newest turn in what was read was started by a message of yours: false for one that background work began (a
-   * routine, a finished process or helper, a kanban event, another bot). A bot busy with such a turn is not shown working.
+   * Whether the newest turn in what was read is yours: started by your message, or by work you set going (a finished process
+   * or helper, a kanban event). False for one a routine or another bot started, which Home does not show as the bot working.
    * Absent when no turn started in what was read.
    */
   lastTurnYours?: boolean
@@ -49,7 +50,8 @@ export function lastVisible(rows: StoredMessage[], stamp: string): VisibleActivi
     }
   }
 
-  const turn = yourTurn === undefined ? {} : { lastTurnYours: yourTurn }
+  const starter = [...rows].reverse().find(row => row.role === 'user' && row.display_kind !== 'hidden')
+  const turn = starter ? { lastTurnYours: startedByYou(starter) } : {}
 
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i]
@@ -60,6 +62,16 @@ export function lastVisible(rows: StoredMessage[], stamp: string): VisibleActivi
   }
 
   return { stamp, ts: 0, text: '', yours, ...turn }
+}
+
+/**
+ * Whether a turn's first row is yours or work you set going (your message, a finished background process or helper, a kanban
+ * event), rather than a routine's output or another bot's message (or the answer to one this bot sent).
+ */
+function startedByYou(row: StoredMessage): boolean {
+  const text = String(row.display_content ?? row.content ?? '')
+
+  return routineDelivery(text) === null && !teammateMessage(text.trim()) && deliveryTarget(text) === null
 }
 
 /**

@@ -218,6 +218,7 @@ export function attentionFor(
       hasPendingPrompt: entries.some(entry => entry.kind !== 'waiting'),
       activeStatus: strongestStatus(input.activeByBot.get(bot.name)),
       turnByYou: input.turnByYou,
+      workerLastActive: bot.worker_session?.last_active,
       lastActive: input.lastActive ?? botLastActive(bot),
     },
     context,

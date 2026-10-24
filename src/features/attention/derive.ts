@@ -9,17 +9,22 @@ import type { ActiveSessionRow, ActiveStatus, ProfileRow } from '../../lib/herme
 
 export type BotState = 'idle' | 'working' | 'needsYou'
 
+/** A kanban/tool worker heartbeats at least every 60 s while running; a stamp older than this is stale. */
+export const WORKER_ACTIVE_WINDOW_S = 150
+
 export interface AttentionSignals {
   /** A prompt (approval, question, secret, sudo) is known to be waiting: seen in events, `approval.pending`, or resume. */
   hasPendingPrompt: boolean
   /** From `session.active_list`, matched to this bot. */
   activeStatus?: ActiveStatus
   /**
-   * Whether the turn running in the bot's chat is one you started (`VisibleActivity.lastTurnYours`): false for one background
-   * work started (a routine, a finished process or helper, a kanban event, another bot), which is not shown as working.
-   * Unknown (not read yet): shown as before.
+   * Whether the turn running in the bot's chat is yours (`VisibleActivity.lastTurnYours`): your message, or work you set going
+   * (a finished process or helper, a kanban event). False for one a routine or another bot started, which is not shown as
+   * working. Unknown (not read yet): shown as before.
    */
   turnByYou?: boolean
+  /** `worker_session.last_active` from the roster row, seconds: the bot working a kanban card, which counts as working. */
+  workerLastActive?: number
   /** Latest activity on the bot's chat, seconds. */
   lastActive: number
 }
@@ -40,6 +45,10 @@ export interface AttentionContext {
   isOpen?: boolean
 }
 
+export function workerActive(workerLastActive: number | undefined, now: number): boolean {
+  return !!workerLastActive && now - workerLastActive < WORKER_ACTIVE_WINDOW_S
+}
+
 export function deriveAttention(signals: AttentionSignals, context: AttentionContext): Attention {
   const unread = !context.isOpen && context.seenAt !== undefined && signals.lastActive > context.seenAt
 
@@ -52,9 +61,10 @@ export function deriveAttention(signals: AttentionSignals, context: AttentionCon
     return { state: 'needsYou', unread, reason: 'waiting' }
   }
 
-  // Busy with your turn only: work it does in the background (a routine, a wake-up) stays out of sight, and so do its kanban
-  // workers (`worker_session`), which no longer count at all.
-  if ((signals.activeStatus === 'working' || signals.activeStatus === 'starting') && signals.turnByYou !== false) {
+  // Busy with your work only: a turn in its chat that a routine or another bot started stays out of sight.
+  const chatBusy = (signals.activeStatus === 'working' || signals.activeStatus === 'starting') && signals.turnByYou !== false
+
+  if (chatBusy || workerActive(signals.workerLastActive, context.now)) {
     return { state: 'working', unread }
   }
 
