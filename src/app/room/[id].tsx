@@ -1,5 +1,5 @@
-import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { FlatList, KeyboardAvoidingView, StyleSheet, View } from 'react-native'
 
 import { Composer } from '@/components/chat/Composer'
@@ -36,7 +36,8 @@ export default function RoomScreen() {
   const [options, setOptions] = useState(false)
   const [confirmDisband, setConfirmDisband] = useState(false)
 
-  useEffect(() => startRoomPoll(id), [id])
+  // Only while the room is on top (a room left under another screen stops reading its log).
+  useFocusEffect(useCallback(() => startRoomPoll(id), [id]))
   // While the room is open, the server pushes nothing about it to this phone.
   useOnScreen(data?.sessions ?? [])
 

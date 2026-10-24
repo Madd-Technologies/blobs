@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather'
-import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect } from 'react'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
+import { useCallback, useEffect } from 'react'
 import { ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotPaper } from '@/components/bots/BotPaper'
@@ -43,9 +43,9 @@ export default function ErrandScreen() {
   useEffect(() => {
     void usePhone.getState().loadErrand(id)
     void usePhone.getState().loadSettings()
-
-    return startPhonePoll()
   }, [id])
+
+  useFocusEffect(useCallback(() => startPhonePoll(), []))
 
   if (!errand) {
     return (

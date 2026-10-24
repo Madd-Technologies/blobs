@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import type { HostedRoom, RoomEvent } from '../../lib/hermes/protocol.ts'
-import { buildRoomViews, roomMatches, type RoomData } from './view.ts'
+import { buildRoomViews, roomMatches, roomNeedsRead, type RoomData } from './view.ts'
 
 const room = (id: string, name: string, updated = 100): HostedRoom => ({
   room_id: id,
@@ -81,3 +81,22 @@ describe('a room whose member asked you a question', () => {
     assert.equal(view?.preview, 'Waiting for your answer')
   })
 })
+
+describe('which rooms Home reads in full', () => {
+  const held = (status: RoomData['status'] = null): RoomData => ({ ...data({ ...room('r-1', 'Planning'), latest_seq: 12, revision: 3 }), status })
+  const listed = (changes: Partial<HostedRoom> = {}) => ({ ...room('r-1', 'Planning'), latest_seq: 12, revision: 3, ...changes })
+
+  it('skips a quiet room the list shows unchanged', () => {
+    assert.equal(roomNeedsRead(listed(), held({ running: true, working: false, blocked: false } as RoomData['status'])), false)
+  })
+
+  it('reads a room it never read, one with a new event or revision, and one that was replying or waiting on you', () => {
+    assert.equal(roomNeedsRead(listed(), undefined), true)
+    assert.equal(roomNeedsRead(listed({ latest_seq: 13 }), held()), true)
+    assert.equal(roomNeedsRead(listed({ revision: 4 }), held()), true)
+    assert.equal(roomNeedsRead(listed({ updated_at: 999 }), held()), true)
+    assert.equal(roomNeedsRead(listed(), held({ running: true, working: true, blocked: false } as RoomData['status'])), true)
+    assert.equal(roomNeedsRead(listed(), held({ running: true, working: false, blocked: true } as RoomData['status'])), true)
+  })
+})
+

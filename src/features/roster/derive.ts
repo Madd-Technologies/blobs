@@ -116,3 +116,26 @@ export function ageLabel(lastActiveS: number, nowS: number): string {
 
   return `${Math.floor(diff / (7 * 86_400))}w`
 }
+
+/**
+ * The new roster with every row that did not change kept as the same object, so a poll that changed one bot re-renders only
+ * that bot (its face, its row) instead of every one. Null when nothing changed at all.
+ */
+export function reuseRows(previous: readonly ProfileRow[], next: readonly ProfileRow[]): ProfileRow[] | null {
+  const before = new Map(previous.map(row => [row.name, row]))
+  let changed = previous.length !== next.length
+  const rows = next.map((row, index) => {
+    const old = before.get(row.name)
+
+    if (old && JSON.stringify(old) === JSON.stringify(row)) {
+      changed = changed || previous[index] !== old
+      return old
+    }
+
+    changed = true
+    return row
+  })
+
+  return changed ? rows : null
+}
+

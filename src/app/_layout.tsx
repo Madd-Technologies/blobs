@@ -46,6 +46,9 @@ function RootStack() {
           headerShown: false,
           contentStyle: { backgroundColor: c.canvas },
           animation: 'slide_from_right',
+          // A screen under another one (Home under a chat, a chat under its dashboard) doesn't re-render until it is back on
+          // top: its stores keep updating, but nothing it draws is seen meanwhile.
+          freezeOnBlur: true,
         }}
       >
         <Stack.Protected guard={configured}>

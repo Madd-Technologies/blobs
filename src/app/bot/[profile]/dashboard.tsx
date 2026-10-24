@@ -1,7 +1,7 @@
 import Feather from '@expo/vector-icons/Feather'
 import * as Clipboard from 'expo-clipboard'
-import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
+import { useCallback, useEffect, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotFace } from '@/components/bots/BotFace'
@@ -54,7 +54,8 @@ export default function BotDashboard() {
 
   const rows = useRowActions(nowS, () => name)
 
-  useEffect(() => startDashboardPoll(profile), [profile])
+  // Only while this dashboard is on top: a dashboard left under another screen stops asking.
+  useFocusEffect(useCallback(() => startDashboardPoll(profile), [profile]))
   useEffect(() => {
     useDashboards
       .getState()

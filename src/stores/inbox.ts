@@ -8,6 +8,7 @@ import { attentionFor, deriveInbox, type InboxEntry } from '@/features/inbox/der
 import { KANBAN_APPROVALS_PATH, NEEDS_YOU_EVENT, NEEDS_YOU_PATH } from '@/features/inbox/pushed'
 import { visibleState } from '@/features/roster/visible'
 import { createInbox } from '@/features/inbox/store'
+import { coalesce } from '@/lib/coalesce'
 import { supportsLiveHelpers } from '@/lib/hermes/capabilities'
 import { HermesHttpError, restJson } from '@/lib/hermes/server'
 import { startPoller } from '@/lib/poller'
@@ -65,13 +66,13 @@ export const inbox = createInbox({
 
 /**
  * What waits on you arrives as the server's push, read once whenever the connection comes up or the app comes back to
- * the front. Status (who is working) is polled every 30 s in the foreground, and straight away when the server says
- * sessions changed.
+ * the front. Status (who is working) is read when the server says sessions changed (at most every 3 s while bots write),
+ * with a safety read every 60 s in the foreground.
  */
 export function startInboxSync(): () => void {
   const refresh = () => void inbox.refresh()
-  const stopPoll = startPoller(refresh, 30_000, () => useConnection.getState().status === 'online')
-  let debounce: ReturnType<typeof setTimeout> | null = null
+  const stopPoll = startPoller(refresh, 60_000, () => useConnection.getState().status === 'online')
+  const changed = coalesce(refresh, { delayMs: 600, minGapMs: 3_000 })
 
   const stopEvents = onGatewayEvent(event => {
     if ((event.type as string) === NEEDS_YOU_EVENT) {
@@ -80,11 +81,8 @@ export function startInboxSync(): () => void {
       return
     }
 
-    if (event.type === 'sessions.changed' && !debounce) {
-      debounce = setTimeout(() => {
-        debounce = null
-        refresh()
-      }, 600)
+    if (event.type === 'sessions.changed') {
+      changed.signal()
     }
   })
 
@@ -111,10 +109,7 @@ export function startInboxSync(): () => void {
     stopEvents()
     stopConnection()
     foreground.remove()
-
-    if (debounce) {
-      clearTimeout(debounce)
-    }
+    changed.cancel()
   }
 }
 

@@ -31,7 +31,11 @@ export const useVisible = create<VisibleState>()(
   }),
 )
 
-/** How many of a chat's newest messages are read: enough to get past a long exchange between bots. */
+/** Messages read first: enough for the last line of most chats, at about a fifth of the bytes of the full window (a bot's
+ * rows carry its reasoning and tool output, ~6 KB each). */
+const FIRST = 15
+/** Read only when the first read shows no visible line, or no exchange of yours while none is known yet: enough to get past
+ * a long exchange between bots. */
 const WINDOW = 60
 /** Chats read at once: in parallel, without crowding out what you open yourself. */
 const AT_ONCE = 3
@@ -86,11 +90,16 @@ export function startVisibleSync(): () => void {
             try {
               // Live messages first: the compacted read can fall back to scanning the whole chat on the server. Only a chat
               // compacted since its last visible line has none of its own yet, and needs the compacted ones.
-              const read = (includeCompacted: boolean) => listSessionMessages(config, storedId, name, { order: 'latest', limit: WINDOW, includeCompacted })
-              let visible = lastVisible((await read(false)).messages, stamp)
+              const read = (limit: number, includeCompacted: boolean) => listSessionMessages(config, storedId, name, { order: 'latest', limit, includeCompacted })
+              const known = useVisible.getState().byBot[name]
+              let visible = lastVisible((await read(FIRST, false)).messages, stamp)
+
+              if (!visible.text || (!visible.yours && !known?.yours)) {
+                visible = lastVisible((await read(WINDOW, false)).messages, stamp)
+              }
 
               if (!visible.text) {
-                visible = lastVisible((await read(true)).messages, stamp)
+                visible = lastVisible((await read(WINDOW, true)).messages, stamp)
               }
 
               useVisible.setState(state => ({ byBot: { ...state.byBot, [name]: keepYours(visible, state.byBot[name]) } }))

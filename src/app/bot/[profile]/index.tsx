@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, KeyboardAvoidingView, StyleSheet, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 
@@ -146,15 +146,17 @@ export default function BotChat() {
   const jobsRunning = runningJobs(transcript?.jobs).length > 0
   const jobNowMs = useNowMs(jobsRunning, 15_000)
 
-  useEffect(() => {
-    if (!jobsRunning) {
-      return
-    }
+  useFocusEffect(
+    useCallback(() => {
+      if (!jobsRunning) {
+        return
+      }
 
-    const timer = setInterval(() => void sessions.refreshJobs(profile), 20_000)
+      const timer = setInterval(() => void sessions.refreshJobs(profile), 20_000)
 
-    return () => clearInterval(timer)
-  }, [jobsRunning, profile])
+      return () => clearInterval(timer)
+    }, [jobsRunning, profile]),
+  )
 
   // The `/` picker lists this bot's skills, which only the server knows; ask once the chat is live (and again if it is re-attached).
   const liveId = session?.liveId

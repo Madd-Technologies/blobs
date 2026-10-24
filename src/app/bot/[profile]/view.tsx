@@ -1,5 +1,5 @@
-import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
+import { useCallback, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotPaper } from '@/components/bots/BotPaper'
@@ -35,7 +35,7 @@ export default function PanelFullView() {
 
   const rows = useRowActions(nowS, () => name)
 
-  useEffect(() => startDashboardPoll(profile), [profile])
+  useFocusEffect(useCallback(() => startDashboardPoll(profile), [profile]))
 
   const openRecord = (record: string) => router.push({ pathname: '/bot/[profile]/record', params: { profile, id: record } })
 
