@@ -5,6 +5,7 @@ import { Image, Pressable, StyleSheet, View } from 'react-native'
 import { BotFace } from '@/components/bots/BotFace'
 import { T } from '@/components/ui/T'
 import { dashboardButton, profileOfHandle } from '@/features/transcript/injected'
+import { splitReply } from '@/features/transcript/reply'
 import { documentPaths, fileName, hidePaths, routeLinks } from '@/features/viewer/kind'
 import type { AttachmentChip } from '@/lib/hermes/attachments'
 import { isPicture, splitMedia, type MediaRef } from '@/lib/hermes/media'
@@ -126,13 +127,24 @@ export const UserBubble = memo(function UserBubble({ text, pending, attachments,
     )
   }
 
+  // A reply carries the line it answers: drawn quietly above your words, not as markdown.
+  const { quote, body } = splitReply(text)
+
   return (
     <View style={styles.userGroup}>
       {attachments?.length ? <Attachments chips={attachments} profile={profile} dim={pending} /> : null}
       {text ? (
         <View style={[styles.base, styles.user, { backgroundColor: c.userBubble, opacity: pending ? 0.6 : 1 }]}>
+          {quote ? (
+            <View style={styles.quote} accessibilityLabel={`Replying to: ${quote}`}>
+              <Feather name="corner-up-left" size={12} color={c.text2} style={styles.quoteIcon} />
+              <T variant="label" color="text2" numberOfLines={2} style={styles.quoteText}>
+                {quote}
+              </T>
+            </View>
+          ) : null}
           <T variant="body" color="userBubbleText" selectable>
-            {text}
+            {body}
           </T>
         </View>
       ) : null}
@@ -239,6 +251,9 @@ const styles = StyleSheet.create({
   teammateRow: { alignSelf: 'stretch', flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   teammateColumn: { flex: 1, minWidth: 0, gap: 2 },
   base: { paddingHorizontal: 14, paddingVertical: 10 },
+  quote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 4 },
+  quoteIcon: { marginTop: 3 },
+  quoteText: { flexShrink: 1 },
   user: { borderTopLeftRadius: radius.bubble, borderTopRightRadius: radius.bubble, borderBottomLeftRadius: radius.bubble, borderBottomRightRadius: radius.tail },
   assistantWrap: { alignSelf: 'stretch', gap: 6 },
   stopped: {},

@@ -5,13 +5,14 @@ import { StyleSheet, View } from 'react-native'
 
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
-import type { DisplayItem } from '@/features/transcript/display'
+import { timeOfDay, type DisplayItem } from '@/features/transcript/display'
 import { useBrowserShows } from '@/stores/display'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 
 import { ActivityLine } from './ActivityLine'
 import { AssistantBubble, TeammateBubble, UserBubble } from './Bubble'
+import { Stamped, SwipeToReply } from './Gestures'
 import { PromptCard } from './PromptCard'
 import { ReplyActions } from './ReplyActions'
 import { RowContext } from './RowContext'
@@ -27,6 +28,8 @@ interface Props {
   latest?: boolean
   /** Drops the latest reply and asks again (passed to every row; only the latest turn's reply shows it). Keep it stable. */
   onRetry?: () => void
+  /** A message was swiped right: reply to it (who wrote it, and its words). Keep it stable. */
+  onReply?: (target: { who: string; text: string }) => void
 }
 
 const sameList = (a?: readonly string[], b?: readonly string[]) => a === b || (!!a && !!b && a.length === b.length && a.every((value, index) => value === b[index]))
@@ -37,7 +40,7 @@ const sameList = (a?: readonly string[], b?: readonly string[]) => a === b || (!
  * row from drawing again for each bit of a reply.
  */
 function sameRow(a: Props, b: Props): boolean {
-  if (a.list !== b.list || a.profile !== b.profile || a.botName !== b.botName || a.latest !== b.latest || a.onRetry !== b.onRetry) {
+  if (a.list !== b.list || a.profile !== b.profile || a.botName !== b.botName || a.latest !== b.latest || a.onRetry !== b.onRetry || a.onReply !== b.onReply) {
     return false
   }
 
@@ -63,7 +66,7 @@ export const ChatRow = memo(function ChatRow({ list, ...props }: Props) {
   )
 }, sameRow)
 
-const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit<Props, 'list'>) {
+const Row = memo(function Row({ entry, profile, botName, latest, onRetry, onReply }: Omit<Props, 'list'>) {
   const { c } = useTheme()
   const router = useRouter()
   const browserShows = useBrowserShows(profile)
@@ -77,34 +80,57 @@ const Row = memo(function Row({ entry, profile, botName, latest, onRetry }: Omit
   }
 
   const { item } = entry
+  // Dragging the chat left shows each message's time; swiping one right replies to it.
+  const time = 'ts' in item && item.ts ? timeOfDay(item.ts) : undefined
+  const replyTo = (who: string, text: string) => (onReply && text.trim() ? () => onReply({ who, text }) : undefined)
 
   switch (item.kind) {
     case 'user':
-      return <UserBubble text={item.text} pending={item.pending} attachments={item.attachments} profile={profile} />
+      return (
+        <Stamped time={time} top={12}>
+          <SwipeToReply label="Reply" onReply={item.pending ? undefined : replyTo('yourself', item.text)}>
+            <UserBubble text={item.text} pending={item.pending} attachments={item.attachments} profile={profile} />
+          </SwipeToReply>
+        </Stamped>
+      )
 
     case 'assistant':
-      return entry.endsTurn ? (
-        <View style={styles.reply}>
-          <AssistantBubble text={item.text} interrupted={item.status === 'interrupted'} profile={profile} hide={entry.drawn} />
-          <ReplyActions id={item.id} text={item.text} onRetry={entry.lastTurn ? onRetry : undefined} />
-        </View>
-      ) : (
-        <AssistantBubble text={item.text} interrupted={item.status === 'interrupted'} profile={profile} hide={entry.drawn} />
+      return (
+        <Stamped time={time} top={4}>
+          <SwipeToReply label="Reply" onReply={item.streaming ? undefined : replyTo(botName, item.text)}>
+            {entry.endsTurn ? (
+              <View style={styles.reply}>
+                <AssistantBubble text={item.text} interrupted={item.status === 'interrupted'} profile={profile} hide={entry.drawn} />
+                <ReplyActions id={item.id} text={item.text} onRetry={entry.lastTurn ? onRetry : undefined} />
+              </View>
+            ) : (
+              <AssistantBubble text={item.text} interrupted={item.status === 'interrupted'} profile={profile} hide={entry.drawn} />
+            )}
+          </SwipeToReply>
+        </Stamped>
       )
 
     case 'teammate':
-      return <TeammateBubble handle={item.handle} text={item.text} />
+      return (
+        <Stamped time={time} top={4}>
+          <SwipeToReply label="Reply" onReply={replyTo(item.handle.replace(/^@/, ''), item.text)}>
+            <TeammateBubble handle={item.handle} text={item.text} />
+          </SwipeToReply>
+        </Stamped>
+      )
 
     case 'note':
       // A routine that ran in this chat leads with a clock, as one quiet line above the bot's summary of it; a call's start and a
       // finished phone errand, a phone.
       return (
-        <View style={styles.note}>
-          {/^(Routine “|A routine ran)/.test(item.text) ? <Feather name="clock" size={14} color={c.text2} /> : /^(Call started |Phone errand finished )/.test(item.text) ? <Feather name="phone" size={14} color={c.text2} /> : null}
-          <T variant="label" color="text2" numberOfLines={2} style={styles.noteText}>
-            {item.text}
-          </T>
-        </View>
+        <Stamped time={time} top={2}>
+          <View style={styles.note}>
+            {/^(Routine “|A routine ran)/.test(item.text) ? <Feather name="clock" size={14} color={c.text2} /> : /^(Call started |Phone errand finished )/.test(item.text) ? <Feather name="phone" size={14} color={c.text2} /> : null}
+            <T variant="label" color="text2" numberOfLines={2} style={styles.noteText}>
+              {item.text}
+            </T>
+          </View>
+        </Stamped>
       )
 
     case 'output':
