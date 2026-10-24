@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import type { CronJob } from '../../lib/hermes/cron.ts'
 import type { Field, RecordDetail, View } from '../../lib/hermes/dashboard.ts'
-import { actionFor, calendarLabel, changeLine, everyWords, figure, fileCard, keptLine, readError, staleNote, MUTE_FOREVER, mutedShort, mutePicks, untilLabel, chartEnds, dashboardRoutines, dateLabel, datePicks, feedsDashboard, formatTyped, groupNumbers, historyLine, isPast, keptBy, longLabel, nextStage, parseDraft, recordDrafts, recordHeading, refreshedSince, safeActionUrl, timeLabel, updatedLine } from './view.ts'
+import { actionFor, calendarLabel, changeLine, everyWords, figure, fileCard, keptLine, readError, staleNote, MUTE_FOREVER, mutedShort, mutePicks, untilLabel, chartEnds, dashboardRoutines, dateLabel, datePicks, feedsDashboard, formatTyped, groupNumbers, historyLine, isPast, keptBy, longLabel, nextStage, parseDraft, recordDrafts, recordHeading, refreshedSince, friendlyDates, rowText, safeActionUrl, tableRowWords, timeLabel, updatedLine } from './view.ts'
 
 /** Local-time epoch seconds, so the labels read the same in any time zone. */
 const at = (y: number, m: number, d: number, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime() / 1000
@@ -168,9 +168,44 @@ describe('panels', () => {
   const number = (id: string): View => ({ id, title: id, kind: 'number', collection: 'b/c', value: 1 })
   const list: View = { id: 'l', title: 'L', kind: 'list', collection: 'b/c', rows: [] }
 
-  it('consecutive numbers share a row of up to three', () => {
-    const grouped = groupNumbers([number('a'), number('b'), list, number('c'), number('d'), number('e'), number('f')])
-    assert.deepEqual(grouped.map(entry => (Array.isArray(entry) ? entry.map(view => view.id) : entry.id)), [['a', 'b'], 'l', ['c', 'd', 'e'], ['f']])
+  it('consecutive numbers share a block, two to a row and up to four', () => {
+    const grouped = groupNumbers([number('a'), number('b'), list, number('c'), number('d'), number('e'), number('f'), number('g')])
+    assert.deepEqual(grouped.map(entry => (Array.isArray(entry) ? entry.map(view => view.id) : entry.id)), [['a', 'b'], 'l', ['c', 'd', 'e', 'f'], ['g']])
+  })
+
+  it('reads plain dates in bot-written text as dates', () => {
+    assert.equal(friendlyDates('Interest seen · Due 2026-11-15', now), 'Interest seen · Due Nov 15')
+    assert.equal(friendlyDates('Back 2026-10-14, out 2026-10-15', now), 'Back Tomorrow, out Thu')
+    assert.equal(friendlyDates('Logged 2026-10-14T09:00 by cron', now), 'Logged 2026-10-14T09:00 by cron', 'a timestamp is left alone')
+    assert.equal(friendlyDates('Order 12026-10-140', now), 'Order 12026-10-140')
+    assert.equal(rowText({ type: 'text', value: 'Due 2026-11-15' }, now), 'Due Nov 15')
+    assert.equal(rowText({ type: 'url', value: 'https://example.com/2026-11-15' }, now), 'example.com', 'only written text')
+  })
+
+  it('reads a table row as a phone row: title, figure on the right, the rest in one line', () => {
+    const columns = [
+      { label: 'Card', type: 'text' as const },
+      { label: 'Watch', type: 'choice' as const },
+      { label: 'Balance', type: 'money' as const },
+      { label: 'Due', type: 'date' as const },
+      { label: 'Autopay', type: 'checkbox' as const },
+      { label: 'Notes', type: 'longtext' as const },
+    ]
+    const cell = (key: string, type: Field['type'], value: string | number | boolean) => ({ key, type, value })
+
+    assert.deepEqual(
+      tableRowWords(columns, [cell('card', 'text', 'Travel card'), cell('watch', 'choice', 'Interest seen 2026-10-12'), cell('balance', 'money', 1250.5), cell('due', 'date', '2026-10-15'), cell('autopay', 'checkbox', true), cell('notes', 'longtext', 'A long note')], now),
+      { title: 'Travel card', figure: '$1,250.50', line: 'Interest seen Yesterday · Due Thu · Autopay' },
+    )
+    assert.deepEqual(tableRowWords(columns, [cell('card', 'text', 'Store card'), null, null, null, cell('autopay', 'checkbox', false), null], now), { title: 'Store card', figure: '', line: '' }, 'empty and unticked cells say nothing')
+
+    const counts = [
+      { label: 'Room', type: 'text' as const },
+      { label: 'Guests', type: 'number' as const },
+      { label: 'Nights', type: 'number' as const },
+    ]
+    assert.deepEqual(tableRowWords(counts, [cell('room', 'text', 'Harbor'), cell('guests', 'number', 2), cell('nights', 'number', 3)], now), { title: 'Harbor', figure: '2', line: 'Nights 3' }, 'the first amount is the figure, later ones carry their names')
+    assert.equal(tableRowWords(counts, [null, cell('guests', 'number', 2), null], now).title, 'Untitled')
   })
 
   it('numbers against the last period', () => {

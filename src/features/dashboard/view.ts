@@ -4,7 +4,7 @@
  */
 
 import { describeSchedule, jobState, type CronJob } from '../../lib/hermes/cron.ts'
-import type { Field, HistoryEntry, RecordDetail, Typed, ValueUnit, View } from '../../lib/hermes/dashboard.ts'
+import type { Field, FieldType, HistoryEntry, RecordDetail, Typed, ValueUnit, View } from '../../lib/hermes/dashboard.ts'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -68,6 +68,18 @@ export function dateLabel(value: string, nowS: number): string {
   }
 
   return Math.abs(ahead) < 7 ? (DAYS[date.getDay()] as string) : `${MONTHS[date.getMonth()]} ${date.getDate()}`
+}
+
+/** Bot-written text with a plain date in it ("Due 2026-11-15") reads the way a date field does on a row ("Due Nov 15"). */
+export function friendlyDates(text: string, nowS: number): string {
+  return text.replace(/\b\d{4}-\d{2}-\d{2}\b(?![T:\d])/g, date => dateLabel(date, nowS))
+}
+
+/** A value on a dashboard row: formatted by type, with plain dates in written text read as dates. */
+export function rowText(typed: Pick<Typed, 'type' | 'value' | 'currency'>, nowS: number): string {
+  const text = formatTyped(typed, nowS)
+
+  return typed.type === 'text' || typed.type === 'choice' || typed.type === 'status' ? friendlyDates(text, nowS) : text
 }
 
 /** The record screen's fuller dates: "Fri, Oct 16" for a date, "Today, 8:12 AM" or "Oct 2, 9:00 AM" for a time. */
@@ -401,14 +413,14 @@ export function changeLine(value: number | null, previous: number | null | undef
   return difference > 0 ? `${figure(difference, unit)} more` : `${figure(-difference, unit)} ${fewer}`
 }
 
-/** Consecutive number panels share one row on the dashboard, the way the design draws them. */
+/** Consecutive number panels share one block on the dashboard, two tiles to a row, up to four (two rows of two). */
 export function groupNumbers(views: View[]): (View | View[])[] {
   const grouped: (View | View[])[] = []
 
   for (const view of views) {
     const last = grouped.at(-1)
 
-    if (view.kind === 'number' && Array.isArray(last) && last.length < 3) {
+    if (view.kind === 'number' && Array.isArray(last) && last.length < 4) {
       last.push(view)
     } else {
       grouped.push(view.kind === 'number' ? [view] : view)
@@ -416,6 +428,49 @@ export function groupNumbers(views: View[]): (View | View[])[] {
   }
 
   return grouped
+}
+
+/** Cell types a phone row reads as its figure, on the right. */
+const FIGURE_TYPES: readonly FieldType[] = ['money', 'number', 'percent']
+/** Cell types a phone row leaves out: they don't fit on one line (the record shows them). */
+const LONG_TYPES: readonly FieldType[] = ['list', 'entries', 'files', 'draft', 'longtext']
+/** Cell types whose value doesn't explain itself, so the row says its column's name first ("Due Tue", "Limit $10,000"). */
+const NAMED_TYPES: readonly FieldType[] = ['number', 'money', 'percent', 'date', 'datetime', 'rating']
+
+/**
+ * A table's row the way a phone draws it on the dashboard, instead of columns cut off at the screen's edge: the first cell is
+ * the title, the first amount after it is the figure on the right, and the other cells make one quiet line
+ * ("Interest seen · Due Tue"). A ticked box reads as its column's name and an unticked or empty cell says nothing.
+ */
+export function tableRowWords(columns: readonly { label: string; type: FieldType }[], cells: readonly (Typed | null)[], nowS: number): { title: string; figure: string; line: string } {
+  const figureAt = columns.findIndex((column, index) => index > 0 && FIGURE_TYPES.includes(column.type) && cells[index] !== null && cells[index] !== undefined)
+  const words: string[] = []
+
+  cells.forEach((cell, index) => {
+    const column = columns[index]
+
+    if (index === 0 || index === figureAt || !cell || !column || LONG_TYPES.includes(cell.type) || cell.value === '') {
+      return
+    }
+
+    if (cell.type === 'checkbox') {
+      if (cell.value) {
+        words.push(column.label)
+      }
+
+      return
+    }
+
+    const value = rowText(cell, nowS)
+
+    words.push(NAMED_TYPES.includes(cell.type) && column.label ? `${column.label} ${value}` : value)
+  })
+
+  return {
+    title: cells[0] ? rowText(cells[0], nowS) : 'Untitled',
+    figure: figureAt > 0 && cells[figureAt] ? formatTyped(cells[figureAt], nowS) : '',
+    line: words.join(' · '),
+  }
 }
 
 /** A chart's first and last labels: "Aug 24" … "This week". */
