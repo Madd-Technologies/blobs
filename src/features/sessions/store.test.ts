@@ -58,7 +58,12 @@ interface Harness {
   handlers: Record<string, (params: Record<string, unknown>) => unknown>
   timers: ReturnType<typeof manualTimers>
   setRoster: (rows: ProfileRow[]) => void
-  setPage: (pages: (offset: number) => StoredMessage[]) => void
+  /** What the history read answers; a promise holds the read (a slow page). */
+  setPage: (pages: (offset: number) => StoredMessage[] | Promise<StoredMessage[]>) => void
+  /** How many history pages were read. */
+  reads: { count: number }
+  /** The event-ring side of the client: what a catch-up answers, and the live ids followed after a chat was read whole. */
+  ring: { catchUp: ((liveId: string) => Promise<boolean>) | null; caughtUp: string[]; followed: string[] }
   /** What the server's paged list of stored chats answers (REST, so not in `calls`). */
   setChats: (page: (query: { offset: number; limit: number; excludeSources?: string[] }) => SessionsPage) => void
   chatQueries: { offset: number; limit: number; excludeSources?: string[] }[]
@@ -70,7 +75,9 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
   const listeners = new Set<(event: GatewayEvent) => void>()
   const timers = manualTimers()
   let roster: ProfileRow[] = [row('bot', 'stored-1')]
-  let pages: (offset: number) => StoredMessage[] = () => history.messages
+  let pages: (offset: number) => StoredMessage[] | Promise<StoredMessage[]> = () => history.messages
+  const reads = { count: 0 }
+  const ring: Harness['ring'] = { catchUp: null, caughtUp: [], followed: [] }
   let chats: (query: { offset: number; limit: number; excludeSources?: string[] }) => SessionsPage = () => ({ sessions: [], total: 0 })
   const chatQueries: Harness['chatQueries'] = []
   const nextLive = { value: 1 }
@@ -106,7 +113,8 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
       return () => void listeners.delete(handler)
     },
     listMessages: async (_config, _id, _profile, query) => {
-      const messages = pages(query?.offset ?? 0)
+      reads.count++
+      const messages = await pages(query?.offset ?? 0)
       return { session_id: 'stored-1', messages, pagination: { limit: PAGE_SIZE, offset: query?.offset ?? 0, order: 'latest', returned: messages.length } }
     },
     listSessions: async (_config, { offset, limit, excludeSources }) => {
@@ -120,6 +128,11 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
     sleep: async () => undefined,
     liveWork: () => !!live.liveWork,
     liveHelpers: () => !!live.liveHelpers,
+    catchUp: async liveId => {
+      ring.caughtUp.push(liveId)
+      return ring.catchUp ? ring.catchUp(liveId) : false
+    },
+    follow: async liveId => void ring.followed.push(liveId),
   })
 
   return {
@@ -133,6 +146,8 @@ function harness(requests?: Pick<RequestBridge, 'answer' | 'ingest'>, live: { li
     setChats: fn => void (chats = fn),
     chatQueries,
     nextLive,
+    reads,
+    ring,
   }
 }
 
@@ -722,6 +737,109 @@ describe('reattach', () => {
     const h = harness()
     await h.sessions.reattachAll()
     assert.deepEqual(methods(h), [])
+  })
+})
+
+describe('coming back to a chat', () => {
+  const settle = () => new Promise(resolve => setImmediate(resolve))
+  const stored = [...history.messages, { id: 900, role: 'user', content: 'Got the code', timestamp: 1_000 }, { id: 901, role: 'assistant', content: 'Save it in a file, then send it.', timestamp: 1_001 }] as StoredMessage[]
+  const said = (h: Harness, text: string) => bot(h)!.transcript.items.filter(item => (item.kind === 'assistant' || item.kind === 'user') && item.text === text).length
+
+  /** The next `session.resume` answers with `liveId`: the same one when the session lived through the disconnect. */
+  function resumeAs(h: Harness, liveId: string) {
+    h.handlers['session.resume'] = () => ({ session_id: liveId, session_key: 'stored-1', running: false, inflight: null, info: { model: 'm', provider: 'p' } })
+  }
+
+  /** Holds the next history read until released (a large chat, a busy server). */
+  function slowRead(h: Harness, messages: StoredMessage[]) {
+    let release: () => void = () => undefined
+    h.setPage(() => new Promise(resolve => (release = () => resolve(messages))))
+
+    return () => release()
+  }
+
+  it('re-attaches a chat whose session lived through the disconnect, and catches up from the event ring without reading it again', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    assert.deepEqual(h.ring.followed, ['live-1'], 'a chat read whole is followed from then on')
+    const readsBefore = h.reads.count
+    resumeAs(h, 'live-1')
+    // What the bot said while the phone was away comes back through the ring.
+    h.ring.catchUp = async liveId => {
+      h.emit({ type: 'message.complete', session_id: liveId, payload: { text: 'Done while you were away.', status: 'complete' } } as GatewayEvent)
+      return true
+    }
+
+    await h.sessions.reattachAll()
+    assert.equal(h.reads.count, readsBefore, 'the history was not read again')
+    assert.deepEqual(h.ring.caughtUp, ['live-1'])
+    assert.equal(said(h, 'Done while you were away.'), 1)
+    assert.equal(bot(h)?.phase, 'ready')
+  })
+
+  it('opening the chat on screen again does not read it again either, or show it as opening', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    resumeAs(h, 'live-1')
+    h.ring.catchUp = async () => true
+    const phases: string[] = []
+    const stop = h.sessions.store.subscribe(state => void phases.push(state.bots.bot?.phase ?? ''))
+    const readsBefore = h.reads.count
+
+    await h.sessions.open('bot')
+    stop()
+    assert.equal(h.reads.count, readsBefore)
+    assert.ok(!phases.includes('opening'), 'the chat stayed on screen')
+  })
+
+  it('reads the chat whole when the ring cannot cover the gap', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    resumeAs(h, 'live-1')
+    h.ring.catchUp = async () => false
+    h.setPage(() => stored)
+
+    await h.sessions.reattachAll()
+    assert.equal(bot(h)?.rows.at(-1)?.id, 901)
+  })
+
+  it('reads the chat whole under a re-created session, and applies what that session says during the read after the page', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    resumeAs(h, 'live-9')
+    const release = slowRead(h, history.messages)
+    const reattach = h.sessions.reattachAll()
+    await settle()
+
+    // The page is still being read when the bot answers on the new session.
+    h.emit({ type: 'message.complete', session_id: 'live-9', payload: { text: 'Here it is.', status: 'complete' } } as GatewayEvent)
+    release()
+    await reattach
+
+    assert.equal(bot(h)?.liveId, 'live-9')
+    assert.equal(said(h, 'Here it is.'), 1, 'the answer was neither dropped nor drawn over')
+    assert.deepEqual(h.ring.caughtUp, [], 'a new session has nothing to catch up from')
+    assert.deepEqual(h.ring.followed, ['live-1', 'live-9'])
+  })
+
+  it('a message sent while the chat is read again keeps its bubble, and goes once the read is done, on the new session', async () => {
+    const h = harness()
+    await h.sessions.open('bot')
+    resumeAs(h, 'live-9')
+    const release = slowRead(h, history.messages)
+    const reattach = h.sessions.reattachAll()
+    await settle()
+
+    const sending = h.sessions.send('bot', 'Got the code')
+    await settle()
+    assert.equal(said(h, 'Got the code'), 1, 'the bubble shows at once')
+    assert.ok(!methods(h).includes('prompt.submit'), 'it waits for the read')
+
+    release()
+    await reattach
+    assert.equal(await sending, true)
+    assert.equal(said(h, 'Got the code'), 1, 'the page did not draw over it')
+    assert.equal(h.calls.find(call => call.method === 'prompt.submit')?.params.session_id, 'live-9')
   })
 })
 
