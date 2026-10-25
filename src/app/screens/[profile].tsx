@@ -15,7 +15,7 @@ import { Screen } from '@/components/ui/Screen'
 import { Sheet } from '@/components/ui/Sheet'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
-import { chord, eventsForChange, KEY, type Modifier } from '@/features/display/keys'
+import { chord, eventsForChange, eventsForPaste, isLoneEnter, KEY, PASTE_TYPE_MAX, type Modifier } from '@/features/display/keys'
 import { isMine } from '@/features/display/store'
 import { wording } from '@/features/transcript/activity'
 import type { Step } from '@/features/transcript/types'
@@ -24,6 +24,7 @@ import { useConnection } from '@/stores/connection'
 import { useBotView } from '@/stores/bots'
 import { display, useScreen } from '@/stores/display'
 import { sessions, useBotSession } from '@/stores/sessions'
+import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
@@ -73,6 +74,8 @@ export default function ScreenWatch() {
    */
   const [typingKey, setTypingKey] = useState(0)
   const lastTyping = useRef('')
+  /** When Enter was last sent from the phone's keyboard (ms), so a keyboard that reports it twice sends it once. */
+  const lastEnter = useRef(0)
 
   // Read the screen when it opens (once connected), and keep the bot's chat live for its activity.
   useEffect(() => {
@@ -216,13 +219,41 @@ export default function ScreenWatch() {
     setModifiers(held => (held.includes(modifier) ? held.filter(entry => entry !== modifier) : [...held, modifier]))
   }
 
+  /**
+   * The phone keyboard's Enter, sent once. Keyboards report it differently: a submit (Samsung's keyboard shows Done or an arrow
+   * for this field, which is visible-password to keep autocorrect away), a key press, or a new line typed into the field.
+   */
+  function typedEnter() {
+    const now = Date.now()
+
+    if (now - lastEnter.current < 250) {
+      return
+    }
+
+    lastEnter.current = now
+    pressKey(KEY.Return)
+  }
+
+  /** Types the phone's clipboard out on the screen, and puts it on the bot's clipboard too (for its own ctrl+V later). */
   async function pasteFromClipboard() {
     const text = await Clipboard.getStringAsync()
 
-    if (text) {
-      paste(text)
-      send(chord(['ctrl'], 0x76))
+    if (!text) {
+      toast('Nothing to paste: the clipboard has no text')
+
+      return
     }
+
+    paste(text)
+
+    if (text.length > PASTE_TYPE_MAX) {
+      toast(`Too long to type out. It is on ${name}’s clipboard: press ctrl+V there (ctrl+shift+V in a terminal).`)
+
+      return
+    }
+
+    send(eventsForPaste(text))
+    setModifiers([])
   }
 
   function toggleFit() {
@@ -341,6 +372,13 @@ export default function ScreenWatch() {
             autoFocus={typingKey > 0 && keyboardHeight > 0}
             defaultValue=""
             onChangeText={next => {
+              if (isLoneEnter(lastTyping.current, next)) {
+                lastTyping.current = next
+                typedEnter()
+
+                return
+              }
+
               const { events, typedAny } = eventsForChange(lastTyping.current, next, modifiers)
 
               if (events.length) {
@@ -353,8 +391,7 @@ export default function ScreenWatch() {
 
               lastTyping.current = next
 
-              // Enter arrives as a newline in the text (the field is multiline, so the keyboard offers a real
-              // Enter instead of "Done"); it was just sent as Return, so start the field over.
+              // A pasted line break was just sent as Return, so start the field over (and when it grows).
               if (next.includes('\n') || next.length > 64) {
                 resetTyping()
               }
@@ -363,8 +400,13 @@ export default function ScreenWatch() {
               if (event.nativeEvent.key === 'Backspace' && lastTyping.current === '') {
                 // Nothing left in the field to delete, so no text change will report it.
                 pressKey(KEY.Backspace)
+              } else if (event.nativeEvent.key === 'Enter') {
+                typedEnter()
               }
             }}
+            // Return submits rather than adding a new line, on every keyboard, and the keyboard stays up.
+            submitBehavior="submit"
+            onSubmitEditing={typedEnter}
             autoCapitalize="none"
             autoCorrect={false}
             spellCheck={false}

@@ -109,3 +109,22 @@ export function eventsForChange(previous: string, next: string, modifiers: Modif
 
   return { events, typedAny: typed.length > 0 }
 }
+
+/** How much pasted text is typed out; longer text only goes on the bot's clipboard. */
+export const PASTE_TYPE_MAX = 5000
+
+/**
+ * The key events that type pasted text out on the bot's screen. Typing works in every app, where the clipboard does not: a
+ * terminal pastes with ctrl+shift+V rather than ctrl+V, and some fields refuse a paste. Line breaks become Enter, except at the
+ * end, so a copied line pasted into a terminal never runs by itself.
+ */
+export function eventsForPaste(text: string): KeyEvent[] {
+  return eventsForTyped(text.replace(/\r\n?/g, '\n').replace(/\n+$/, ''), [])
+}
+
+/** Whether one change of the hidden field is just the keyboard's Enter (a lone new line), as opposed to typed or pasted text. */
+export function isLoneEnter(previous: string, next: string): boolean {
+  const { backspaces, typed } = diffTyped(previous, next)
+
+  return backspaces === 0 && (typed === '\n' || typed === '\r')
+}
