@@ -16,6 +16,10 @@ describe('replying to a message', () => {
     assert.ok(long.endsWith('…'))
   })
 
+  it('quotes @mentions as bare names, so a quote asks nobody in a room, but leaves addresses alone', () => {
+    assert.equal(replySnippet("Waiting on @juniper's check; mail ops@example.com"), "Waiting on juniper's check; mail ops@example.com")
+  })
+
   it('quotes only your words when you reply to a reply', () => {
     assert.equal(withReply('> An older line\n\nMy answer', 'And this'), '> My answer\n\nAnd this')
   })

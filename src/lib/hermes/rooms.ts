@@ -189,13 +189,23 @@ export function memberName(room: Pick<HostedRoom, 'members'>, memberId: string, 
   return member?.display_name || actor?.display_name || member?.profile || actor?.profile || memberId
 }
 
+/** Members who passed in a row, said in one line, and where in the timeline that line is. */
+interface PassRun {
+  at: number
+  id: string
+  names: string[]
+}
+
 /**
  * The room as a conversation, oldest first: your messages, the bots' messages (with who said it), a quiet line when
- * you stopped the room, and a red one when a bot's turn failed. Turn bookkeeping and system events are left out.
+ * you stopped the room or a bot had nothing to add, and a red one when a bot's turn failed. Other turn bookkeeping and
+ * system events are left out.
  */
 export function buildTimeline(room: Pick<HostedRoom, 'members'>, events: RoomEvent[]): TimelineItem[] {
   const items: TimelineItem[] = []
   let lastMessageTs = 0
+  // Bots that pass in a row get one line: "Orion and Juniper had nothing to add".
+  let passes = null as PassRun | null
 
   const stamp = (ts: number, seq: number) => {
     if (!lastMessageTs || ts - lastMessageTs > TIME_GAP_S) {
@@ -236,6 +246,21 @@ export function buildTimeline(room: Pick<HostedRoom, 'members'>, events: RoomEve
       const error = typeof event.payload.error === 'string' ? oneLine(event.payload.error, 140) : ''
 
       items.push({ kind: 'note', id: `e-${event.seq}`, text: `${memberName(room, memberId)} couldn’t reply`, detail: error || undefined, tone: 'danger' })
+    } else if (event.kind === 'turn.settled' && event.payload.passed === true) {
+      // Asked, with nothing to add: the server drops its "(pass)", so say so quietly, or a round that ends this way reads as a
+      // stuck room.
+      const name = memberName(room, typeof event.payload.member_id === 'string' ? event.payload.member_id : '')
+      const run: PassRun | null = passes && passes.at === items.length - 1 ? passes : null
+      const names: string[] = run ? [...new Set([...run.names, name])] : [name]
+      const item: TimelineItem = { kind: 'note', id: run?.id ?? `e-${event.seq}`, text: `${nameList(names)} had nothing to add`, tone: 'quiet' }
+
+      if (run) {
+        items[run.at] = item
+      } else {
+        items.push(item)
+      }
+
+      passes = { at: items.length - 1, id: item.id, names }
     } else if (event.kind === 'room.stop_requested') {
       items.push({ kind: 'note', id: `e-${event.seq}`, text: 'Stopped', tone: 'quiet' })
     } else if (event.kind === 'turn.cancelled' && event.payload.reason === SUPERSEDED) {
@@ -262,6 +287,16 @@ function askedIn(room: Pick<HostedRoom, 'members'>, text: string): string[] {
   const named = new Set(splitMentions(text, [...byHandle.keys()]).flatMap(part => (part.mention === 'member' ? [byHandle.get(part.text.slice(1).toLowerCase())] : [])))
 
   return room.members.filter(member => named.has(member.member_id)).map(member => member.member_id)
+}
+
+/**
+ * The members a message asks to the exclusion of the rest, as Hermes reads it (`resolve_mentions`): the ones it @mentions. None
+ * when it mentions nobody or everyone, since then every member is asked. Others join only when a bot @mentions them.
+ */
+export function askedOnly(room: Pick<HostedRoom, 'members'>, text: string): string[] {
+  const asked = askedIn(room, text)
+
+  return asked.length < room.members.length ? asked : []
 }
 
 export interface PausedAsk {
@@ -399,7 +434,8 @@ function memberOfTask(events: RoomEvent[], taskId: string): string | undefined {
 /** The hidden session the server runs one member's turns of a room in (one per member and room, made on its first turn). */
 export const roomSessionTitle = (roomId: string): string => `Group: ${roomId}`
 
-const TURN_ENDS = new Set(['turn.settled', 'turn.failed', 'turn.cancelled', 'turn.deferred'])
+/** Log kinds that end a member's turn, with a message or without one. */
+export const TURN_ENDS = new Set(['turn.settled', 'turn.failed', 'turn.cancelled', 'turn.deferred'])
 const AT_EVERYONE = /(^|[^A-Za-z0-9_])@(all|everyone)(?![A-Za-z0-9_-])/i
 
 /**

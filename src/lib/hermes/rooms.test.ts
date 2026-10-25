@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import type { RoomEvent, RoomMember } from './protocol.ts'
 import {
   answerPausedText,
+  askedOnly,
   approveRoomAction,
   buildMembers,
   buildTimeline,
@@ -139,6 +140,14 @@ describe('mentions', () => {
     assert.equal(mentionsYou('no mention'), false)
   })
 
+  it('knows who a message asks to the exclusion of the rest, as Hermes reads it', () => {
+    assert.deepEqual(askedOnly(room, 'Sounds done? @forge sent an update'), ['m-forge'], 'any @mention asks only those')
+    assert.deepEqual(askedOnly(room, 'what do you both think?'), [], 'no mention asks everyone')
+    assert.deepEqual(askedOnly(room, '@all check in'), [])
+    assert.deepEqual(askedOnly(room, '@hermes and @forge, check in'), [], 'every member named is everyone')
+    assert.deepEqual(askedOnly(room, 'mail ops@forge.dev'), [], 'an address is not a mention')
+  })
+
   it('splits a message so mentions can be drawn apart', () => {
     assert.deepEqual(splitMentions('@forge yes, 1 AM works. cc @unknown and @you.', ['forge', 'scout']), [
       { text: '@forge', mention: 'member' },
@@ -194,11 +203,29 @@ describe('the room as a conversation', () => {
   it('leaves out bookkeeping and empty messages', () => {
     const items = buildTimeline(room, [
       event('room.created', {}, { kind: 'system', id: 's' }),
-      event('turn.settled', { member_id: 'm-forge', passed: true }, { kind: 'gateway', id: 'g' }),
+      event('turn.settled', { member_id: 'm-forge', passed: false }, { kind: 'gateway', id: 'g' }),
       event('room.activity', { status: 'settled' }, { kind: 'gateway', id: 'g' }),
       bot('m-forge', '   '),
     ])
     assert.deepEqual(items, [])
+  })
+
+  it('says quietly when a bot had nothing to add, in one line for bots that pass in a row', () => {
+    const gateway = { kind: 'gateway', id: 'g' } as const
+    const items = buildTimeline(room, [
+      you('thanks both', 1000),
+      event('turn.settled', { member_id: 'm-hermes', passed: true }, gateway, 1005),
+      event('turn.settled', { member_id: 'm-forge', passed: true }, gateway, 1006),
+      event('room.activity', { status: 'settled', reason_code: 'silent_round' }, gateway, 1006),
+      you('@forge one more thing', 1100),
+      event('turn.settled', { member_id: 'm-forge', passed: true }, gateway, 1105),
+    ])
+    const notes = items.filter(item => item.kind === 'note')
+
+    assert.deepEqual(
+      notes.map(item => item.kind === 'note' && item.text),
+      ['Hermes and Forge had nothing to add', 'Forge had nothing to add'],
+    )
   })
 })
 

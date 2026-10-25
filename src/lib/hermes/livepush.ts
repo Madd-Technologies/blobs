@@ -6,6 +6,7 @@
  */
 
 import type { RoomEvent } from './protocol.ts'
+import { TURN_ENDS } from './rooms.ts'
 import { restJson, type ServerConfig } from './server.ts'
 
 export const ROOMS_CHANGED = 'plugin.hermes-bot-mobile.rooms.changed'
@@ -147,29 +148,48 @@ export function parseDashboardChanged(payload: unknown): DashboardChanged | null
   }
 }
 
+/** Hermes's reply for a member with nothing to add (`is_pass_text`): "(pass)", "pass." and the like. */
+const PASS = /^\(?\s*pass\s*\)?\.?$/i
+
+/** Whether a member's words so far are its pass, or the start of one ("(", "(pa"): never shown as a reply. */
+export function isPassText(text: string): boolean {
+  const words = text.trim()
+
+  return PASS.test(words) || (words.startsWith('(') && '(pass)'.startsWith(words.toLowerCase()))
+}
+
+/** What a live turn has written so far, without a pass: Hermes throws that away, so it is no reply. */
+export const liveWords = (turn: Pick<LiveTurn, 'text'>): string => (turn.text && !isPassText(turn.text) ? turn.text : '')
+
 /**
- * A member's live turn is worth showing while it is the room's current work: not after the room log already has that member's
- * reply from when the turn started on (the finished message replaces it), and not once it has been quiet for a long while.
+ * A member's live turn is worth showing while it is the room's current work: not after the room log has that member's reply or
+ * the end of its turn from when the turn started on (the finished message replaces it; a pass ends it with no message), and
+ * not once it has been quiet for a long while.
  */
-export function showLiveTurn(turn: LiveTurn, lastMessageAt: number | undefined, nowS: number): boolean {
-  if (!turn.text && !turn.steps.length && turn.phase !== 'thinking' && turn.phase !== 'tool') {
+export function showLiveTurn(turn: LiveTurn, lastDoneAt: number | undefined, nowS: number): boolean {
+  if (!liveWords(turn) && !turn.steps.length && turn.phase !== 'thinking' && turn.phase !== 'tool') {
     return false
   }
 
-  if (lastMessageAt !== undefined && lastMessageAt >= turn.started) {
+  if (lastDoneAt !== undefined && lastDoneAt >= turn.started) {
     return false
   }
 
   return nowS - turn.updated < 10 * 60
 }
 
-/** When each member last posted a message in the room's log (server seconds), to hide a live turn its reply has replaced. */
-export function lastMessageBy(events: readonly Pick<RoomEvent, 'kind' | 'actor' | 'created_at'>[]): Record<string, number> {
+/**
+ * When each member last posted a message or finished a turn in the room's log (server seconds), to hide a live turn that is
+ * over. A turn's end names its member in the payload (the gateway logs it); a message's author is its actor.
+ */
+export function lastDoneBy(events: readonly Pick<RoomEvent, 'kind' | 'actor' | 'payload' | 'created_at'>[]): Record<string, number> {
   const last: Record<string, number> = {}
 
   for (const event of events) {
-    if (event.kind === 'message.member' && event.actor?.id) {
-      last[event.actor.id] = Math.max(last[event.actor.id] ?? 0, event.created_at)
+    const member = event.kind === 'message.member' ? event.actor?.id : TURN_ENDS.has(event.kind) && typeof event.payload?.member_id === 'string' ? event.payload.member_id : undefined
+
+    if (member) {
+      last[member] = Math.max(last[member] ?? 0, event.created_at)
     }
   }
 

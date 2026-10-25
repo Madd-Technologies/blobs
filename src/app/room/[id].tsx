@@ -19,9 +19,9 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { afterSheetCloses } from '@/lib/afterSheet'
-import { activityPhrase, answerPausedText, roomAttention, buildTimeline, memberName, memberOf, nameList, pausedAsk, pausedLine, replyingLine, type TimelineItem } from '@/lib/hermes/rooms'
+import { activityPhrase, answerPausedText, askedOnly, roomAttention, buildTimeline, memberName, memberOf, nameList, pausedAsk, pausedLine, replyingLine, type TimelineItem } from '@/lib/hermes/rooms'
 import { withReply } from '@/features/transcript/reply'
-import { lastMessageBy, showLiveTurn } from '@/lib/hermes/livepush'
+import { lastDoneBy, liveWords, showLiveTurn } from '@/lib/hermes/livepush'
 import { useNow } from '@/lib/useNow'
 import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useBotMetas } from '@/stores/bots'
@@ -58,16 +58,16 @@ export default function RoomScreen() {
   const room = data?.room
   const working = data?.status?.working === true
   const replying = data?.replying ?? []
-  // The members' turns as they stream (hermes-bot-mobile 0.2+), until each one's finished reply is in the log.
+  // The members' turns as they stream (hermes-bot-mobile 0.2+), until the log has each one's reply or the end of its turn.
   const live = useRooms(state => state.live[id])
   const liveTurns = useMemo(() => {
     if (!live || !data) {
       return []
     }
 
-    const posted = lastMessageBy(data.events)
+    const done = lastDoneBy(data.events)
 
-    return Object.entries(live.members).filter(([memberId, turn]) => showLiveTurn(turn, posted[memberId], nowS))
+    return Object.entries(live.members).filter(([memberId, turn]) => showLiveTurn(turn, done[memberId], nowS))
   }, [live, data, nowS])
   const streaming = new Set(liveTurns.map(([memberId]) => memberId))
   const attention = useMemo(() => (room && data ? roomAttention(room, data.events, data.status) : null), [room, data])
@@ -83,16 +83,27 @@ export default function RoomScreen() {
 
   const mention = useCallback((handle: string) => setText(current => `${current}${current && !/\s$/.test(current) ? ' ' : ''}@${handle} `), [])
 
+  /** What is sent for `message`: a reply quotes the message it answers, and mentions the member who wrote it so that one answers. */
+  const outgoing = useCallback(
+    (message: string) => {
+      const handle = replyTo?.memberId && room ? memberOf(room, replyTo.memberId)?.handle : undefined
+      const addressed = handle && !new RegExp(`@${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(message) ? `@${handle} ${message}` : message
+
+      return replyTo ? withReply(replyTo.text, addressed) : message
+    },
+    [replyTo, room],
+  )
+  // Hermes asks only the members a message @mentions (everyone when it mentions none), so say so while you write.
+  const asked = useMemo(() => (room ? askedOnly(room, outgoing(text)) : []), [room, outgoing, text])
+  const askedHint = room && asked.length ? `Only ${nameList(asked.map(memberId => memberName(room, memberId)))} ${asked.length > 1 ? 'are' : 'is'} asked` : null
+
   function send(message: string) {
     // Sending takes you to the bottom, where your message and the replies will appear.
     stick.toLatest()
     setText('')
-    // A reply quotes the message it answers, and mentions the member who wrote it so that one answers.
-    const handle = replyTo?.memberId && room ? memberOf(room, replyTo.memberId)?.handle : undefined
-    const addressed = handle && !new RegExp(`@${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(message) ? `@${handle} ${message}` : message
-    const outgoing = replyTo ? withReply(replyTo.text, addressed) : message
+    const sent = outgoing(message)
     setReplyTo(null)
-    void sendToRoom(id, outgoing).then(error => error && toast(error))
+    void sendToRoom(id, sent).then(error => error && toast(error))
   }
 
   async function stop() {
@@ -189,7 +200,7 @@ export default function RoomScreen() {
                             profile={profile}
                             meta={metas[profile]}
                             doing={activityPhrase({ phase: turn.phase, tool: turn.tool, since: turn.started })}
-                            text={turn.text}
+                            text={liveWords(turn)}
                             steps={turn.steps}
                             cut={turn.cut}
                           />
@@ -250,7 +261,7 @@ export default function RoomScreen() {
           above={
             <>
               {replyTo ? <ReplyStrip who={replyTo.who} text={replyTo.text} onCancel={() => setReplyTo(null)} /> : null}
-              <MentionChips members={room.members} metas={metas} onMention={mention} />
+              <MentionChips members={room.members} metas={metas} onMention={mention} hint={askedHint} />
             </>
           }
           focusSignal={focusComposer}

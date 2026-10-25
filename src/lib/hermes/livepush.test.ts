@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { lastMessageBy, parseDashboardChanged, parseRoomLive, parseRoomsChanged, showLiveTurn, type LiveTurn } from './livepush.ts'
+import { isPassText, lastDoneBy, parseDashboardChanged, parseRoomLive, parseRoomsChanged, showLiveTurn, type LiveTurn } from './livepush.ts'
 
 describe('pushed room and dashboard changes', () => {
   it('reads a room member turn as it streams, tolerating what it does not know', () => {
@@ -33,28 +33,41 @@ describe('pushed room and dashboard changes', () => {
     assert.deepEqual(parseDashboardChanged({ versions: {} }), { versions: {} })
   })
 
-  it('shows a live turn until the room log has that member’s reply, or it went quiet', () => {
+  it('shows a live turn until the room log has that member’s reply or turn end, or it went quiet', () => {
     const turn: LiveTurn = { turn: 't-1', phase: 'writing', tool: null, text: 'Hi', cut: false, steps: [], started: 100, updated: 110 }
 
     assert.equal(showLiveTurn(turn, undefined, 120), true)
     assert.equal(showLiveTurn(turn, 90, 120), true, 'its last message is from before this turn')
-    assert.equal(showLiveTurn(turn, 115, 120), false, 'the finished reply is in the log')
+    assert.equal(showLiveTurn(turn, 115, 120), false, 'the finished reply (or the end of the turn) is in the log')
     assert.equal(showLiveTurn(turn, undefined, 110 + 11 * 60), false, 'quiet for over ten minutes')
     assert.equal(showLiveTurn({ ...turn, text: '', phase: 'writing' }, undefined, 120), false, 'nothing to show yet')
     assert.equal(showLiveTurn({ ...turn, text: '', phase: 'tool', tool: 'terminal' }, undefined, 120), true)
+    assert.equal(showLiveTurn({ ...turn, text: '(pass)' }, undefined, 120), false, 'a pass is no reply')
   })
 
-  it('knows when each member last posted', () => {
+  it('knows a pass, and the start of one, but not a reply that only begins like it', () => {
+    for (const text of ['(pass)', ' (Pass). ', 'pass', 'PASS.', '(', '(pa', '(pass']) {
+      assert.equal(isPassText(text), true, text)
+    }
+
+    for (const text of ['', 'Passing this to @juniper', '(passed the check)', '(see above)', 'Hi']) {
+      assert.equal(isPassText(text), false, text)
+    }
+  })
+
+  it('knows when each member last posted or finished a turn', () => {
     const actor = (id: string, kind = 'member') => ({ kind, id })
 
     assert.deepEqual(
-      lastMessageBy([
-        { kind: 'message.member', actor: actor('m-orion'), created_at: 10 },
-        { kind: 'turn.settled', actor: actor('gw', 'gateway'), created_at: 12 },
-        { kind: 'message.member', actor: actor('m-orion'), created_at: 15 },
-        { kind: 'message.user', actor: actor('you', 'user'), created_at: 16 },
+      lastDoneBy([
+        { kind: 'message.member', actor: actor('m-orion'), payload: { member_id: 'm-orion' }, created_at: 10 },
+        { kind: 'turn.settled', actor: actor('gw', 'gateway'), payload: { member_id: 'm-orion' }, created_at: 12 },
+        { kind: 'message.member', actor: actor('m-orion'), payload: {}, created_at: 15 },
+        // A pass: the turn ends with no message.
+        { kind: 'turn.settled', actor: actor('gw', 'gateway'), payload: { member_id: 'm-juniper', passed: true }, created_at: 17 },
+        { kind: 'message.user', actor: actor('you', 'user'), payload: {}, created_at: 18 },
       ]),
-      { 'm-orion': 15 },
+      { 'm-orion': 15, 'm-juniper': 17 },
     )
   })
 })
