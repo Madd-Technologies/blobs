@@ -75,7 +75,7 @@ export default function Connect() {
 
     if (probe.apiServer) {
       setBusy(false)
-      setError('That is Hermes’s API server (usually port 8642), which is a different service. HermesBot connects to the dashboard gateway, usually port 9119.')
+      setError('That is Hermes’s API server (usually port 8642), which is a different service. Blobs connects to the dashboard gateway, usually port 9119.')
 
       return
     }

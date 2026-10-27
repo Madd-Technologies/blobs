@@ -50,7 +50,7 @@ describe('plugin install messages', () => {
 
   it('a single plugin gets only its own steps', () => {
     const message = installMessage(['hermes-drive'])
-    assert.match(message, /this HermesBot plugin/)
+    assert.match(message, /this Blobs plugin/)
     assert.doesNotMatch(message, /hermes-push/)
     assert.doesNotMatch(message, /Paperless check/)
     assert.match(message, /Drive check/)

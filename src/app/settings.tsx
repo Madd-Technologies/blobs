@@ -12,6 +12,7 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { Sheet } from '@/components/ui/Sheet'
 import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
+import { openLink } from '@/lib/openLink'
 import { useConnection } from '@/stores/connection'
 import { usePhone } from '@/stores/phone'
 import { useRestart } from '@/stores/restart'
@@ -25,6 +26,12 @@ const THEMES: { value: ThemePref; label: string }[] = [
 ]
 
 const STATUS = { unconfigured: 'Not connected', connecting: 'Connecting…', online: 'Connected', offline: 'Offline' } as const
+
+// The app's website (GitHub Pages: this address keeps working when the site moves to its own domain).
+const SITE = 'https://madd-technologies.github.io/blobs'
+const PRIVACY_URL = `${SITE}/privacy.html`
+const SUPPORT_URL = 'https://github.com/Madd-Technologies/blobs/issues'
+const SOURCE_URL = 'https://github.com/Madd-Technologies/blobs'
 
 export default function Settings() {
   const router = useRouter()
@@ -89,6 +96,9 @@ export default function Settings() {
 
         <GroupedList separators={false}>
           <Row label="How Blobs works" onPress={() => router.push('/tour')} />
+          <Row label="Privacy" onPress={() => void openLink(PRIVACY_URL)} />
+          <Row label="Support" onPress={() => void openLink(SUPPORT_URL)} />
+          <Row label="Source and licence" onPress={() => void openLink(SOURCE_URL)} />
         </GroupedList>
 
         {__DEV__ ? (
@@ -102,7 +112,7 @@ export default function Settings() {
         </GroupedList>
 
         <T variant="meta" color="text2" style={styles.version}>
-          HermesBot {Constants.expoConfig?.version ?? ''}
+          Blobs {Constants.expoConfig?.version ?? ''}
         </T>
       </ScrollView>
 

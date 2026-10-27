@@ -33,7 +33,7 @@ import { radius } from '@/theme/tokens'
  * Hermes's tool search, and "dashboard" alone reads as Hermes's own web dashboard (a bot asked for one may set out to build a plugin).
  */
 const SET_UP =
-  'Load skill_view("hermes-dashboard:dashboard") and use your dashboard_* tools (find them with tool search) to track something for me on my HermesBot app dashboard: a collection with its own fields, kept fresh by a routine. No new plugin. What to track: '
+  'Load skill_view("hermes-dashboard:dashboard") and use your dashboard_* tools (find them with tool search) to track something for me on my Blobs app dashboard: a collection with its own fields, kept fresh by a routine. No new plugin. What to track: '
 
 /** A pinned bot's dashboard: panels over the collections it keeps for you, with the chat one tap away. */
 export default function BotDashboard() {

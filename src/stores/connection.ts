@@ -159,8 +159,17 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
   serverVersion: null,
 
   hydrate: async () => {
-    const raw = await secure.get(CONFIG_KEY)
-    const config = raw ? (JSON.parse(raw) as ServerConfig) : null
+    let config: ServerConfig | null = null
+
+    try {
+      const raw = await secure.get(CONFIG_KEY)
+      config = raw ? (JSON.parse(raw) as ServerConfig) : null
+    } catch {
+      // Android can lose the Keystore key (a new lock screen, a restore), and then the saved server can't be read. Start over at
+      // Connect rather than stay on the splash: the app only draws once this has finished.
+      await secure.remove(CONFIG_KEY).catch(() => undefined)
+    }
+
     // A saved server is about to be dialled (the root layout connects right after this), so say
     // "connecting", not "offline": Home shows a can't-reach banner for the latter on every cold start.
     set({ config, hydrated: true, status: config ? 'connecting' : 'unconfigured' })

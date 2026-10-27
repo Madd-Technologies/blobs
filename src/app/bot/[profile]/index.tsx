@@ -96,6 +96,9 @@ function chatStatus(line: string, elsewhere: boolean, itemCount: number): string
   return itemCount === 0 ? 'New side chat' : `Side chat · ${line}`
 }
 
+// A chat that throws while drawing (a bot's own text is the likely cause) keeps the app open, with a way home.
+export { ScreenError as ErrorBoundary } from '@/components/ui/RouteError'
+
 export default function BotChat() {
   // `chat`: the stored id of the chat a link is about (a notification's), main or side.
   const { profile, chat } = useLocalSearchParams<{ profile: string; chat?: string }>()

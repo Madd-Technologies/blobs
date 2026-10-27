@@ -21,6 +21,7 @@ import { ImageViewer } from '@/components/chat/ImageViewer'
 import { RestartingScreen } from '@/components/restart/RestartingScreen'
 import { RestartSheet } from '@/components/restart/RestartSheet'
 import { ToastHost } from '@/components/ui/ToastHost'
+import { RootError } from '@/components/ui/RouteError'
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider'
 
 void SplashScreen.preventAutoHideAsync()
@@ -102,8 +103,11 @@ function RootStack() {
   )
 }
 
+// A screen that throws while drawing shows a way back instead of closing the app.
+export { RootError as ErrorBoundary }
+
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Geist_400Regular,
     Geist_500Medium,
     Geist_600SemiBold,
@@ -133,7 +137,8 @@ export default function RootLayout() {
   }, [])
 
   // The native splash stays up until this first frame; the animated splash then takes over and hides it.
-  const ready = fontsLoaded && hydrated && prefsReady
+  // A font that fails to load falls back to the system's rather than keeping the app on the splash.
+  const ready = (fontsLoaded || !!fontError) && hydrated && prefsReady
   if (!ready) return null
 
   return (

@@ -140,7 +140,7 @@ export function rowView(input: {
   }
 
   if (status === null) {
-    return { line: 'Needs HermesBot 0.1.7 on the server', tone: 'quiet', spinner: false, action: 'update', opens: 'plugins' }
+    return { line: 'Needs the Blobs plugin 0.1.7 on the server', tone: 'quiet', spinner: false, action: 'update', opens: 'plugins' }
   }
 
   if (!status.supported) {

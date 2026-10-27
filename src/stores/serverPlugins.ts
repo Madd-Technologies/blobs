@@ -41,7 +41,7 @@ function phonesLine(status: PushStatus): string {
 export const SERVER_PLUGINS: ServerPlugin[] = [
   {
     name: 'hermes-bot-mobile',
-    title: 'HermesBot',
+    title: 'Blobs plugin',
     about: 'Tells your phone when a bot needs you, and shows what bots in a room are doing.',
     version: RELEASES['hermes-bot-mobile'],
     setup: installMessage(['hermes-bot-mobile']),
@@ -55,7 +55,7 @@ export const SERVER_PLUGINS: ServerPlugin[] = [
 
       const older = await pushStatusFrom(config, 'hermes-push')
 
-      return older ? { detail: `${phonesLine(older)} They come through the older hermes-push plugin, which HermesBot replaces, keeping your phones.`, needsSetup: false, formerly: true } : null
+      return older ? { detail: `${phonesLine(older)} They come through the older hermes-push plugin, which the Blobs plugin replaces, keeping your phones.`, needsSetup: false, formerly: true } : null
     },
   },
   {

@@ -118,7 +118,7 @@ export function installMessage(names: readonly PluginName[], commit: string = PL
   )
 
   return [
-    `Hermes: please install or update ${chosen.length > 1 ? 'these HermesBot plugins' : 'this HermesBot plugin'} on this Hermes server from GitHub (github.com/${PLUGINS_REPO}), pinned to one exact commit: ${listed}. Follow the steps in order, show me the output of each, and stop and tell me if anything fails. Change nothing else: no other plugins, profiles, bots or config keys. Do NOT restart Hermes or the gateway; I will do that myself. Never print, quote or send me any token, key or secret.`,
+    `Hermes: please install or update ${chosen.length > 1 ? 'these Blobs plugins' : 'this Blobs plugin'} on this Hermes server from GitHub (github.com/${PLUGINS_REPO}), pinned to one exact commit: ${listed}. Follow the steps in order, show me the output of each, and stop and tell me if anything fails. Change nothing else: no other plugins, profiles, bots or config keys. Do NOT restart Hermes or the gateway; I will do that myself. Never print, quote or send me any token, key or secret.`,
     `What ${chosen.length > 1 ? 'they are' : 'it is'}:\n${chosen.map(name => `- ${name}: ${ABOUT[name]}`).join('\n')}`,
     `Steps:\n${steps.map((step, index) => `${index + 1}. ${step}`).join('\n')}`,
   ].join('\n\n')

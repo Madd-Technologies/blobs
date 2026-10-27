@@ -31,6 +31,9 @@ import { toast } from '@/stores/toast'
 import { useWatch } from '@/stores/watch'
 
 /** A group room: you and several bots in one conversation, run by the server so it carries on with the app closed. */
+// A chat that throws while drawing (a bot's own text is the likely cause) keeps the app open, with a way home.
+export { ScreenError as ErrorBoundary } from '@/components/ui/RouteError'
+
 export default function RoomScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
