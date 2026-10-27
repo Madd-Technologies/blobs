@@ -39,6 +39,12 @@ const ABOUT: Record<PluginName, string> = {
  */
 export const PER_BOT: readonly PluginName[] = ['hermes-dashboard']
 
+/**
+ * What the app itself needs on any server (pushes, room activity, dashboards), offered from the chat's attach menu. Paperless,
+ * Drive, voice (xAI) and phone (Twilio) need their own services, so they are offered only from Settings → Server plugins.
+ */
+export const MOBILE_PLUGINS: readonly PluginName[] = ['hermes-bot-mobile', 'hermes-dashboard']
+
 /** Hermes profile names, as the `-p` flag takes them. */
 const PROFILE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
