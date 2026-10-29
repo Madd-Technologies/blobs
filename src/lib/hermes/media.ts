@@ -30,13 +30,18 @@ const IMAGE_EXT = 'png|jpe?g|gif|webp|bmp'
  * An absolute path to a picture, written out in a reply: `/home/orion/.hermes/profiles/x/images/a.png`. Where the server tells a bot there
  * is no attachment channel (it does, for chats it counts as a terminal), "stating the file's absolute path" is how it delivers one.
  * The path has no spaces, is not part of a longer word or of a URL (`https://host/a.png`), and may sit in backticks, quotes or a link.
+ * A folder in it has no slash of its own (`[^…/]+/`): with one, a long run of slashes and no picture at its end (base64, which is full
+ * of `/`) made the matcher try every way of splitting the run, and a bot's pasted image data froze the app.
  */
-const STATED_PATH = new RegExp(String.raw`(?<![\w:/.~-])(/(?:[^\s\`"'<>()\[\]{}*]+/)*[^\s\`"'<>()\[\]{}*/]+\.(?:${IMAGE_EXT}))(?![\w/-])`, 'gi')
+const STATED_PATH = new RegExp(String.raw`(?<![\w:/.~-])(/(?:[^\s\`"'<>()\[\]{}*/]+/)*[^\s\`"'<>()\[\]{}*/]+\.(?:${IMAGE_EXT}))(?![\w/-])`, 'gi')
 /** A line that is nothing but one such path (with a bullet, backticks or a full stop around it): the picture says it, so the line goes. */
-const PATH_LINE = new RegExp(String.raw`^[ \t]*(?:[-*•][ \t]+)?[\`"']?(/(?:[^\s\`"'<>()\[\]{}*]+/)*[^\s\`"'<>()\[\]{}*/]+\.(?:${IMAGE_EXT}))[\`"']?[.,:;]?[ \t]*$`, 'i')
+const PATH_LINE = new RegExp(String.raw`^[ \t]*(?:[-*•][ \t]+)?[\`"']?(/(?:[^\s\`"'<>()\[\]{}*/]+/)*[^\s\`"'<>()\[\]{}*/]+\.(?:${IMAGE_EXT}))[\`"']?[.,:;]?[ \t]*$`, 'i')
 
 /** The most pictures drawn from one reply. */
 const MAX_PICTURES = 6
+
+/** A line longer than this holds no path to a picture (it is data, a pasted blob): it is left as it is, unscanned. */
+export const MAX_SCAN_LINE = 2000
 
 /**
  * A bot's files, lifted out of its reply: the `MEDIA:` lines, and absolute picture paths it states in its words. `hide` names pictures
@@ -61,6 +66,12 @@ export function splitMedia(text: string, hide?: ReadonlySet<string>): { text: st
   let removedLine = false
 
   for (const line of cleaned.split('\n')) {
+    if (line.length > MAX_SCAN_LINE) {
+      kept.push(line)
+
+      continue
+    }
+
     const only = PATH_LINE.exec(line)?.[1]
 
     if (only) {
