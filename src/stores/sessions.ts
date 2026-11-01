@@ -7,9 +7,12 @@ import { readAsStringAsync } from 'expo-file-system/legacy'
 import { createSessions, type BotSession } from '@/features/sessions/store'
 import type { Job, Step } from '@/features/transcript/types'
 import { supportsLiveHelpers, supportsLiveWork } from '@/lib/hermes/capabilities'
+import { listLightMessages } from '@/lib/hermes/history'
+import { listSessionMessages } from '@/lib/hermes/rest'
 import { gateway, onGatewayEvent, requests, useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
 import { useRoster } from '@/stores/roster'
+import { pushes } from '@/stores/watch'
 
 /** The app's chat sessions, wired to the real gateway. */
 export const sessions = createSessions({
@@ -23,6 +26,8 @@ export const sessions = createSessions({
   liveHelpers: () => supportsLiveHelpers(useConnection.getState().serverVersion),
   catchUp: liveId => gateway.catchUp(liveId),
   follow: liveId => gateway.follow(liveId),
+  // A chat's history light where the server's hermes-bot-mobile serves it (0.3+), else Hermes's own route as before.
+  listMessages: (config, storedId, profile, query) => (pushes('history') ? listLightMessages(config, storedId, profile, query) : listSessionMessages(config, storedId, profile, query)),
 })
 
 // An earlier version kept which side chat a bot was on under this key; that now lives in the prefs (`lastChats`), and only for

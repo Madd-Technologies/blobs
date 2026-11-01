@@ -178,6 +178,8 @@ export default function RoomScreen() {
                 data={items}
                 keyExtractor={item => item.id}
                 renderItem={({ item }) => <RoomMessage item={item} handles={handles} metas={metas} now={nowS * 1000} onReply={reply} />}
+                // About three screens around what is in view, as in a bot's chat.
+                windowSize={7}
                 contentContainerStyle={styles.list}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"

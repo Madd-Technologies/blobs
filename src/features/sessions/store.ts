@@ -8,6 +8,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 
 import { JsonRpcGatewayError, type GatewayEvent } from '../../lib/hermes/gateway-client.ts'
 import { asHermesEvent, RpcCode, type HermesEvent, type ProfileRow, type SessionInfo, type SessionResumeResult } from '../../lib/hermes/protocol.ts'
+import { hasOlder } from '../../lib/hermes/history.ts'
 import { listSessionMessages, listSessionsPage, type StoredMessage } from '../../lib/hermes/rest.ts'
 import { call, isRpcCode, type RpcClient, type RpcMethods } from '../../lib/hermes/rpc.ts'
 import type { RequestBridge } from '../../lib/hermes/server-requests.ts'
@@ -315,7 +316,7 @@ export function createSessions(deps: SessionsDeps) {
       const transcript = buildTranscript(page.messages, { running: false, inflight: null, pending_approval: null, pending_clarify: null })
       patch(profile, {
         rows: page.messages,
-        hasOlder: page.pagination.returned >= PAGE_SIZE,
+        hasOlder: hasOlder(page, PAGE_SIZE),
         transcript: { ...transcript, liveWork: bot.transcript.liveWork, liveHelpers: bot.transcript.liveHelpers, jobs: bot.transcript.jobs },
       })
     } catch {
@@ -513,7 +514,7 @@ export function createSessions(deps: SessionsDeps) {
         liveId: resumed.session_id,
         info: resumed.info ?? null,
         rows: page.messages,
-        hasOlder: page.pagination.returned >= PAGE_SIZE,
+        hasOlder: hasOlder(page, PAGE_SIZE),
         loadingOlder: false,
         transcript,
       })
@@ -871,7 +872,7 @@ export function createSessions(deps: SessionsDeps) {
 
         return {
           rows,
-          hasOlder: page.pagination.returned >= PAGE_SIZE,
+          hasOlder: hasOlder(page, PAGE_SIZE),
           loadingOlder: false,
           transcript: { ...current.transcript, items: [...history, ...live] },
         }

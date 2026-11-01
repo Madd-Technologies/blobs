@@ -122,6 +122,16 @@ A row: `id, role, content, tool_calls[{id, function{name, arguments}}], tool_cal
 finish_reason, compacted, active`, plus `display_content` / `display_kind` / reasoning when present. Skip
 `display_kind:'hidden'`, prefer `display_content`, and pair a `tool` row to its call by `tool_call_id`.
 
+**Read light (hermes-bot-mobile 0.3.0, Hermes 0.22+).** Where the plugin's `/status` lists `history` in `features`, a chat
+is read through `GET /api/plugins/hermes-bot-mobile/history/{storedId}?bot=<p>&turns=20&offset=<rows held>` instead: the same
+rows in the same shape, through Hermes's own reader with `inline_images=false`, for the person's newest 20 turns (not 200
+rows), with `api_content` and stored reasoning dropped (the app never draws them) and each long tool output cut to its end
+(its small fields kept). A cut row has `omitted` (its length whole); `pagination.has_older` says whether there is more.
+`GET …/history/{storedId}/rows?bot=<p>&ids=1,2` hands rows back whole; a tool step built from a cut row keeps that row's id
+(`partial`) and fetches it when the step is drawn (`stores/wholeRows.ts`). On real chats a page went from 1.35 MB to 81 KB.
+A 404 from either falls back to Hermes's route. Measured on Hermes 0.22.4: Hermes's own route has no light mode, and its
+compact `_history_to_messages` (what `session.resume` returns) comes only as a whole chat.
+
 ## A turn (verified)
 
 `prompt.submit {session_id, text}` → `{status:'streaming'}`. Events, in this order:

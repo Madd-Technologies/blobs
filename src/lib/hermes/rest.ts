@@ -28,6 +28,8 @@ export interface StoredMessage {
   finish_reason?: string | null
   /** Compacted rows were summarized away; pass `includeCompacted` to see them. */
   compacted?: number
+  /** Read light (hermes-bot-mobile's history): this row was cut down from this many characters; `fetchWholeRows` has it whole. */
+  omitted?: number
   active?: number
   [key: string]: unknown
 }
@@ -36,7 +38,7 @@ export interface MessagesPage {
   session_id: string
   /** Oldest first within the page, whichever `order` selected which rows. */
   messages: StoredMessage[]
-  pagination: { limit: number; offset: number; order: string; returned: number }
+  pagination: { limit: number; offset: number; order: string; returned: number; has_older?: boolean; turns?: number }
 }
 
 export interface MessagesQuery {

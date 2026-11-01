@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather'
-import { memo, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 
 import { Pill } from '@/components/ui/Pill'
@@ -9,10 +9,12 @@ import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { formatDuration, usesScreen, waitingOnYou, wording } from '@/features/transcript/activity'
 import { summarizeWork, withJob } from '@/features/transcript/jobs'
+import { readResult } from '@/features/transcript/reduce'
 import type { Item, Step } from '@/features/transcript/types'
 import { fileName } from '@/features/viewer/kind'
 import { openDocument, openFile } from '@/stores/documents'
 import { useStepJobs } from '@/stores/sessions'
+import { useWholeRows, wantWholeRows, wholeKey } from '@/stores/wholeRows'
 import { useNowMs } from '@/lib/useNow'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
@@ -22,14 +24,34 @@ type Activity = Extract<Item, { kind: 'activity' }>
 /** Long output is trimmed to its tail: the end is what matters, and the screen is small. */
 const OUTPUT_LIMIT = 4000
 
+/** A step's output: whole once its row has come (read light, the step came with only the end of it), else what it came with. */
+function useStepOutput(profile: string, step: Step): string | undefined {
+  const whole = useWholeRows(state => (step.partial !== undefined ? state.rows[wholeKey(profile, step.partial)] : undefined))
+
+  if (!whole) {
+    return step.output
+  }
+
+  let parsed: unknown = whole.content
+
+  try {
+    parsed = typeof whole.content === 'string' && whole.content.trimStart().startsWith('{') ? JSON.parse(whole.content) : whole.content
+  } catch {
+    // Plain text: shown as it is.
+  }
+
+  return readResult(parsed as Parameters<typeof readResult>[0]).output ?? step.output
+}
+
 /** `handled`: the bot carried on after this step's run, so a failure in it is marked quietly, not in red. */
-function StepRow({ step, handled }: { step: Step; handled: boolean }) {
+function StepRow({ step, handled, profile }: { step: Step; handled: boolean; profile: string }) {
   const { c } = useTheme()
   const [open, setOpen] = useState(false)
   const failed = step.state === 'failed'
   const red = failed && !handled
   const icon = step.state === 'blocked' ? 'slash' : failed ? 'x' : step.state === 'running' ? 'more-horizontal' : 'check'
-  const output = step.output && step.output.length > OUTPUT_LIMIT ? `…${step.output.slice(-OUTPUT_LIMIT)}` : step.output
+  const full = useStepOutput(profile, step)
+  const output = full && full.length > OUTPUT_LIMIT ? `…${full.slice(-OUTPUT_LIMIT)}` : full
   const words = wording(step)
   const file = fileOf(step)
 
@@ -125,6 +147,16 @@ export const ActivityLine = memo(function ActivityLine({
 }) {
   const { c } = useTheme()
   const [open, setOpen] = useState(false)
+  // Read light, a step came with only the end of its output: its whole row is fetched now that this line is drawn (the chat
+  // draws a few screens around what is in view), so opening a step shows all of it at once.
+  const partial = profile ? item.steps.flatMap(step => (step.partial !== undefined ? [String(step.partial)] : [])).join(',') : ''
+
+  useEffect(() => {
+    if (profile && partial) {
+      wantWholeRows(profile, partial.split(','))
+    }
+  }, [profile, partial])
+
   const jobs = useStepJobs(profile, item.steps)
   const running = item.steps.some(step => step.state === 'running') || Object.values(jobs ?? {}).some(job => job.state === 'running')
   const now = useNowMs(running)
@@ -194,7 +226,7 @@ export const ActivityLine = memo(function ActivityLine({
       {open ? (
         <View style={styles.steps}>
           {(summary.kind === 'running' ? finished : item.steps.map(step => withJob(step, jobs))).map(step => (
-            <StepRow key={step.toolId} step={step} handled={summary.kind !== 'failed'} />
+            <StepRow key={step.toolId} step={step} handled={summary.kind !== 'failed'} profile={profile ?? ''} />
           ))}
         </View>
       ) : null}

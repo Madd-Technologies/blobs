@@ -64,9 +64,11 @@ export interface PushFeatures {
   roomsChanged: boolean
   roomLive: boolean
   dashboardChanged: boolean
+  /** hermes-bot-mobile 0.3+ serves chats' history light (`lib/hermes/history.ts`). */
+  history: boolean
 }
 
-export const NO_PUSH: PushFeatures = { watch: false, roomsChanged: false, roomLive: false, dashboardChanged: false }
+export const NO_PUSH: PushFeatures = { watch: false, roomsChanged: false, roomLive: false, dashboardChanged: false, history: false }
 
 const record = (value: unknown): Record<string, unknown> | null => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null)
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
@@ -215,6 +217,7 @@ export async function getPushFeatures(config: ServerConfig): Promise<PushFeature
     roomsChanged: mobile.includes('rooms.changed'),
     roomLive: mobile.includes('room.live'),
     dashboardChanged: dashboard.includes('changed'),
+    history: mobile.includes('history'),
   }
 }
 

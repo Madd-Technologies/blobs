@@ -443,6 +443,9 @@ export default function BotChat() {
                     item.kind === 'errand' ? <ErrandBlock errand={item.errand} botName={name} meta={view?.meta} /> : <ChatRow entry={item} list={`chat:${profile}`} profile={profile} botName={name} latest={index === newestRow} onRetry={retry} onReply={reply} />
                   }
                   {...viewable}
+                  // Draws about three screens around what is in view (React Native's default is ten), so opening a long chat
+                  // does not work through rows nobody is near.
+                  windowSize={7}
                   contentContainerStyle={styles.list}
                   keyboardShouldPersistTaps="handled"
                   keyboardDismissMode="interactive"
