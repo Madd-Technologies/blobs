@@ -35,7 +35,8 @@ export interface RestartEntry {
   finished_at?: number
   restarted_at?: number
   busy_left?: number
-  detail?: string
+  /** Why, in a line. Since hermes-bot-mobile 0.3.1, "The gateway did not restart: …" when the gateway stayed. */
+  detail?: string | null
 }
 
 export interface RestartStatus {
