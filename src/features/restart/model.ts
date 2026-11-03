@@ -188,3 +188,23 @@ export function rowView(input: {
 export function cameBack(status: RestartStatus | null | undefined, before: number | null): boolean {
   return !!status?.started_at && (before === null || status.started_at > before + 0.5)
 }
+
+/** How hermes-bot-mobile (0.3.1+) begins a request's `detail` when the gateway it was asked to restart did not. */
+const GATEWAY_STAYED = 'The gateway did not restart: '
+
+/**
+ * The toast once the dashboard is back. After a restart of both, a gateway that did not restart (Hermes 0.22 refuses
+ * while the gateway runs a routine or a turn) says so, with the plugin's reason: the dashboard alone coming back is not
+ * the whole restart.
+ */
+export function backLine(status: RestartStatus | null | undefined, choice: RestartChoice, at: string): string {
+  const detail = status?.last?.detail
+
+  if (choice === 'both' && detail?.startsWith(GATEWAY_STAYED)) {
+    const reason = detail.slice(GATEWAY_STAYED.length).trim()
+
+    return `Dashboard back · the gateway didn’t restart${reason ? `: ${reason.length > 90 ? `${reason.slice(0, 89)}…` : reason}` : ''}`
+  }
+
+  return `Hermes is back · restarted ${at}`
+}

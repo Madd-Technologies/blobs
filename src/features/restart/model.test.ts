@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import type { RestartStatus } from '../../lib/hermes/restart.ts'
-import { busyRows, cameBack, defaultChoice, rowView, uptime, workingLine } from './model.ts'
+import { backLine, busyRows, cameBack, defaultChoice, rowView, uptime, workingLine } from './model.ts'
 
 const NOW = 2_000_000
 const names: Record<string, string> = { concierge: 'Concierge', forge: 'Forge' }
@@ -114,6 +114,19 @@ describe('coming back', () => {
     assert.equal(cameBack(status({ started_at: NOW }), NOW - 60), true)
     assert.equal(cameBack(status({ started_at: NOW - 60 }), NOW - 60), false)
     assert.equal(cameBack(null, NOW), false)
+  })
+
+  it('says when the gateway stayed, after a restart of both', () => {
+    const entry = { id: 'r1', requested_at: NOW, mode: 'now' as const, include_gateway: true, outcome: 'done' }
+    const stayed = status({ last: { ...entry, detail: 'The gateway did not restart: Refusing to restart the gateway: 3 live session(s) would be interrupted.' } })
+
+    assert.equal(backLine(stayed, 'both', 'at 9:41'), 'Dashboard back · the gateway didn’t restart: Refusing to restart the gateway: 3 live session(s) would be interrupted.')
+    assert.equal(backLine(status({ last: entry }), 'both', 'at 9:41'), 'Hermes is back · restarted at 9:41')
+    // A dashboard-only restart never mentions the gateway, and other details are not about it.
+    assert.equal(backLine(stayed, 'dashboard', 'at 9:41'), 'Hermes is back · restarted at 9:41')
+    assert.equal(backLine(status({ last: { ...entry, detail: 'Replaced by a newer request (now).' } }), 'both', 'at 9:41'), 'Hermes is back · restarted at 9:41')
+    assert.equal(backLine(null, 'both', 'at 9:41'), 'Hermes is back · restarted at 9:41')
+    assert.ok(backLine(status({ last: { ...entry, detail: `The gateway did not restart: ${'x'.repeat(200)}` } }), 'both', '').endsWith('…'))
   })
 
   it('reads uptime in minutes, hours, then days', () => {

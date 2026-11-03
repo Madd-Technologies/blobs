@@ -1,7 +1,7 @@
 import { AppState } from 'react-native'
 import { create } from 'zustand'
 
-import { busyRows, cameBack, clockLabel, underWay, type RestartChoice, type RestartPhase } from '@/features/restart/model'
+import { backLine, busyRows, cameBack, clockLabel, underWay, type RestartChoice, type RestartPhase } from '@/features/restart/model'
 import { displayName } from '@/lib/hermes/identity'
 import { cancelRestart, getRestartStatus, RestartRefused, requestRestart, restartGateway, type RestartStatus } from '@/lib/hermes/restart'
 import { useConnection } from '@/stores/connection'
@@ -73,7 +73,7 @@ export const useRestart = create<RestartState>((set, get) => ({
       if (phase.kind === 'restarting' && cameBack(status, phase.before)) {
         // A new dashboard process answers: it is back.
         set({ status, phase: { kind: 'idle' }, overlayHidden: false })
-        toast(`Hermes is back · restarted ${clockLabel(status?.started_at ?? nowS())}`)
+        toast(backLine(status, phase.choice, clockLabel(status?.started_at ?? nowS())))
 
         return
       }
