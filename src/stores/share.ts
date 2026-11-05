@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Directory, File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
+import { Platform } from 'react-native'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
-import { getFailure, sendFailure, sentToast } from '@/features/share/model'
+import { DOWNLOADS_URI, folderLabel, freeName, getFailure, savedToast, sendFailure, sentToast } from '@/features/share/model'
 import { HermesHttpError, restHeaders, type ServerConfig } from '@/lib/hermes/server'
 import { RestartRefused } from '@/lib/hermes/restart'
 import { cancelTaildropSend, getTaildrop, getTaildropSend, sendTaildrop, type TaildropStatus, type TaildropTarget } from '@/lib/hermes/taildrop'
@@ -15,10 +16,10 @@ import { toast } from '@/stores/toast'
 /** A share line under the viewer's title, while something is under way or went wrong. */
 export type ShareLine =
   | { kind: 'idle' }
-  /** Downloading for share from this phone; the line shows only past half a second. */
-  | { kind: 'getting'; done: number; total: number | null; visible: boolean }
+  /** Getting the file onto this phone, to share it or to save it; the line shows only past half a second. */
+  | { kind: 'getting'; purpose: 'share' | 'download'; done: number; total: number | null; visible: boolean }
   | { kind: 'sending'; id: string; target: TaildropTarget; sent: number | null; total: number | null }
-  | { kind: 'error'; message: string; retry: 'share' | 'taildrop'; target?: TaildropTarget }
+  | { kind: 'error'; message: string; retry: 'share' | 'download' | 'taildrop'; target?: TaildropTarget }
 
 interface ShareState {
   /** The server's Taildrop status: undefined until read, null without the route. */
@@ -27,10 +28,16 @@ interface ShareState {
   lines: Record<string, ShareLine>
   /** The device sheet, for one viewer screen. */
   sheetFor: string | null
+  /** Android's share sheet (Download, Share), for one viewer screen. */
+  phoneSheetFor: string | null
   loadTaildrop: () => Promise<void>
   openSheet: (key: string) => void
   closeSheet: () => void
+  openPhoneSheet: (key: string) => void
+  closePhoneSheet: () => void
   share: (key: string, doc: ViewerDoc) => Promise<void>
+  /** Saves it to the folder picked once (Android), or to another one with `pick`. */
+  download: (key: string, doc: ViewerDoc, options?: { pick?: boolean }) => Promise<void>
   send: (key: string, doc: ViewerDoc, target: TaildropTarget) => Promise<void>
   cancel: (key: string) => void
   clear: (key: string) => void
@@ -46,6 +53,20 @@ export const useLastTarget = create<{ byServer: Record<string, string>; remember
     { name: 'blobs.taildrop', storage: createJSONStorage(() => AsyncStorage), partialize: state => ({ byServer: state.byServer }) },
   ),
 )
+
+/** The folder downloads go to (Android): a folder the person picked once, kept with its access across restarts. */
+export const useDownloadFolder = create<{ uri: string | null; set: (uri: string | null) => void }>()(
+  persist(
+    set => ({
+      uri: null,
+      set: uri => set({ uri }),
+    }),
+    { name: 'blobs.downloads', storage: createJSONStorage(() => AsyncStorage), partialize: state => ({ uri: state.uri }) },
+  ),
+)
+
+/** Whether this phone saves files itself (Android); iOS saves through the share sheet's Save to Files. */
+export const canDownload = Platform.OS === 'android'
 
 /** Running downloads and sends, by document key, so Cancel can stop them. */
 const running = new Map<string, { abort?: AbortController; poll?: ReturnType<typeof setInterval>; config: ServerConfig; sendId?: string }>()
@@ -79,6 +100,38 @@ function shareFolder(): Directory {
 /** A file name the phone's file system takes. */
 const safeName = (name: string) => name.replace(/[/\\:*?"<>|]+/g, '-').slice(0, 120) || 'file'
 
+/** What the document is called as a file on this phone (a change is a .patch). */
+const fileName = (doc: ViewerDoc) => (doc.kind === 'diff' ? `${safeName(doc.name)}.patch` : safeName(doc.name))
+
+/**
+ * The folder to save in: the one picked before while it is still there, else Android's folder picker, opened at
+ * Download (a new pick is kept). Null when the person backed out of the picker.
+ */
+async function downloadFolder(pick: boolean): Promise<Directory | null> {
+  const saved = useDownloadFolder.getState().uri
+
+  if (saved && !pick) {
+    try {
+      const folder = new Directory(saved)
+
+      if (folder.exists) {
+        return folder
+      }
+    } catch {
+      // Its access was taken back: pick again.
+    }
+  }
+
+  try {
+    const folder = await Directory.pickDirectoryAsync(saved ?? DOWNLOADS_URI)
+    useDownloadFolder.getState().set(folder.uri)
+
+    return folder
+  } catch {
+    return null
+  }
+}
+
 export const useShare = create<ShareState>((set, get) => {
   const setLine = (key: string, line: ShareLine) => set(state => ({ lines: { ...state.lines, [key]: line } }))
   const stop = (key: string) => {
@@ -91,10 +144,90 @@ export const useShare = create<ShareState>((set, get) => {
     running.delete(key)
   }
 
+  /**
+   * The document as a file in the app's own cache (named `name`, else its own name), with the line under the title while
+   * it comes: a change is written here as a .patch, a file is downloaded from the server. Null when cancelled or failed
+   * (the line then says why).
+   */
+  const fetchToPhone = async (key: string, doc: ViewerDoc, purpose: 'share' | 'download', name: string = fileName(doc)): Promise<File | null> => {
+    const config = useConnection.getState().config
+
+    if (!config || running.has(key)) {
+      return null
+    }
+
+    try {
+      if (doc.kind === 'diff') {
+        // A change is made on the phone, as a .patch file.
+        const file = new File(shareFolder(), name)
+        file.write(doc.diff)
+        setLine(key, { kind: 'idle' })
+
+        return file
+      }
+
+      const url = downloadUrl(config, doc)
+
+      if (!url) {
+        return null
+      }
+
+      const abort = new AbortController()
+      running.set(key, { abort, config })
+      setLine(key, { kind: 'getting', purpose, done: 0, total: null, visible: false })
+      // Ready within half a second: no line at all.
+      const reveal = setTimeout(() => {
+        const line = get().lines[key]
+
+        if (line?.kind === 'getting') {
+          setLine(key, { ...line, visible: true })
+        }
+      }, 500)
+      const task = File.createDownloadTask(url, new File(shareFolder(), name), {
+        headers: restHeaders(config),
+        signal: abort.signal,
+        // You are waiting for it: iOS's default background session adds seconds after the last byte.
+        sessionType: 'foreground',
+        onProgress: ({ bytesWritten, totalBytes }) => {
+          const line = get().lines[key]
+
+          if (line?.kind === 'getting') {
+            setLine(key, { ...line, done: bytesWritten, total: totalBytes > 0 ? totalBytes : null })
+          }
+        },
+      })
+
+      let file: File | null
+
+      try {
+        file = await task.downloadAsync()
+      } finally {
+        clearTimeout(reveal)
+        stop(key)
+      }
+
+      setLine(key, { kind: 'idle' })
+
+      return file
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        setLine(key, { kind: 'idle' })
+
+        return null
+      }
+
+      const status = error instanceof HermesHttpError ? error.status : (Number(/\b([45]\d\d)\b/.exec(String(error))?.[1]) || null)
+      setLine(key, { kind: 'error', message: `Couldn’t get the file · ${getFailure(status)}`, retry: purpose })
+
+      return null
+    }
+  }
+
   return {
     taildrop: undefined,
     lines: {},
     sheetFor: null,
+    phoneSheetFor: null,
 
     async loadTaildrop() {
       const config = useConnection.getState().config
@@ -119,81 +252,67 @@ export const useShare = create<ShareState>((set, get) => {
       set({ sheetFor: null })
     },
 
-    async share(key, doc) {
-      const config = useConnection.getState().config
+    openPhoneSheet(key) {
+      set({ phoneSheetFor: key })
+    },
 
-      if (!config || running.has(key)) {
+    closePhoneSheet() {
+      set({ phoneSheetFor: null })
+    },
+
+    async share(key, doc) {
+      set({ phoneSheetFor: null })
+      const file = await fetchToPhone(key, doc, 'share')
+
+      if (!file) {
         return
       }
 
       try {
-        if (doc.kind === 'diff') {
-          // A change is made on the phone, as a .patch file.
-          const file = new File(shareFolder(), `${safeName(doc.name)}.patch`)
-          file.write(doc.diff)
-          setLine(key, { kind: 'idle' })
-          await Sharing.shareAsync(file.uri, { mimeType: 'text/x-diff', dialogTitle: doc.name })
+        await Sharing.shareAsync(file.uri, { dialogTitle: doc.name, ...(doc.kind === 'diff' ? { mimeType: 'text/x-diff' } : {}) })
+      } catch {
+        // The share sheet could not open, or was closed: nothing was lost, and the button is there to try again.
+      }
+    },
 
-          return
-        }
+    async download(key, doc, options = {}) {
+      set({ phoneSheetFor: null })
 
-        const url = downloadUrl(config, doc)
+      if (!canDownload || running.has(key)) {
+        return
+      }
 
-        if (!url) {
-          return
-        }
+      const folder = await downloadFolder(options.pick === true)
 
-        const abort = new AbortController()
-        running.set(key, { abort, config })
-        setLine(key, { kind: 'getting', done: 0, total: null, visible: false })
-        // Ready within half a second: no line at all.
-        const reveal = setTimeout(() => {
-          const line = get().lines[key]
+      if (!folder) {
+        return
+      }
 
-          if (line?.kind === 'getting') {
-            setLine(key, { ...line, visible: true })
-          }
-        }, 500)
-        const task = File.createDownloadTask(url, new File(shareFolder(), safeName(doc.name)), {
-          headers: restHeaders(config),
-          signal: abort.signal,
-          // You are waiting for it: iOS's default background session adds seconds after the last byte.
-          sessionType: 'foreground',
-          onProgress: ({ bytesWritten, totalBytes }) => {
-            const line = get().lines[key]
+      let name: string
 
-            if (line?.kind === 'getting') {
-              setLine(key, { ...line, done: bytesWritten, total: totalBytes > 0 ? totalBytes : null })
-            }
-          },
-        })
+      try {
+        // Named before it is fetched, so the copy keeps the name: a file already there is never replaced.
+        name = freeName(fileName(doc), folder.list().map(entry => entry.name))
+      } catch {
+        // The folder went away, or its access was taken back: pick it again next time.
+        useDownloadFolder.getState().set(null)
+        setLine(key, { kind: 'error', message: 'Couldn’t open the folder · pick it again', retry: 'download' })
 
-        let file: File | null
+        return
+      }
 
-        try {
-          file = await task.downloadAsync()
-        } finally {
-          clearTimeout(reveal)
-          stop(key)
-        }
+      const file = await fetchToPhone(key, doc, 'download', name)
 
-        if (!file) {
-          setLine(key, { kind: 'idle' })
+      if (!file) {
+        return
+      }
 
-          return
-        }
-
-        setLine(key, { kind: 'idle' })
-        await Sharing.shareAsync(file.uri, { dialogTitle: doc.name })
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          setLine(key, { kind: 'idle' })
-
-          return
-        }
-
-        const status = error instanceof HermesHttpError ? error.status : (Number(/\b([45]\d\d)\b/.exec(String(error))?.[1]) || null)
-        setLine(key, { kind: 'error', message: `Couldn’t get the file · ${getFailure(status)}`, retry: 'share' })
+      try {
+        await file.copy(folder)
+        toast(savedToast(folderLabel(folder.uri), name))
+      } catch {
+        useDownloadFolder.getState().set(null)
+        setLine(key, { kind: 'error', message: 'Couldn’t save it there · pick the folder again', retry: 'download' })
       }
     },
 

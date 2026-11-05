@@ -158,3 +158,53 @@ export function sendFailure(target: string, error: string | null | undefined): s
 export function getFailure(status: number | null): string {
   return status ? `the server said ${status}` : 'the connection dropped'
 }
+
+/** Where Android's folder picker opens the first time: the phone's Download folder. */
+export const DOWNLOADS_URI = 'content://com.android.externalstorage.documents/document/primary%3ADownload'
+
+/** "report.pdf", or "report (1).pdf" and on when a file of that name is already in the folder (as Android names copies). */
+export function freeName(name: string, taken: Iterable<string>): string {
+  const names = new Set([...taken].map(each => each.toLowerCase()))
+
+  if (!names.has(name.toLowerCase())) {
+    return name
+  }
+
+  const dot = name.lastIndexOf('.')
+  const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
+
+  for (let n = 1; ; n += 1) {
+    const candidate = `${stem} (${n})${extension}`
+
+    if (!names.has(candidate.toLowerCase())) {
+      return candidate
+    }
+  }
+}
+
+/** A picked folder's name, from its content URI: ".../tree/primary%3ADownload%2FReports" → "Reports"; "Download" at the top. */
+export function folderLabel(uri: string | null | undefined): string {
+  const encoded = /\/(?:tree|document)\/([^/]+)\/?$/.exec(uri ?? '')?.[1]
+
+  if (!encoded) {
+    return 'your folder'
+  }
+
+  let path: string
+
+  try {
+    path = decodeURIComponent(encoded)
+  } catch {
+    return 'your folder'
+  }
+
+  const inside = path.includes(':') ? path.slice(path.indexOf(':') + 1) : path
+  const last = inside.split('/').filter(Boolean).pop()
+
+  return last || (path.startsWith('primary:') ? 'your phone' : 'your folder')
+}
+
+/** "Saved to Download · report (1).pdf". */
+export function savedToast(folder: string, name: string): string {
+  return `Saved to ${folder} · ${name}`
+}
