@@ -1,8 +1,8 @@
 /**
  * Needs you as a deck: everything waiting on you, one card at a time. A live call's question first (it waits a minute at
  * most), then bots' prompts, calls waiting for your OK, what dashboards hold for you, what a finished call asked of you, and
- * rooms holding something for you. Cards you skip go to the back, in the order you skipped them. Pure: `useDeck` feeds it
- * from the stores.
+ * rooms holding something for you. You move through it like a ring (up for the next card, down for the one before), and
+ * cards you skip go to the back, in the order you skipped them. Pure: `useDeck` feeds it from the stores.
  */
 
 import type { NeedsYouRecord } from '../../lib/hermes/dashboard.ts'
@@ -52,9 +52,23 @@ export function orderDeck(cards: DeckCard[], skipped: readonly string[]): DeckCa
   return [...now, ...back]
 }
 
-/** Skip the top card: it moves to the back (and to the back again if it was skipped before). */
-export function skip(skipped: readonly string[], key: string): string[] {
-  return [...skipped.filter(other => other !== key), key]
+/**
+ * Turn the deck like a ring: `next` sends the top card to the back (`by` cards at once, for a card tapped behind the top
+ * one), `previous` brings the bottom card back to the top. Returns the new skipped list for `orderDeck`: every card but the
+ * new top, in their new order.
+ */
+export function turn(deck: readonly DeckCard[], way: 'next' | 'previous', by = 1): string[] {
+  const keys = deck.map(card => card.key)
+  const count = keys.length
+
+  if (count < 2) {
+    return []
+  }
+
+  const shift = way === 'next' ? by % count : count - (by % count)
+  const order = [...keys.slice(shift), ...keys.slice(0, shift)]
+
+  return order.slice(1)
 }
 
 /** The profile a card belongs to, for its tint and face; a room has none of its own. */

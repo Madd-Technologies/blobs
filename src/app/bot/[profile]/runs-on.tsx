@@ -408,7 +408,7 @@ function KeySection({
           style={[styles.field, styles.mono, { backgroundColor: c.sheet, color: c.text }]}
         />
         <T variant="label" color="text2">
-          Empty uses the server’s own SSH setup. Update HermesBot in Settings → Server plugins to make a key here and check the connection.
+          Empty uses the server’s own SSH setup. Update the Blobs plugin in Settings → Server plugins to make a key here and check the connection.
         </T>
       </View>
     )

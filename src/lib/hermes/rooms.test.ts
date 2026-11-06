@@ -3,6 +3,8 @@ import { describe, it } from 'node:test'
 
 import type { RoomEvent, RoomMember } from './protocol.ts'
 import {
+  answerPausedText,
+  askedOnly,
   approveRoomAction,
   buildMembers,
   buildTimeline,
@@ -15,6 +17,8 @@ import {
   mergeEvents,
   nameList,
   newId,
+  pausedAsk,
+  pausedLine,
   readLog,
   replyingFromLog,
   replyingFromSessions,
@@ -30,6 +34,7 @@ import {
   sendRoomMessage,
   slug,
   splitMentions,
+  stopRoom,
   whoIsReplying,
 } from './rooms.ts'
 import type { RpcClient } from './rpc.ts'
@@ -135,6 +140,14 @@ describe('mentions', () => {
     assert.equal(mentionsYou('no mention'), false)
   })
 
+  it('knows who a message asks to the exclusion of the rest, as Hermes reads it', () => {
+    assert.deepEqual(askedOnly(room, 'Sounds done? @forge sent an update'), ['m-forge'], 'any @mention asks only those')
+    assert.deepEqual(askedOnly(room, 'what do you both think?'), [], 'no mention asks everyone')
+    assert.deepEqual(askedOnly(room, '@all check in'), [])
+    assert.deepEqual(askedOnly(room, '@hermes and @forge, check in'), [], 'every member named is everyone')
+    assert.deepEqual(askedOnly(room, 'mail ops@forge.dev'), [], 'an address is not a mention')
+  })
+
   it('splits a message so mentions can be drawn apart', () => {
     assert.deepEqual(splitMentions('@forge yes, 1 AM works. cc @unknown and @you.', ['forge', 'scout']), [
       { text: '@forge', mention: 'member' },
@@ -190,11 +203,60 @@ describe('the room as a conversation', () => {
   it('leaves out bookkeeping and empty messages', () => {
     const items = buildTimeline(room, [
       event('room.created', {}, { kind: 'system', id: 's' }),
-      event('turn.settled', { member_id: 'm-forge', passed: true }, { kind: 'gateway', id: 'g' }),
+      event('turn.settled', { member_id: 'm-forge', passed: false }, { kind: 'gateway', id: 'g' }),
       event('room.activity', { status: 'settled' }, { kind: 'gateway', id: 'g' }),
       bot('m-forge', '   '),
     ])
     assert.deepEqual(items, [])
+  })
+
+  it('says quietly when a bot had nothing to add, in one line for bots that pass in a row', () => {
+    const gateway = { kind: 'gateway', id: 'g' } as const
+    const items = buildTimeline(room, [
+      you('thanks both', 1000),
+      event('turn.settled', { member_id: 'm-hermes', passed: true }, gateway, 1005),
+      event('turn.settled', { member_id: 'm-forge', passed: true }, gateway, 1006),
+      event('room.activity', { status: 'settled', reason_code: 'silent_round' }, gateway, 1006),
+      you('@forge one more thing', 1100),
+      event('turn.settled', { member_id: 'm-forge', passed: true }, gateway, 1105),
+    ])
+    const notes = items.filter(item => item.kind === 'note')
+
+    assert.deepEqual(
+      notes.map(item => item.kind === 'note' && item.text),
+      ['Hermes and Forge had nothing to add', 'Forge had nothing to add'],
+    )
+  })
+})
+
+describe('a bot conversation the server cut off', () => {
+  const gateway = { kind: 'gateway', id: 'g' } as const
+  const said = (memberId: string, text: string, round: number) => event('message.member', { member_id: memberId, text, thread_id: MAIN_THREAD, discussion_event_id: 'user:1', round_index: round }, { kind: 'member', id: memberId }, 1000)
+  const bounded = (reason = 'max_rounds') => event('room.activity', { discussion_event_id: 'user:1', reason_code: reason, status: 'bounded', thread_id: MAIN_THREAD }, gateway)
+
+  it('names the bot left asked when the rounds ran out, and who asked it', () => {
+    const log = [you('can you two sort out the build?'), said('m-hermes', 'On it. @forge can you check the logs?', 0), said('m-forge', 'Logs are clean.', 1), said('m-hermes', 'Thanks. @forge please rerun it.', 2), bounded()]
+    const paused = pausedAsk(room, log)
+    assert.deepEqual(paused, { askerId: 'm-hermes', asked: ['m-forge'], reason: 'max_rounds' })
+    assert.equal(answerPausedText(room, paused!), '@forge, Hermes asked you above.')
+    assert.equal(pausedLine(room, paused!), 'Paused after three rounds. Hermes asked Forge.')
+  })
+
+  it('says nothing when the asked bot already answered, the room settled, or you wrote since', () => {
+    assert.equal(pausedAsk(room, [you('hi'), said('m-hermes', '@forge over to you', 1), said('m-forge', 'Done.', 2), bounded()]), null)
+    assert.equal(pausedAsk(room, [you('hi'), said('m-hermes', '@forge over to you', 2), event('room.activity', { discussion_event_id: 'user:1', reason_code: 'silent_round', status: 'settled' }, gateway)]), null)
+    assert.equal(pausedAsk(room, [you('hi'), said('m-hermes', '@forge over to you', 2), bounded(), you('@forge see above')]), null)
+    assert.equal(pausedAsk(room, [you('hi'), said('m-hermes', 'Thanks @hermes, all done.', 2), bounded()]), null, 'a bot naming itself asks nobody')
+  })
+
+  it('knows the message cap from the round cap', () => {
+    assert.equal(pausedAsk(room, [you('hi'), said('m-forge', '@hermes your turn', 2), bounded('max_messages')])?.reason, 'max_messages')
+  })
+
+  it('shows a reply set aside for your newer message as a quiet line', () => {
+    const items = buildTimeline(room, [event('turn.cancelled', { member_id: 'm-forge', reason: 'superseded_by_newer_user_event' }, gateway)])
+    assert.deepEqual(items.map(item => item.kind === 'note' && item.text), ['Forge’s reply was set aside for your newer message'])
+    assert.deepEqual(buildTimeline(room, [event('turn.cancelled', { member_id: 'm-forge', reason: 'stopped' }, gateway)]), [], 'a stop already says Stopped')
   })
 })
 
@@ -286,6 +348,15 @@ describe('calls', () => {
     assert.deepEqual(c.calls[0], { method: 'groups.send', params: { room_id: 'r1', event_id: 'e-1', payload: { text: 'hello', thread_id: MAIN_THREAD } } })
   })
 
+  it('gives every stop its own cancel id, so each one moves the room’s stop fence', async () => {
+    const c = client(() => ({ cancelled: 1 }))
+    assert.equal(await stopRoom(c, 'r1', 'stop-a'), 1)
+    await stopRoom(c, 'r1')
+    await stopRoom(c, 'r1')
+    assert.deepEqual(c.calls[0], { method: 'groups.stop', params: { room_id: 'r1', cancel_id: 'stop-a' } })
+    assert.notEqual(c.calls[1]?.params.cancel_id, c.calls[2]?.params.cancel_id)
+  })
+
   it('answers an approval with exactly the ids the server gave', async () => {
     const c = client(() => ({ approved: true }))
     await approveRoomAction(c, 'r1', { kind: 'approval', task_id: 't1', member_id: 'm-forge', execution_generation: 2, request_id: 'q9' }, 'once')
@@ -353,6 +424,12 @@ describe('who is replying in a room', () => {
     assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('approval') }), 'Forge needs your OK')
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('writing') }), 'Hermes and Forge are writing…')
     assert.equal(replyingLine(room, ['m-hermes', 'm-forge'], { 'm-hermes': at('writing'), 'm-forge': at('tool', 'terminal') }), 'Hermes and Forge are working…')
+  })
+
+  it('says a bot on clarify has a question, not that it is messaging', () => {
+    const at = (phase: string, tool: string | null = null) => ({ phase, tool, since: 100 })
+    assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('tool', 'clarify') }), 'Forge has a question…')
+    assert.equal(replyingLine(room, ['m-forge'], { 'm-forge': at('tool', 'send_message') }), 'Forge is messaging…')
   })
 })
 

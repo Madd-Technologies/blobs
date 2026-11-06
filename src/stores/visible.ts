@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
-import { activityStamp, isCurrent, lastVisible, type VisibleActivity } from '@/features/roster/visible'
+import { activityStamp, isCurrent, keepYours, lastVisible, type VisibleActivity } from '@/features/roster/visible'
 import { listSessionMessages } from '@/lib/hermes/rest'
 import { useConnection } from '@/stores/connection'
 import { useRoster } from '@/stores/roster'
@@ -31,7 +31,11 @@ export const useVisible = create<VisibleState>()(
   }),
 )
 
-/** How many of a chat's newest messages are read: enough to get past a long exchange between bots. */
+/** Messages read first: enough for the last line of most chats, at about a fifth of the bytes of the full window (a bot's
+ * rows carry its reasoning and tool output, ~6 KB each). */
+const FIRST = 15
+/** Read only when the first read shows no visible line, or no exchange of yours while none is known yet: enough to get past
+ * a long exchange between bots. */
 const WINDOW = 60
 /** Chats read at once: in parallel, without crowding out what you open yourself. */
 const AT_ONCE = 3
@@ -86,14 +90,19 @@ export function startVisibleSync(): () => void {
             try {
               // Live messages first: the compacted read can fall back to scanning the whole chat on the server. Only a chat
               // compacted since its last visible line has none of its own yet, and needs the compacted ones.
-              const read = (includeCompacted: boolean) => listSessionMessages(config, storedId, name, { order: 'latest', limit: WINDOW, includeCompacted })
-              let visible = lastVisible((await read(false)).messages, stamp)
+              const read = (limit: number, includeCompacted: boolean) => listSessionMessages(config, storedId, name, { order: 'latest', limit, includeCompacted })
+              const known = useVisible.getState().byBot[name]
+              let visible = lastVisible((await read(FIRST, false)).messages, stamp)
 
-              if (!visible.text) {
-                visible = lastVisible((await read(true)).messages, stamp)
+              if (!visible.text || (!visible.yours && !known?.yours)) {
+                visible = lastVisible((await read(WINDOW, false)).messages, stamp)
               }
 
-              useVisible.setState(state => ({ byBot: { ...state.byBot, [name]: visible } }))
+              if (!visible.text) {
+                visible = lastVisible((await read(WINDOW, true)).messages, stamp)
+              }
+
+              useVisible.setState(state => ({ byBot: { ...state.byBot, [name]: keepYours(visible, state.byBot[name]) } }))
             } catch {
               // A bot that was read before keeps what it showed. One that never was falls back to the server's own preview.
               useVisible.setState(state => (state.byBot[name] ? state : { byBot: { ...state.byBot, [name]: { stamp, ts: 0, text: '', failed: true } } }))

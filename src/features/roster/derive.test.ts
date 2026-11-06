@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import type { BotMeta } from '../../lib/hermes/identity.ts'
 import type { ProfileRow } from '../../lib/hermes/protocol.ts'
-import { ageLabel, filterRoster, isHidden, isPinned, previewOf, sortRoster, stripPreviewMarkdown } from './derive.ts'
+import { ageLabel, filterRoster, isHidden, isPinned, previewOf, reuseRows, sortRoster, stripPreviewMarkdown } from './derive.ts'
 
 function bot(name: string, lastActive: number, meta?: BotMeta, extra: Partial<ProfileRow> = {}): ProfileRow {
   return {
@@ -96,3 +96,27 @@ describe('ageLabel', () => {
     assert.equal(ageLabel(0, now), '')
   })
 })
+
+describe('reuseRows', () => {
+  it('keeps unchanged rows as the same objects and reports no change when nothing moved', () => {
+    const before = [bot('orion', 100), bot('juniper', 200)]
+    const same = [bot('orion', 100), bot('juniper', 200)]
+
+    assert.equal(reuseRows(before, same), null)
+
+    const moved = reuseRows(before, [bot('orion', 100), bot('juniper', 300)])
+
+    assert.ok(moved)
+    assert.equal(moved[0], before[0], 'orion did not change: same object, so its face does not re-render')
+    assert.notEqual(moved[1], before[1])
+  })
+
+  it('reports a new order, a new bot or a removed one as a change', () => {
+    const before = [bot('orion', 100), bot('juniper', 200)]
+
+    assert.deepEqual(reuseRows(before, [before[1] as ProfileRow, before[0] as ProfileRow].map(row => ({ ...row })))?.map(row => row.name), ['juniper', 'orion'])
+    assert.equal(reuseRows(before, [bot('orion', 100)])?.length, 1)
+    assert.equal(reuseRows(before, [...before.map(row => ({ ...row })), bot('harbor', 50)])?.length, 3)
+  })
+})
+

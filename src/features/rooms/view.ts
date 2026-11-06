@@ -79,3 +79,21 @@ export function roomMatches(view: Pick<RoomView, 'name' | 'data'>, query: string
 
   return [view.name, ...view.data.room.members.flatMap(member => [member.display_name ?? '', member.handle, member.profile])].some(text => text.toLowerCase().includes(needle))
 }
+
+/**
+ * Whether Home's room poll must read a room in full (its state, newest events and members) or can keep the copy it holds:
+ * only when the room list shows something moved (a new event, a new revision) or the room was replying or waiting on you at
+ * the last read, when who is replying and what they asked can change without a new event. The full read includes
+ * `groups.state`, which the server answers on the socket's request reader and can take seconds for a big room.
+ */
+export function roomNeedsRead(listed: Pick<HostedRoom, 'latest_seq' | 'revision' | 'updated_at'>, held: RoomData | undefined): boolean {
+  if (!held) {
+    return true
+  }
+
+  if (held.status?.working || held.status?.blocked) {
+    return true
+  }
+
+  return (listed.latest_seq ?? 0) !== (held.room.latest_seq ?? 0) || listed.revision !== held.room.revision || listed.updated_at !== held.room.updated_at
+}

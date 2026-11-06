@@ -1,7 +1,7 @@
 import Feather from '@expo/vector-icons/Feather'
 import * as Clipboard from 'expo-clipboard'
-import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
+import { useCallback, useEffect, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotFace } from '@/components/bots/BotFace'
@@ -21,6 +21,7 @@ import type { View as DashboardView } from '@/lib/hermes/dashboard'
 import { useNow } from '@/lib/useNow'
 import { useBotView, useFaceColor } from '@/stores/bots'
 import { startDashboardPoll, useBotBoard, useDashboards } from '@/stores/dashboards'
+import { useWatch } from '@/stores/watch'
 import { useDrafts } from '@/stores/drafts'
 import { toast } from '@/stores/toast'
 import { BotTint, useTheme } from '@/theme/ThemeProvider'
@@ -32,7 +33,7 @@ import { radius } from '@/theme/tokens'
  * Hermes's tool search, and "dashboard" alone reads as Hermes's own web dashboard (a bot asked for one may set out to build a plugin).
  */
 const SET_UP =
-  'Load skill_view("hermes-dashboard:dashboard") and use your dashboard_* tools (find them with tool search) to track something for me on my HermesBot app dashboard: a collection with its own fields, kept fresh by a routine. No new plugin. What to track: '
+  'Load skill_view("hermes-dashboard:dashboard") and use your dashboard_* tools (find them with tool search) to track something for me on my Blobs app dashboard: a collection with its own fields, kept fresh by a routine. No new plugin. What to track: '
 
 /** A pinned bot's dashboard: panels over the collections it keeps for you, with the chat one tap away. */
 export default function BotDashboard() {
@@ -54,7 +55,10 @@ export default function BotDashboard() {
 
   const rows = useRowActions(nowS, () => name)
 
-  useEffect(() => startDashboardPoll(profile), [profile])
+  // Only while this dashboard is on top: a dashboard left under another screen stops asking.
+  useFocusEffect(useCallback(() => startDashboardPoll(profile), [profile]))
+  // The server then reads its live panels and pushes its changes.
+  useWatch('dashboards', [profile])
   useEffect(() => {
     useDashboards
       .getState()
@@ -72,6 +76,9 @@ export default function BotDashboard() {
 
   const openDetails = () => router.push({ pathname: '/bot/[profile]/details', params: { profile } })
   const openRecord = (id: string) => router.push({ pathname: '/bot/[profile]/record', params: { profile, id } })
+  /** A count, a chart's bar or a stat's metric opens a page of the records behind it (dashboard, page, record). */
+  const openPage = (view: string, options: { bucket?: string; metric?: number } = {}) =>
+    router.push({ pathname: '/bot/[profile]/page', params: { profile, view, ...(options.bucket ? { bucket: options.bucket } : {}), ...(options.metric !== undefined ? { metric: String(options.metric) } : {}) } })
   const openFull = (target: DashboardView) => router.push({ pathname: '/bot/[profile]/view', params: { profile, id: target.id } })
 
   async function onPull() {
@@ -120,9 +127,9 @@ export default function BotDashboard() {
         <ScrollView style={styles.flex} contentContainerStyle={styles.body} refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => void onPull()} tintColor={c.text2} />}>
           {groupNumbers(views).map(entry =>
             Array.isArray(entry) ? (
-              <NumbersBlock key={entry.map(item => item.id).join('+')} views={entry} onMenu={setMenu} />
+              <NumbersBlock key={entry.map(item => item.id).join('+')} views={entry} onMenu={setMenu} onOpenPage={panel => openPage(panel.id)} />
             ) : (
-              <ViewBlock key={entry.id} view={entry} nowS={nowS} raised={entry.id === raisedPanel} onOpenRecord={openRecord} onToggle={(id, done) => rows.toggle(profile, id, done)} onMute={entry.collection ? row => rows.mute(profile, row) : undefined} onMenu={() => setMenu(entry)} onOpenFull={() => openFull(entry)} />
+              <ViewBlock key={entry.id} view={entry} nowS={nowS} raised={entry.id === raisedPanel} onOpenRecord={openRecord} onToggle={(id, done) => rows.toggle(profile, id, done)} onMute={entry.collection ? row => rows.mute(profile, row) : undefined} onMenu={() => setMenu(entry)} onOpenFull={() => openFull(entry)} onOpenPage={options => openPage(entry.id, options)} />
             ),
           )}
 

@@ -47,8 +47,12 @@ interface Props {
   onCall?: () => void
   /** The commands and skills a slash opens a picker of. Leave out where there are none (rooms). */
   commands?: SlashOption[]
-  /** A row inside the tray, above the field (a room's @mention chips). */
+  /** A message that has the bot install the app's server plugins: the attach menu offers to put it in the field, unsent. */
+  setupMessage?: string
+  /** A row inside the tray, above the field (a room's @mention chips, the message you reply to). */
   above?: ReactNode
+  /** Bring the keyboard up whenever this changes (you swiped a message to reply to it). */
+  focusSignal?: number
   onSend: (text: string) => void
   onStop: () => void
 }
@@ -59,7 +63,7 @@ interface Props {
  * bot works. The mic records a voice message and puts what you said in the field, where you can fix it before sending; for a
  * bot that takes calls it is Call instead.
  */
-export function Composer({ botName, running, initialText, value, onChangeText, files, onFilesChange, voiceProfile, onCall, commands, above, onSend, onStop }: Props) {
+export function Composer({ botName, running, initialText, value, onChangeText, files, onFilesChange, voiceProfile, onCall, commands, setupMessage, above, focusSignal, onSend, onStop }: Props) {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
   // With the keyboard up it already covers the home-indicator / nav-bar area, so the inset would only leave a gap.
@@ -68,6 +72,12 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
   const text = value ?? own
   const setText = onChangeText ?? setOwn
   const input = useRef<TextInput>(null)
+
+  useEffect(() => {
+    if (focusSignal) {
+      input.current?.focus()
+    }
+  }, [focusSignal])
   const attached = files ?? []
   const typed = text.trim().length > 0 || attached.length > 0
   const voice = useVoiceNote(voiceProfile)
@@ -136,6 +146,15 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
     // The picker is another screen: let the sheet finish leaving before it opens.
     await new Promise<void>(resolve => afterSheetCloses(resolve))
     await attach(pick)
+  }
+
+  /** Puts the setup message in the field (after anything already typed) for you to read and send; never sends it. */
+  async function addSetup(message: string) {
+    setMenu(false)
+    setText(text.trim() ? `${text.trimEnd()}\n\n${message}` : message)
+
+    await new Promise<void>(resolve => afterSheetCloses(resolve))
+    input.current?.focus()
   }
 
   /**
@@ -295,6 +314,7 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
           <Row label="Photo library" chevron={false} onPress={() => void add(pickPhotos)} />
           <Row label="Take a photo" chevron={false} onPress={() => void add(takePhoto)} />
           <Row label="Files" chevron={false} onPress={() => void add(pickFiles)} />
+          {setupMessage ? <Row label="Install the Blobs plugins" chevron={false} onPress={() => void addSetup(setupMessage)} /> : null}
         </GroupedList>
       </Sheet>
     </View>

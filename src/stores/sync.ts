@@ -10,6 +10,7 @@ import { useSeen } from '@/stores/seen'
 import { startVisibleSync } from '@/stores/visible'
 import { sessions, startLastChatSync } from '@/stores/sessions'
 import { useConnection } from '@/stores/connection'
+import { startWatchSync } from '@/stores/watch'
 
 /**
  * Starts everything that keeps the app current: the roster and inbox pollers, this phone's notification
@@ -27,6 +28,7 @@ export function startSessionSync(): () => void {
   const stopPresence = startPresenceSync()
   const stopLastChat = startLastChatSync()
   const stopRestart = startRestartSync()
+  const stopWatch = startWatchSync()
   let generation = useConnection.getState().generation
 
   const stopConnection = useConnection.subscribe(state => {
@@ -57,6 +59,7 @@ export function startSessionSync(): () => void {
     stopPresence()
     stopLastChat()
     stopRestart()
+    stopWatch()
     stopConnection()
     stopSeed()
     stopHydration()

@@ -553,3 +553,20 @@ describe('what a bot says beside its tool calls (Codex models, Hermes 0.21.5)', 
     assert.deepEqual(assistantTexts(said({ content: null })), [])
   })
 })
+
+describe('a chat read light', () => {
+  it('marks a step whose output was cut, with the row that has it whole', () => {
+    const rows: StoredMessage[] = [
+      { id: 1, role: 'user', content: 'build it' },
+      { id: 2, role: 'assistant', content: '', tool_calls: [{ id: 'c1', function: { name: 'terminal', arguments: '{"command":"make"}' } }, { id: 'c2', function: { name: 'terminal', arguments: '{"command":"true"}' } }] },
+      { id: 3, role: 'tool', tool_call_id: 'c1', content: JSON.stringify({ output: '…the end of it\nbuilt', exit_code: 0 }), omitted: 48_000 },
+      { id: 4, role: 'tool', tool_call_id: 'c2', content: JSON.stringify({ output: 'ok', exit_code: 0 }) },
+    ]
+    const activity = itemsFromHistory(rows).find(item => item.kind === 'activity')
+    const steps = activity?.kind === 'activity' ? activity.steps : []
+
+    assert.equal(steps[0]?.partial, 3)
+    assert.equal(steps[0]?.resultLine, 'built', 'the line it shows comes with the cut row')
+    assert.equal(steps[1]?.partial, undefined, 'a whole one needs nothing more')
+  })
+})

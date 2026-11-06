@@ -1,5 +1,5 @@
-import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
+import { useCallback, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotPaper } from '@/components/bots/BotPaper'
@@ -14,6 +14,7 @@ import type { View as DashboardView } from '@/lib/hermes/dashboard'
 import { useNow } from '@/lib/useNow'
 import { useBotView } from '@/stores/bots'
 import { startDashboardPoll, useBotBoard, useDashboards } from '@/stores/dashboards'
+import { useWatch } from '@/stores/watch'
 import { useDrafts } from '@/stores/drafts'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -35,7 +36,8 @@ export default function PanelFullView() {
 
   const rows = useRowActions(nowS, () => name)
 
-  useEffect(() => startDashboardPoll(profile), [profile])
+  useFocusEffect(useCallback(() => startDashboardPoll(profile), [profile]))
+  useWatch('dashboards', [profile])
 
   const openRecord = (record: string) => router.push({ pathname: '/bot/[profile]/record', params: { profile, id: record } })
 

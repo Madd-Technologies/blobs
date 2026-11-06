@@ -84,13 +84,13 @@ function Setup() {
       )
 
     case 'unsupported':
-      return <Message title="Not on this device yet" body="Notifications work on Android builds of HermesBot. iPhone support comes later." />
+      return <Message title="Not on this device yet" body="Notifications work on Android builds of Blobs. iPhone support comes later." />
 
     case 'no-plugin':
       return (
         <Message
           title="Your server can’t send notifications yet"
-          body="It needs the HermesBot plugin (hermes-bot-mobile). Copy the setup message and paste it to your Hermes bot; when it’s done, restart Hermes and check again."
+          body="It needs the Blobs plugin (hermes-bot-mobile). Copy the setup message and paste it to your Hermes bot; when it’s done, restart Hermes and check again."
         >
           <Pill
             label="Copy setup message"
@@ -129,7 +129,7 @@ function Setup() {
 
     case 'blocked':
       return (
-        <Message title="Notifications are blocked" body="Allow notifications for HermesBot in Android’s settings, then try again.">
+        <Message title="Notifications are blocked" body="Allow notifications for Blobs in Android’s settings, then try again.">
           <Pill label="Open settings" variant="primary" onPress={() => void Linking.openSettings()} />
           <Pill label="Try again" onPress={() => void push.enable()} />
         </Message>

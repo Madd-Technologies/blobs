@@ -151,8 +151,8 @@ export class JsonRpcGatewayClient {
   private lastInboundAt = 0
   /** Last observed event seq per session_id — drives lossless reconnect replay. */
   private lastSeenSeq = new Map<string, number>()
-  /** Set while a post-reconnect replay fetch is in flight (dedup guard). */
-  private replayInFlight = false
+  /** The replay fetches, one after another: each parks the frames of the sessions it replays in `replayHold`. */
+  private replayChain: Promise<unknown> = Promise.resolve()
   /**
    * While a replay fetch is in flight, live seq'd frames for the sessions
    * being replayed are parked here instead of dispatching immediately.
@@ -271,7 +271,7 @@ export class JsonRpcGatewayClient {
         // Lossless resume: drain events emitted while we were disconnected.
         // Fire-and-forget so connect() latency is unaffected; only runs when
         // we actually observed seq'd events before the drop.
-        void this.fetchReplay()
+        void this.replay()
       }
 
       const onError = () => {
@@ -610,44 +610,94 @@ export class JsonRpcGatewayClient {
   }
 
   /**
-   * After a reconnect, ask the gateway to replay every event newer than our
-   * per-session watermarks. Replayed frames go through the SAME dispatchEvent
-   * path as live frames — dedupe happens naturally because recordSeq ignores
-   * non-increasing seqs and downstream stores key on event identity.
-   * Best-effort: failures are swallowed (the next reconnect retries).
+   * Replays what one session emitted since the last event this client saw from it, through the same seq-gated path as the
+   * reconnect replay: after `session.resume` re-attached it, for anything it emitted between the reconnect and the resume.
+   * True when nothing can be missing (the server's ring still reached back to our watermark); false when it did not, when this
+   * client never saw a numbered event from the session, or when the request failed. Then the caller reads the session again.
    */
-  private async fetchReplay(): Promise<void> {
-    if (this.replayInFlight || this.lastSeenSeq.size === 0) {
-      return
+  async catchUp(sessionId: string): Promise<boolean> {
+    if (!this.lastSeenSeq.has(sessionId)) {
+      return false
     }
 
-    this.replayInFlight = true
+    return (await this.replay([sessionId])).has(sessionId)
+  }
+
+  /**
+   * Follows a session from the server's latest event on, so a later reconnect replays exactly what this client missed of it.
+   * For a session whose history was just read whole: everything before now is already shown, and what comes next arrives live.
+   * Best-effort: without a watermark a reconnect cannot catch up, and the caller reads the session again instead.
+   */
+  async follow(sessionId: string): Promise<void> {
+    try {
+      const result = await this.request<{ latest_seq?: number; epoch?: string }>(
+        'session.events.since',
+        { session_id: sessionId, last_seen: Number.MAX_SAFE_INTEGER },
+        REPLAY_REQUEST_TIMEOUT_MS
+      )
+
+      if (typeof result?.epoch === 'string' && result.epoch) {
+        this.adoptReplayEpoch(result.epoch)
+      }
+
+      const latest = result?.latest_seq
+
+      if (typeof latest === 'number' && Number.isFinite(latest) && latest > (this.lastSeenSeq.get(sessionId) ?? 0)) {
+        this.lastSeenSeq.set(sessionId, latest)
+      }
+    } catch {
+      // See above.
+    }
+  }
+
+  /** Runs a replay fetch after the ones before it (each holds its sessions' live frames in `replayHold` while it runs). */
+  private replay(only?: readonly string[]): Promise<Set<string>> {
+    const run = this.replayChain.then(() => this.fetchReplay(only))
+    this.replayChain = run.catch(() => undefined)
+
+    return run
+  }
+
+  /**
+   * After a reconnect, ask the gateway to replay every event newer than our
+   * per-session watermarks (or only `only`'s). Replayed frames go through the
+   * SAME dispatchEvent path as live frames — dedupe happens naturally because
+   * recordSeq ignores non-increasing seqs and downstream stores key on event
+   * identity. Returns the sessions replayed completely (not truncated).
+   * Best-effort: failures are swallowed (the next reconnect retries).
+   */
+  private async fetchReplay(only?: readonly string[]): Promise<Set<string>> {
+    const complete = new Set<string>()
+    const sids = (only ?? [...this.lastSeenSeq.keys()]).filter(sid => this.lastSeenSeq.has(sid))
+
+    if (sids.length === 0) {
+      return complete
+    }
+
     // Park live frames for the sessions we're about to replay so a frame
     // racing the replay response can't dispatch ahead of (or duplicate) the
     // gap events. Sessions without watermarks are unaffected.
     const hold = new Map<string, GatewayEvent[]>()
 
-    for (const sid of this.lastSeenSeq.keys()) {
+    for (const sid of sids) {
       hold.set(sid, [])
     }
 
     this.replayHold = hold
 
     try {
-      const entries = Object.entries(this.getSeqWatermarks())
-
       // One RPC per known session keeps params flat; sessions are few (<20).
       const results = await Promise.allSettled(
-        entries.map(([sid, lastSeen]) =>
-          this.request<{ events?: { type: string; session_id?: string; seq?: number; payload?: unknown }[] }>(
+        sids.map(sid =>
+          this.request<{ events?: { type: string; session_id?: string; seq?: number; payload?: unknown }[]; truncated?: boolean }>(
             'session.events.since',
-            { session_id: sid, last_seen: lastSeen },
+            { session_id: sid, last_seen: this.lastSeenSeq.get(sid) ?? 0 },
             REPLAY_REQUEST_TIMEOUT_MS
           )
         )
       )
 
-      for (const result of results) {
+      for (const [index, result] of results.entries()) {
         if (result.status !== 'fulfilled' || !Array.isArray(result.value?.events)) {
           continue
         }
@@ -681,13 +731,19 @@ export class JsonRpcGatewayClient {
             this.handleServerRequest({ id: open.id, method: open.method, params: open.params ?? {} })
           }
         }
+
+        // A truncated window lost events past the server's ring: the replay has holes.
+        if (result.value.truncated !== true) {
+          complete.add(sids[index] as string)
+        }
       }
     } catch {
       // Replay is an optimization over lossy-reconnect; never surface errors.
     } finally {
       this.flushReplayHold()
-      this.replayInFlight = false
     }
+
+    return complete
   }
 
   /**

@@ -96,3 +96,14 @@ describe('paths shown as chips are not shown again in the words', () => {
     assert.deepEqual(documentPaths('Run this:\n```\nless /var/log/app.log\n```\nThen read /home/orion/out.txt'), ['/home/orion/out.txt'])
   })
 })
+
+describe('pasted data does not hold up the documents a reply names', () => {
+  it('scans base64 in no time and finds no document in it, and still finds a deep path', () => {
+    const blob = 'Ab+/9z'.repeat(4000)
+    const started = performance.now()
+
+    assert.deepEqual(documentPaths(`![scan](data:application/pdf;base64,${blob})\nand ${'Ab+/9z'.repeat(330)}`), [])
+    assert.ok(performance.now() - started < 200)
+    assert.deepEqual(documentPaths(`The report: /home/orion/${'r/'.repeat(30)}q3.pdf`), [`/home/orion/${'r/'.repeat(30)}q3.pdf`])
+  })
+})

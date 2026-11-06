@@ -17,7 +17,8 @@
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
         },
-        "NSLocalNetworkUsageDescription": "Blobs connects to the Hermes server you choose, which can be on your local network."
+        "NSLocalNetworkUsageDescription": "Blobs connects to the Hermes server you choose, which can be on your local network.",
+        "NSPhotoLibraryAddUsageDescription": "Blobs saves pictures you choose to your photo library."
       }
     },
     "android": {
@@ -30,9 +31,12 @@
       "predictiveBackGestureEnabled": true,
       "package": "com.maddtechnologies.blobs",
       "permissions": [
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -43,7 +47,12 @@
     "plugins": [
       "expo-router",
       "expo-status-bar",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       "expo-font",
       [
         "expo-splash-screen",
@@ -61,7 +70,8 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Blobs uses the microphone for voice messages and calls with your bots."
+          "microphonePermission": "Blobs uses the microphone for voice messages and calls with your bots.",
+          "enableBackgroundPlayback": false
         }
       ],
       [

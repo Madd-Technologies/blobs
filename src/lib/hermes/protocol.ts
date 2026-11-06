@@ -241,6 +241,12 @@ export type SubmitStatus = 'streaming' | 'queued' | 'redirected' | 'steered'
 
 export interface PromptSubmitResult {
   status: SubmitStatus
+  /**
+   * Hermes 0.22+: the gateway already had work for this chat, so the dashboard handed the message to the gateway's queue
+   * (`status: 'queued'`). Only message.start and message.complete come back for it, with no deltas or tool steps.
+   */
+  forwarded?: boolean
+  admission_id?: string
 }
 
 // ── events ───────────────────────────────────────────────────────────────────────────────────────

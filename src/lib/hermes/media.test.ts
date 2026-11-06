@@ -149,3 +149,29 @@ describe('fetching a picture', () => {
     assert.equal(viewError(new Error('Network request failed')), 'Network request failed')
   })
 })
+
+describe('pasted data in a reply', () => {
+  // Base64 is full of `/` (and `+/` pairs, which a path may start after): the shape that once froze the app for good.
+  const blob = (chars: number) => 'Ab+/9z'.repeat(Math.ceil(chars / 6)).slice(0, chars)
+
+  it('scans an image pasted as data in no time, and finds no picture in it', () => {
+    const started = performance.now()
+    const { media } = splitMedia(`Here it is:\n\n![preview](data:image/png;base64,${blob(20_000)})\n\nSent.`)
+
+    assert.deepEqual(media, [])
+    assert.ok(performance.now() - started < 200, 'well under a frame budget, not minutes')
+  })
+
+  it('stays quick on the longest line it still scans', () => {
+    const started = performance.now()
+
+    assert.deepEqual(splitMedia(`see ${blob(1990)}`).media, [])
+    assert.ok(performance.now() - started < 200)
+  })
+
+  it('still finds a deep path to a picture', () => {
+    const path = `/home/orion/${'d/'.repeat(40)}shot.png`
+
+    assert.deepEqual(splitMedia(`Saved it to ${path} for you.`).media, [{ path, name: 'shot.png', stated: true }])
+  })
+})

@@ -122,6 +122,16 @@ A row: `id, role, content, tool_calls[{id, function{name, arguments}}], tool_cal
 finish_reason, compacted, active`, plus `display_content` / `display_kind` / reasoning when present. Skip
 `display_kind:'hidden'`, prefer `display_content`, and pair a `tool` row to its call by `tool_call_id`.
 
+**Read light (hermes-bot-mobile 0.3.0, Hermes 0.22+).** Where the plugin's `/status` lists `history` in `features`, a chat
+is read through `GET /api/plugins/hermes-bot-mobile/history/{storedId}?bot=<p>&turns=20&offset=<rows held>` instead: the same
+rows in the same shape, through Hermes's own reader with `inline_images=false`, for the person's newest 20 turns (not 200
+rows), with `api_content` and stored reasoning dropped (the app never draws them) and each long tool output cut to its end
+(its small fields kept). A cut row has `omitted` (its length whole); `pagination.has_older` says whether there is more.
+`GET …/history/{storedId}/rows?bot=<p>&ids=1,2` hands rows back whole; a tool step built from a cut row keeps that row's id
+(`partial`) and fetches it when the step is drawn (`stores/wholeRows.ts`). On real chats a page went from 1.35 MB to 81 KB.
+A 404 from either falls back to Hermes's route. Measured on Hermes 0.22.4: Hermes's own route has no light mode, and its
+compact `_history_to_messages` (what `session.resume` returns) comes only as a whole chat.
+
 ## A turn (verified)
 
 `prompt.submit {session_id, text}` → `{status:'streaming'}`. Events, in this order:
@@ -762,3 +772,26 @@ files. The bot's home, `.env` and `.ssh` are not copied (verified: the bot's key
 - Hermes's plugin install scan (0.21.6 and 0.22.2) reads the name of SSH's trusted-keys file in a plugin's README prose as a
   critical `ssh_backdoor` and blocks the install, even with `--force`. The plugin's docs leave the name out; the app's own
   words are not scanned.
+
+## Chats the gateway owns (Hermes 0.22.4, from source at tag `v0.22.4` and verified on a local 0.22.4)
+
+From 0.22 the messaging gateway owns local sessions through a "session authority". A standalone `hermes dashboard` (what
+the app talks to) still runs chats in its own process, and every RPC and REST route the app uses is still there, with
+additive changes only. The gateway reaches the app in three places:
+
+- **A chat the gateway already has work for.** Routines, kanban results and other bots' messages are admitted into a chat
+  by the gateway. Before each turn the dashboard checks state.db; while the gateway holds a queued or running turn there,
+  `prompt.submit` is handed to the gateway's queue and answers `{status: 'queued', forwarded: true, admission_id}`. Only
+  `message.start` and `message.complete` come back for it (the final reply in `text`, no deltas or tool steps), so the
+  app reads the chat again once the forwarded turn completes. Otherwise the submit is refused with 4090 and
+  `data.reason`: `SESSION_OWNER_BUSY`, `SESSION_OWNER_UNCONFIRMED` (it may still be queued: never resend blindly) or
+  `SESSION_NOT_OWNED` (work the first gateway start marked `unknown`; only `hermes sessions discard` clears it). The app
+  says each of these in words.
+- **Plugin routes for another bot.** 0.22 reads a route's `profile` parameter (path or query) as "run as that profile" and
+  refuses it for a plugin it did not ship, or forwards it to that bot's plugin host. hermes-dashboard 0.6.1 names it
+  `bot` (URLs unchanged); hermes-voice 0.1.2 takes `?bot=`, which the app sends once the plugin's status says 0.1.2.
+- **Rooms.** The gateway's own room service drives only rooms it owns (made through its own protocol), so rooms the app
+  makes through the dashboard keep running in the dashboard, where their approvals and questions reach the app.
+
+`DELETE /api/sessions/{id}` (and REST rename/import) now needs `request_id` and `expected_revision`; the app deletes with
+the `session.delete` RPC, which is unchanged.

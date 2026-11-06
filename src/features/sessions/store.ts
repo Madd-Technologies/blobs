@@ -8,6 +8,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 
 import { JsonRpcGatewayError, type GatewayEvent } from '../../lib/hermes/gateway-client.ts'
 import { asHermesEvent, RpcCode, type HermesEvent, type ProfileRow, type SessionInfo, type SessionResumeResult } from '../../lib/hermes/protocol.ts'
+import { hasOlder } from '../../lib/hermes/history.ts'
 import { listSessionMessages, listSessionsPage, type StoredMessage } from '../../lib/hermes/rest.ts'
 import { call, isRpcCode, type RpcClient, type RpcMethods } from '../../lib/hermes/rpc.ts'
 import type { RequestBridge } from '../../lib/hermes/server-requests.ts'
@@ -107,6 +108,14 @@ export interface SessionsDeps {
    * The server reports helpers' progress (Hermes 0.21.5+): helpers are then followed even where background commands are not.
    */
   liveHelpers?: () => boolean
+  /**
+   * Replays what a live session emitted that this client has not seen yet (Hermes's event ring, `session.events.since`), into
+   * `onEvent`. True when nothing can be missing; false when the ring no longer reaches back, or the client never followed the
+   * session: then the chat is read again. Absent, a chat that comes back is always read again.
+   */
+  catchUp?: (liveId: string) => Promise<boolean>
+  /** Starts following a live session's events from the server's latest one, so a later `catchUp` knows where it left off. */
+  follow?: (liveId: string) => Promise<void>
 }
 
 export type RespondResult = 'answered' | 'expired' | 'failed'
@@ -126,8 +135,24 @@ export function blankSession(profile: string): BotSession {
 }
 
 /** A short, human sentence for an error from the gateway or the network. */
+/**
+ * Hermes 0.22's refusals for a chat its gateway owns (`data.reason` on a 4090), in words. The gateway runs routines, kanban
+ * results and other bots' messages into chats too, and while it holds one the dashboard cannot start a turn there.
+ */
+const OWNER_REFUSALS: Record<string, string> = {
+  SESSION_OWNER_BUSY: 'Hermes is busy in this chat right now. Your message wasn’t sent; try again in a moment.',
+  SESSION_OWNER_UNCONFIRMED: 'Hermes couldn’t confirm your message was queued. Check the chat before sending it again.',
+  SESSION_NOT_OWNED: 'Hermes has unfinished work in this chat from before a restart, so it won’t take new messages here until that’s cleared on the server (`hermes sessions discard`).',
+}
+
 export function describeError(error: unknown): string {
   if (error instanceof JsonRpcGatewayError) {
+    const reason = (error.data as { reason?: unknown } | undefined)?.reason
+
+    if (error.code === RpcCode.Refused && typeof reason === 'string' && OWNER_REFUSALS[reason]) {
+      return OWNER_REFUSALS[reason]
+    }
+
     if (error.code === RpcCode.Refused) {
       return 'This chat is open on another device. Close it there, or try again.'
     }
@@ -264,12 +289,77 @@ export function createSessions(deps: SessionsDeps) {
     return queue
   }
 
+  /** Bots whose last message Hermes 0.22 handed to its gateway: their chat is read again once that turn completes. */
+  const forwarded = new Set<string>()
+
+  /**
+   * Reads a chat's latest page again and redraws it from what the server stored: after a turn that ran in the gateway, whose
+   * steps never streamed here (Hermes 0.22 relays only its start and its final reply).
+   */
+  async function reread(profile: string): Promise<void> {
+    const config = deps.getConfig()
+    const { storedId } = get(profile)
+
+    if (!config || !storedId) {
+      return
+    }
+
+    try {
+      const page = await listMessages(config, storedId, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true })
+      const bot = get(profile)
+
+      // Another chat opened, or another turn started meanwhile: what is on screen is newer.
+      if (bot.storedId !== storedId || bot.transcript.running) {
+        return
+      }
+
+      const transcript = buildTranscript(page.messages, { running: false, inflight: null, pending_approval: null, pending_clarify: null })
+      patch(profile, {
+        rows: page.messages,
+        hasOlder: hasOlder(page, PAGE_SIZE),
+        transcript: { ...transcript, liveWork: bot.transcript.liveWork, liveHelpers: bot.transcript.liveHelpers, jobs: bot.transcript.jobs },
+      })
+    } catch {
+      // The reply already showed with the completion; the steps just stay unseen.
+    }
+  }
+
+  /**
+   * Chats being read whole (`readWhole`): their live session's events wait here until the page is drawn, then apply on top of
+   * it. Drawn the other way round, the page (older than what had streamed in while it was read) wiped those events.
+   */
+  const held = new Map<string, HermesEvent[]>()
+
+  /** Routes a chat's live events by the live id the server returned (a new one when the session had been closed). */
+  function rekey(profile: string, liveId: string) {
+    const previous = get(profile).liveId
+
+    if (previous && previous !== liveId) {
+      liveToProfile.delete(previous)
+    }
+
+    liveToProfile.set(liveId, profile)
+  }
+
   const stopEvents = deps.onEvent(raw => {
     const event = asHermesEvent(raw)
     const profile = event?.session_id ? liveToProfile.get(event.session_id) : undefined
 
     if (event && profile) {
+      const waiting = held.get(profile)
+
+      if (waiting) {
+        waiting.push(event)
+
+        return
+      }
+
       queueFor(profile).push(event)
+
+      if (event.type === 'message.complete' && forwarded.delete(profile)) {
+        // Give the gateway a moment to commit the turn's rows.
+        timers.set(() => void reread(profile), 600)
+      }
 
       // A background job's news (it finished, failed or sent a heartbeat): the list has its exit status and output.
       if (event.type === 'status.update' && event.payload.kind === 'process') {
@@ -371,51 +461,51 @@ export function createSessions(deps: SessionsDeps) {
     }
   }
 
-  async function doOpen(profile: string, silent: boolean) {
-    const config = deps.getConfig()
-
-    if (!config) {
-      patch(profile, { phase: 'error', error: 'Not connected to a server.' })
-      return
-    }
-
-    if (!silent || get(profile).phase === 'idle') {
-      patch(profile, { phase: 'opening', error: null })
-    }
-
-    try {
-      const found = await findStoredId(profile)
-      const read = (id: string) =>
-        listMessages(config, id, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true }).catch((error: unknown) => {
-          // A chat nobody has written in yet has no stored row, so there is nothing to read: it opens empty.
-          if (error instanceof HermesHttpError && error.status === 404 && store.getState().chosen[profile] === id) {
-            return { session_id: id, messages: [] as StoredMessage[], pagination: { limit: PAGE_SIZE, offset: 0, order: 'latest', returned: 0 } }
-          }
-
-          throw error
-        })
-      // The history needs only the stored id, so it is read while the server resumes the chat instead of after it. If the
-      // resume recreated the chat under a new id, that read is dropped and the new chat is read.
-      const early = read(found)
-      early.catch(() => undefined)
-      const { resume: resumed, storedId } = await resume(profile, found)
-      const page = await (storedId === found ? early : read(storedId))
-
-      // Re-key by the id the server returned: it is new if the session had been closed.
-      const previous = get(profile).liveId
-
-      if (previous && previous !== resumed.session_id) {
-        liveToProfile.delete(previous)
+  /** A chat's latest history page. A chat nobody has written in yet has no stored row: it reads as empty. */
+  function readPage(config: ServerConfig, profile: string, id: string) {
+    return listMessages(config, id, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true }).catch((error: unknown) => {
+      if (error instanceof HermesHttpError && error.status === 404 && store.getState().chosen[profile] === id) {
+        return { session_id: id, messages: [] as StoredMessage[], pagination: { limit: PAGE_SIZE, offset: 0, order: 'latest', returned: 0 } }
       }
 
-      liveToProfile.set(resumed.session_id, profile)
+      throw error
+    })
+  }
+
+  /**
+   * Draws a chat from its history page and what `session.resume` said. The live session's events are held from now until the
+   * page is drawn, then applied on top of it, and a message sent meanwhile goes once this is done (see `send`), so nothing that
+   * happens while the page is read can be drawn over by it. `early` is the page when it was asked for before the resume.
+   */
+  async function readWhole(profile: string, config: ServerConfig, storedId: string, resumed: SessionResumeResult, early?: ReturnType<typeof readPage>) {
+    held.set(profile, [])
+    rekey(profile, resumed.session_id)
+
+    try {
+      const page = await (early ?? readPage(config, profile, storedId))
       queues.get(profile)?.dispose()
       queues.delete(profile)
 
+      const bot = get(profile)
       const liveWork = deps.liveWork?.() ?? false
       const liveHelpers = !liveWork && (deps.liveHelpers?.() ?? false)
       // The same chat opened again keeps the jobs it was following (a helper count the lists cannot give back).
-      const kept = get(profile).storedId === storedId ? get(profile).transcript.jobs : undefined
+      const kept = bot.storedId === storedId ? bot.transcript.jobs : undefined
+      let transcript: TranscriptState = {
+        ...buildTranscript(page.messages, resumed),
+        ...(liveWork ? { liveWork } : {}),
+        ...(liveHelpers ? { liveHelpers } : {}),
+        ...((liveWork || liveHelpers) && kept ? { jobs: kept } : {}),
+      }
+
+      // Messages sent while it was read: not stored yet (each waits for this read before it goes), so they stay as they were.
+      if (bot.storedId === storedId) {
+        for (const item of bot.transcript.items) {
+          if (item.kind === 'user' && item.pending) {
+            transcript = appendUser(transcript, item.text, item.ts ?? now(), item.attachments ?? [])
+          }
+        }
+      }
 
       patch(profile, {
         phase: 'ready',
@@ -424,22 +514,73 @@ export function createSessions(deps: SessionsDeps) {
         liveId: resumed.session_id,
         info: resumed.info ?? null,
         rows: page.messages,
-        hasOlder: page.pagination.returned >= PAGE_SIZE,
+        hasOlder: hasOlder(page, PAGE_SIZE),
         loadingOlder: false,
-        transcript: {
-          ...buildTranscript(page.messages, resumed),
-          ...(liveWork ? { liveWork } : {}),
-          ...(liveHelpers ? { liveHelpers } : {}),
-          ...((liveWork || liveHelpers) && kept ? { jobs: kept } : {}),
-        },
+        transcript,
       })
 
       // Prompts still waiting on a person (Hermes 0.21.5+): show them, and be able to answer them.
       deps.requests?.ingest(resumed.session_id, resumed.open_requests)
+      // From here on what it does arrives live, and a reconnect catches up from this point instead of reading it all again.
+      void deps.follow?.(resumed.session_id)
 
       if (liveWork || liveHelpers) {
         void refreshJobs(profile)
       }
+    } finally {
+      const waiting = held.get(profile) ?? []
+      held.delete(profile)
+
+      for (const event of waiting) {
+        queueFor(profile).push(event)
+      }
+    }
+  }
+
+  async function doOpen(profile: string, silent: boolean) {
+    const config = deps.getConfig()
+
+    if (!config) {
+      patch(profile, { phase: 'error', error: 'Not connected to a server.' })
+      return
+    }
+
+    const shown = get(profile)
+    // A chat already on screen with its live session: coming back to it re-attaches it, it is not read again.
+    const attached = shown.phase === 'ready' && !!shown.liveId && !!shown.storedId
+
+    if (!attached && (!silent || shown.phase === 'idle')) {
+      patch(profile, { phase: 'opening', error: null })
+    }
+
+    try {
+      const found = await findStoredId(profile)
+
+      if (attached && found === shown.storedId) {
+        // A reconnect, or opening the chat again: re-attach it, and take what it did meanwhile from the server's event ring.
+        // Only when the ring cannot cover the gap (the session was closed after 20 s away, the server restarted, the ring moved
+        // on) is the chat read whole again.
+        const { resume: resumed, storedId } = await resume(profile, found)
+
+        if (storedId === found && resumed.session_id === shown.liveId && (await deps.catchUp?.(resumed.session_id))) {
+          patch(profile, { phase: 'ready', error: null, info: resumed.info ?? get(profile).info })
+          deps.requests?.ingest(resumed.session_id, resumed.open_requests)
+          void refreshJobs(profile)
+
+          return
+        }
+
+        await readWhole(profile, config, storedId, resumed)
+
+        return
+      }
+
+      // The history needs only the stored id, so it is read while the server resumes the chat instead of after it. If the
+      // resume recreated the chat under a new id, that read is dropped and the new chat is read.
+      const early = readPage(config, profile, found)
+      early.catch(() => undefined)
+      const { resume: resumed, storedId } = await resume(profile, found)
+      await readWhole(profile, config, storedId, resumed, storedId === found ? early : undefined)
     } catch (error) {
       // A failed silent re-open keeps what was on screen; the first open shows the error.
       patch(profile, bot => ({ phase: bot.phase === 'ready' && silent ? 'ready' : 'error', error: describeError(error) }))
@@ -731,7 +872,7 @@ export function createSessions(deps: SessionsDeps) {
 
         return {
           rows,
-          hasOlder: page.pagination.returned >= PAGE_SIZE,
+          hasOlder: hasOlder(page, PAGE_SIZE),
           loadingOlder: false,
           transcript: { ...current.transcript, items: [...history, ...live] },
         }
@@ -778,13 +919,20 @@ export function createSessions(deps: SessionsDeps) {
     }
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      const liveId = get(profile).liveId
-
-      if (!liveId) {
+      if (!get(profile).liveId) {
         return false
       }
 
       patchTranscript(profile, transcript => appendUser(transcript, trimmed, now(), files.map(chipOf)))
+      // A chat being read again (a reconnect) takes the message once that is done, on the live session it ends on.
+      await opening.get(profile)?.catch(() => undefined)
+      const liveId = get(profile).liveId
+
+      if (!liveId) {
+        patchTranscript(profile, transcript => failUser(transcript, 'Not connected to the server.'))
+
+        return false
+      }
 
       try {
         const uploads: Uploaded[] = []
@@ -795,7 +943,11 @@ export function createSessions(deps: SessionsDeps) {
 
         const voice = options.voiceContext === undefined ? {} : { surface: 'voice-live' as const, voice_context: options.voiceContext }
 
-        await call(deps.client, 'prompt.submit', { session_id: liveId, text: options.wire ?? messageFor(trimmed, uploads), ...voice })
+        const submitted = await call(deps.client, 'prompt.submit', { session_id: liveId, text: options.wire ?? messageFor(trimmed, uploads), ...voice })
+
+        if (submitted?.forwarded) {
+          forwarded.add(profile)
+        }
 
         return true
       } catch (error) {

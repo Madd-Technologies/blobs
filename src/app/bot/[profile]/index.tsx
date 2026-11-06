@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, KeyboardAvoidingView, StyleSheet, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native'
 
@@ -9,6 +9,8 @@ import { ChatRow } from '@/components/chat/ChatRow'
 import { KanbanCards } from '@/components/chat/KanbanCards'
 import { CallTrayRow, ErrandBlock } from '@/components/phone/ErrandBlock'
 import { Composer } from '@/components/chat/Composer'
+import { StampReveal } from '@/components/chat/Gestures'
+import { ReplyStrip } from '@/components/chat/ReplyStrip'
 import { ConfirmSheet } from '@/components/ui/ConfirmSheet'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
@@ -16,6 +18,7 @@ import { Screen } from '@/components/ui/Screen'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { callingErrand, errandsForChat, placeErrands, type Placed } from '@/features/phone/view'
+import { installMessage, MOBILE_PLUGINS } from '@/features/plugins/catalog'
 import type { BotView } from '@/features/roster/view'
 import type { BotSession } from '@/features/sessions/store'
 import { pendingPrompts } from '@/features/transcript/reduce'
@@ -24,6 +27,7 @@ import { botLastActive } from '@/features/attention/derive'
 import { runningLine } from '@/features/transcript/display'
 import { jobsLine, runningJobs } from '@/features/transcript/jobs'
 import { ageLabel } from '@/features/roster/derive'
+import { withReply } from '@/features/transcript/reply'
 import type { PendingFile } from '@/lib/hermes/attachments'
 import type { Errand } from '@/lib/hermes/phone'
 import { classify, helpGroups, helpText, type SlashAction } from '@/lib/hermes/slash'
@@ -92,6 +96,9 @@ function chatStatus(line: string, elsewhere: boolean, itemCount: number): string
   return itemCount === 0 ? 'New side chat' : `Side chat · ${line}`
 }
 
+// A chat that throws while drawing (a bot's own text is the likely cause) keeps the app open, with a way home.
+export { ScreenError as ErrorBoundary } from '@/components/ui/RouteError'
+
 export default function BotChat() {
   // `chat`: the stored id of the chat a link is about (a notification's), main or side.
   const { profile, chat } = useLocalSearchParams<{ profile: string; chat?: string }>()
@@ -102,6 +109,8 @@ export default function BotChat() {
   const chosen = useChosenChat(profile)
   const draft = useDrafts(state => state.byBot[profile])
   const commands = useCommands(state => state.byBot[profile])
+  // The attach menu's plugin setup: this bot gets its own copy of the per-bot ones (the dashboard).
+  const setupMessage = useMemo(() => installMessage(MOBILE_PLUGINS, undefined, [profile]), [profile])
   const showThinking = usePrefs(state => state.showThinking)
   const showChatter = usePrefs(state => state.showBotChatter)
   const nowS = useNow(60)
@@ -146,15 +155,17 @@ export default function BotChat() {
   const jobsRunning = runningJobs(transcript?.jobs).length > 0
   const jobNowMs = useNowMs(jobsRunning, 15_000)
 
-  useEffect(() => {
-    if (!jobsRunning) {
-      return
-    }
+  useFocusEffect(
+    useCallback(() => {
+      if (!jobsRunning) {
+        return
+      }
 
-    const timer = setInterval(() => void sessions.refreshJobs(profile), 20_000)
+      const timer = setInterval(() => void sessions.refreshJobs(profile), 20_000)
 
-    return () => clearInterval(timer)
-  }, [jobsRunning, profile])
+      return () => clearInterval(timer)
+    }, [jobsRunning, profile]),
+  )
 
   // The `/` picker lists this bot's skills, which only the server knows; ask once the chat is live (and again if it is re-attached).
   const liveId = session?.liveId
@@ -180,6 +191,13 @@ export default function BotChat() {
   useEffect(() => () => markSeen(profile, Date.now() / 1000), [profile, markSeen])
 
   const list = useRef<FlatList<ChatEntry>>(null)
+  // The message you swiped to reply to: quoted above your words when you send (it shows above the field until then).
+  const [replyTo, setReplyTo] = useState<{ who: string; text: string } | null>(null)
+  const [focusComposer, setFocusComposer] = useState(0)
+  const reply = useCallback((target: { who: string; text: string }) => {
+    setReplyTo(target)
+    setFocusComposer(count => count + 1)
+  }, [])
   // Only what is on screen loads its pictures.
   const viewable = useViewableRows(`chat:${profile}`)
   // On the newest message while you are there (a streaming reply stays in view); let go the moment you scroll.
@@ -259,11 +277,14 @@ export default function BotChat() {
     useSpeech.getState().stop()
 
     const sending = files
+    const replying = replyTo
     setFiles([])
+    setReplyTo(null)
     jumpToLatest()
 
-    if (!(await sessions.send(profile, text, sending))) {
+    if (!(await sessions.send(profile, replying ? withReply(replying.text, text) : text, sending))) {
       setFiles(sending)
+      setReplyTo(replying)
 
       if (text.trim()) {
         useDrafts.getState().set(profile, text.trim())
@@ -412,35 +433,40 @@ export default function BotChat() {
             </View>
           ) : (
             <View style={styles.fill}>
-              <FlatList
-                ref={list}
-                inverted
-                data={data}
-                keyExtractor={entry => (entry.kind === 'item' ? entry.item.id : entry.id)}
-                renderItem={({ item, index }) =>
-                  item.kind === 'errand' ? <ErrandBlock errand={item.errand} botName={name} meta={view?.meta} /> : <ChatRow entry={item} list={`chat:${profile}`} profile={profile} botName={name} latest={index === newestRow} onRetry={retry} />
-                }
-                {...viewable}
-                contentContainerStyle={styles.list}
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="interactive"
-                onEndReachedThreshold={0.5}
-                onEndReached={() => void sessions.loadOlder(profile)}
-                ListFooterComponent={session?.loadingOlder ? <Spinner size={14} /> : null}
-                // The newest end of an inverted list.
-                ListHeaderComponent={kanban}
-                onScroll={onScroll}
-                onScrollBeginDrag={stick.onScrollBeginDrag}
-                onScrollEndDrag={stick.onScrollEndDrag}
-                onMomentumScrollBegin={stick.onMomentumScrollBegin}
-                onMomentumScrollEnd={stick.onMomentumScrollEnd}
-                scrollEventThrottle={32}
-                onContentSizeChange={stick.onContentSizeChange}
-                // Holds your place while you read older messages, and follows new ones while you're at the newest: the list does both in
-                // the same layout pass. Pinning alone pushed a new message just below the screen whenever the pin landed after the
-                // jump to the newest row (often, on Android), so it looked like nothing arrived.
-                maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: 80 }}
-              />
+              <StampReveal>
+                <FlatList
+                  ref={list}
+                  inverted
+                  data={data}
+                  keyExtractor={entry => (entry.kind === 'item' ? entry.item.id : entry.id)}
+                  renderItem={({ item, index }) =>
+                    item.kind === 'errand' ? <ErrandBlock errand={item.errand} botName={name} meta={view?.meta} /> : <ChatRow entry={item} list={`chat:${profile}`} profile={profile} botName={name} latest={index === newestRow} onRetry={retry} onReply={reply} />
+                  }
+                  {...viewable}
+                  // Draws about three screens around what is in view (React Native's default is ten), so opening a long chat
+                  // does not work through rows nobody is near.
+                  windowSize={7}
+                  contentContainerStyle={styles.list}
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="interactive"
+                  onEndReachedThreshold={0.5}
+                  onEndReached={() => void sessions.loadOlder(profile)}
+                  ListFooterComponent={session?.loadingOlder ? <Spinner size={14} /> : null}
+                  // The newest end of an inverted list.
+                  ListHeaderComponent={kanban}
+                  onScroll={onScroll}
+                  onScrollBeginDrag={stick.onScrollBeginDrag}
+                  onScrollEndDrag={stick.onScrollEndDrag}
+                  onMomentumScrollBegin={stick.onMomentumScrollBegin}
+                  onMomentumScrollEnd={stick.onMomentumScrollEnd}
+                  scrollEventThrottle={32}
+                  onContentSizeChange={stick.onContentSizeChange}
+                  // Holds your place while you read older messages, and follows new ones while you're at the newest: the list does both in
+                  // the same layout pass. Pinning alone pushed a new message just below the screen whenever the pin landed after the
+                  // jump to the newest row (often, on Android), so it looked like nothing arrived.
+                  maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: 80 }}
+                />
+              </StampReveal>
               {away ? (
                 <View style={styles.jump}>
                   <IconCircle icon="chevron-down" label="Jump to latest" diameter={40} onPress={jumpToLatest} />
@@ -452,7 +478,16 @@ export default function BotChat() {
           {callHere ? (
             <CallBar profile={profile} botName={name} meta={view?.meta} call={callHere} waiting={!!transcript && pendingPrompts(transcript).length > 0} onOpen={openCall} />
           ) : (
-            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} above={calling ? <CallTrayRow errand={calling} /> : undefined} onSend={text => void send(text)} onStop={() => void sessions.stop(profile)} />
+            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} setupMessage={setupMessage} above={
+                replyTo || calling ? (
+                  <>
+                    {replyTo ? <ReplyStrip who={replyTo.who} text={replyTo.text} onCancel={() => setReplyTo(null)} /> : null}
+                    {calling ? <CallTrayRow errand={calling} /> : null}
+                  </>
+                ) : undefined
+              }
+              focusSignal={focusComposer}
+              onSend={text => void send(text)} onStop={() => void sessions.stop(profile)} />
           )}
         </KeyboardAvoidingView>
 
