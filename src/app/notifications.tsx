@@ -90,7 +90,7 @@ function Setup() {
       return (
         <Message
           title="Your server can’t send notifications yet"
-          body="It needs the HermesBot plugin (hermes-bot-mobile). Copy the setup message and paste it to your Hermes bot; when it’s done, restart Hermes and check again."
+          body="Hermes sends them through an optional server plugin, hermes-bot-mobile. Copy the setup message and paste it to your Hermes bot; when it’s done, restart Hermes and check again."
         >
           <Pill
             label="Copy setup message"

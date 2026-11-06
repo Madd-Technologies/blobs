@@ -24,8 +24,40 @@ export function RestartSheet() {
 
   return (
     <Sheet visible={open} onClose={() => useRestart.getState().close()} label="Restart Hermes">
-      {status ? <Body status={status} /> : <View style={styles.loading}>{status === undefined ? <Spinner size={16} /> : null}</View>}
+      {status ? <Body status={status} /> : status === null ? <GatewayOnly /> : <View style={styles.loading}><Spinner size={16} /></View>}
     </Sheet>
+  )
+}
+
+/** The text under the Gateway choice: Hermes restarts it at once (0.22 interrupts what it is doing). */
+const GATEWAY_NOTE = 'Hermes restarts it right away: a routine or a reply it is in the middle of stops. This app stays connected.'
+
+/**
+ * A server without the restart plugin: Hermes's own route restarts the gateway; the dashboard (what this app talks to)
+ * can only be restarted where Hermes runs.
+ */
+function GatewayOnly() {
+  const sending = useRestart(state => state.sending)
+  const refused = useRestart(state => state.refused)
+
+  return (
+    <View style={styles.body}>
+      <Header title="Restart the gateway" line="Messaging and routines" />
+      <T variant="label" color="text2">
+        {GATEWAY_NOTE}
+      </T>
+      <View style={styles.buttons}>
+        <Pill label="Restart the gateway" variant="primary" height={52} loading={sending} onPress={() => void useRestart.getState().restart('gateway', 'now')} />
+      </View>
+      {refused ? (
+        <T variant="label" color="text2">
+          {refused}
+        </T>
+      ) : null}
+      <T variant="label" color="text2">
+        To restart the dashboard, restart Hermes where it runs. An optional server plugin lets this app do that too.
+      </T>
+    </View>
   )
 }
 
@@ -156,7 +188,7 @@ function Choose({ status, rows }: { status: RestartStatus; rows: BusyRow[] }) {
 
       {choice === 'gateway' ? (
         <T variant="label" color="text2">
-          The gateway lets its running turns finish before it restarts. This app stays connected.
+          {GATEWAY_NOTE}
         </T>
       ) : status.busy === null ? (
         <T variant="label" color="text2">

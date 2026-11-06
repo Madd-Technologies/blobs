@@ -24,6 +24,7 @@ import {
   whoIsReplying,
   type RoomQuestion,
 } from '@/lib/hermes/rooms'
+import { absentGate } from '@/lib/absent'
 import { getRoomActivity } from '@/lib/hermes/plugins'
 import { call } from '@/lib/hermes/rpc'
 import { startPoller } from '@/lib/poller'
@@ -48,6 +49,26 @@ const FIRST_LOOK = 60
 const roomSessions = new Map<string, Record<string, string[] | undefined>>()
 const lookedFor = new Map<string, number>()
 const LOOK_AGAIN_MS = 15_000
+/** Room activity comes from hermes-bot-mobile, which is optional: without it the room asks only now and then. */
+const activityPlugin = absentGate()
+
+/** What each busy bot is doing, or `fallback` when the server can't say right now; null without the plugin. */
+async function readActivity(roomId: string, fallback: RoomData['activity'] | null) {
+  const config = useConnection.getState().config
+
+  if (!config || !activityPlugin.due()) {
+    return null
+  }
+
+  try {
+    const answer = await getRoomActivity(config, roomId)
+    activityPlugin.seen(answer !== 'absent')
+
+    return answer === 'absent' ? null : answer
+  } catch {
+    return fallback
+  }
+}
 
 /**
  * The hidden session each member answers this room in (`Group: <room id>`, made on its first turn there). A member on another
@@ -151,8 +172,7 @@ async function syncRoom(room: HostedRoom, previous: RoomData | undefined): Promi
   const questions = members && liveRows ? await claimQuestions(state.room, members, liveRows) : []
   const sameReplying = (previous?.replying ?? []).join() === replying.join()
   // What each busy bot is doing (hermes-bot-mobile's room activity), asked only while the room works.
-  const config = useConnection.getState().config
-  const activity = status?.working && config ? currentActivity(await getRoomActivity(config, state.room.room_id).catch(() => previous?.activity ?? null), replying, events) : null
+  const activity = status?.working ? currentActivity(await readActivity(state.room.room_id, previous?.activity ?? null), replying, events) : null
   const found = Object.values(roomSessions.get(state.room.room_id) ?? {}).flatMap(ids => ids ?? [])
   const sessions = previous?.sessions && previous.sessions.join() === found.join() ? previous.sessions : found
   const unchanged =
@@ -277,6 +297,7 @@ export function startRoomsSync(): () => void {
   const stopPoll = startPoller(() => void useRooms.getState().refresh(), 5_000, () => useConnection.getState().status === 'online')
   const stopConnection = useConnection.subscribe((state, previous) => {
     if (state.status === 'online' && previous.status !== 'online') {
+      activityPlugin.reset()
       void useRooms.getState().refresh()
     }
   })

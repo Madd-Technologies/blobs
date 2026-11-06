@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 import { dashboardRoutines, refreshedSince } from '@/features/dashboard/view'
 import { describeError } from '@/features/sessions/store'
+import { absentGate } from '@/lib/absent'
 import { listCronJobs, triggerCronJob, type CronJob } from '@/lib/hermes/cron'
 import { addRecordNote, changeRecord, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
 import { startPoller } from '@/lib/poller'
@@ -55,6 +56,9 @@ const empty: BotBoard = { dashboard: null, loaded: false, error: null }
 /** After "Check now": read the dashboard this often, for at most this long (a routine that reads a whole inbox can take several minutes). */
 const WATCH_EVERY_MS = 5_000
 const WATCH_MS = 10 * 60_000
+
+/** hermes-dashboard is optional: once the server is found without it, the timers ask only now and then. */
+const plugin = absentGate()
 
 export const useDashboards = create<DashboardsState>((set, get) => {
   let summaryBusy = false
@@ -115,7 +119,7 @@ export const useDashboards = create<DashboardsState>((set, get) => {
     refreshSummary: async () => {
       const current = config()
 
-      if (!current || summaryBusy) {
+      if (!current || summaryBusy || !plugin.due()) {
         return
       }
 
@@ -123,6 +127,7 @@ export const useDashboards = create<DashboardsState>((set, get) => {
 
       try {
         const answer = await getDashboardsSummary(current)
+        plugin.seen(!!answer)
         set(answer ? { available: true, summary: answer.bots } : { available: false, summary: {} })
       } catch {
         // The next poll tries again; what is shown stays.
@@ -135,6 +140,15 @@ export const useDashboards = create<DashboardsState>((set, get) => {
       const current = config()
 
       if (!current || (loading.has(profile) && !options.fresh)) {
+        return
+      }
+
+      if (!plugin.due() && !options.fresh) {
+        // The server has no dashboards plugin: the screen says so without asking again every few seconds.
+        if (!get().byBot[profile]?.loaded) {
+          set(state => ({ available: false, byBot: { ...state.byBot, [profile]: { ...empty, loaded: true } } }))
+        }
+
         return
       }
 
@@ -153,6 +167,7 @@ export const useDashboards = create<DashboardsState>((set, get) => {
           return
         }
 
+        plugin.seen(!!dashboard)
         set(state => (dashboard ? { available: true, byBot: { ...state.byBot, [profile]: { dashboard, loaded: true, error: null } } } : { available: false, byBot: { ...state.byBot, [profile]: { ...empty, loaded: true } } }))
       } catch (error) {
         const old = error instanceof OldDashboardPlugin
@@ -313,7 +328,10 @@ export const useDashboards = create<DashboardsState>((set, get) => {
       }
     },
 
-    reset: () => set({ available: null, summary: {}, byBot: {}, records: {}, needsYou: {}, keepers: {}, checking: {} }),
+    reset: () => {
+      plugin.reset()
+      set({ available: null, summary: {}, byBot: {}, records: {}, needsYou: {}, keepers: {}, checking: {} })
+    },
   }
 })
 
@@ -328,6 +346,8 @@ export function startDashboardsSync(): () => void {
     }
 
     if (state.status === 'online' && previous.status !== 'online') {
+      // Connected (or back after a restart, maybe with the plugin now installed): ask at once.
+      plugin.reset()
       void useDashboards.getState().refreshSummary()
     }
   })

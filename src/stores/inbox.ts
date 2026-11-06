@@ -9,6 +9,7 @@ import { KANBAN_APPROVALS_PATH, NEEDS_YOU_EVENT, NEEDS_YOU_PATH } from '@/featur
 import { visibleState } from '@/features/roster/visible'
 import { createInbox } from '@/features/inbox/store'
 import { supportsLiveHelpers } from '@/lib/hermes/capabilities'
+import { isAbsent } from '@/lib/hermes/plugins'
 import { HermesHttpError, restJson } from '@/lib/hermes/server'
 import { startPoller } from '@/lib/poller'
 import { useNow } from '@/lib/useNow'
@@ -34,7 +35,7 @@ export const inbox = createInbox({
       return await restJson(config, NEEDS_YOU_PATH, {}, { timeoutMs: 8_000 })
     } catch (error) {
       // No hermes-bot-mobile, or one older than 0.1.7: the app keeps its own check.
-      if (error instanceof HermesHttpError && error.status === 404) {
+      if (isAbsent(error)) {
         return null
       }
 

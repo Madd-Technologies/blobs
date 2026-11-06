@@ -1,5 +1,4 @@
 import Feather from '@expo/vector-icons/Feather'
-import { useRouter } from 'expo-router'
 import { Pressable, StyleSheet, View } from 'react-native'
 
 import { Spinner } from '@/components/ui/Spinner'
@@ -29,7 +28,6 @@ export function useWaitingPlugin(): WaitingPlugin | null {
 /** Settings → Restart Hermes: how long the dashboard has been up, or what a restart is doing (canvas row 24). */
 export function RestartRow() {
   const { c } = useTheme()
-  const router = useRouter()
   const status = useRestart(state => state.status)
   const phase = useRestart(state => state.phase)
   const dismissedTimeout = useRestart(state => state.dismissedTimeout)
@@ -37,7 +35,7 @@ export function RestartRow() {
   const now = useNow(30)
   const view = rowView({ status, phase, waiting, now, nameOf: botName, dismissedTimeout })
 
-  const onPress = view.opens === 'sheet' ? () => useRestart.getState().open() : view.opens === 'plugins' ? () => router.push('/plugins') : undefined
+  const onPress = view.opens === 'sheet' ? () => useRestart.getState().open() : undefined
 
   return (
     <Pressable
@@ -63,10 +61,6 @@ export function RestartRow() {
         <Pressable accessibilityRole="button" accessibilityLabel="Cancel the restart" hitSlop={10} onPress={() => void useRestart.getState().cancel()}>
           <T variant="body">Cancel</T>
         </Pressable>
-      ) : view.action === 'update' ? (
-        <T variant="body" color="text2">
-          Update
-        </T>
       ) : null}
       {onPress && view.action !== 'cancel' ? <Feather name="chevron-right" size={16} color={c.text2} /> : null}
     </Pressable>
