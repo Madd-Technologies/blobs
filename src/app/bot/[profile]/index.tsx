@@ -18,7 +18,6 @@ import { Screen } from '@/components/ui/Screen'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { callingErrand, errandsForChat, placeErrands, type Placed } from '@/features/phone/view'
-import { installMessage, MOBILE_PLUGINS } from '@/features/plugins/catalog'
 import type { BotView } from '@/features/roster/view'
 import type { BotSession } from '@/features/sessions/store'
 import { pendingPrompts } from '@/features/transcript/reduce'
@@ -109,8 +108,6 @@ export default function BotChat() {
   const chosen = useChosenChat(profile)
   const draft = useDrafts(state => state.byBot[profile])
   const commands = useCommands(state => state.byBot[profile])
-  // The attach menu's plugin setup: this bot gets its own copy of the per-bot ones (the dashboard).
-  const setupMessage = useMemo(() => installMessage(MOBILE_PLUGINS, undefined, [profile]), [profile])
   const showThinking = usePrefs(state => state.showThinking)
   const showChatter = usePrefs(state => state.showBotChatter)
   const nowS = useNow(60)
@@ -478,7 +475,7 @@ export default function BotChat() {
           {callHere ? (
             <CallBar profile={profile} botName={name} meta={view?.meta} call={callHere} waiting={!!transcript && pendingPrompts(transcript).length > 0} onOpen={openCall} />
           ) : (
-            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} setupMessage={setupMessage} above={
+            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} above={
                 replyTo || calling ? (
                   <>
                     {replyTo ? <ReplyStrip who={replyTo.who} text={replyTo.text} onCancel={() => setReplyTo(null)} /> : null}

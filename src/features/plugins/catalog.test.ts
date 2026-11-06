@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { installCommand, installMessage, MOBILE_PLUGINS, PLUGINS_COMMIT, RELEASES } from './catalog.ts'
+import { installCommand, installMessage, PLUGINS_COMMIT, RELEASES } from './catalog.ts'
 
 describe('plugin install messages', () => {
   it('pins every install to one exact commit of the public repo', () => {
@@ -18,13 +18,6 @@ describe('plugin install messages', () => {
     assert.match(message, /drive\/scripts\/find\.py recent --limit 1/)
     assert.match(message, /Do NOT restart/)
     assert.doesNotMatch(message, /BEGIN|base64/)
-  })
-
-  it('the chat’s setup message installs what the app needs, with the bot’s own dashboard, and nothing that needs another service', () => {
-    const message = installMessage(MOBILE_PLUGINS, PLUGINS_COMMIT, ['concierge'])
-    assert.match(message, /\/hermes-bot-mobile --ref/)
-    assert.match(message, /hermes -p concierge plugins install Madd-Technologies\/blobs-hermes-bot-plugins\/hermes-dashboard/)
-    assert.doesNotMatch(message, /hermes-paperless|hermes-drive|hermes-voice|hermes-phone/)
   })
 
   it('a per-bot plugin is installed in the default profile and in each pinned bot, with -p', () => {
