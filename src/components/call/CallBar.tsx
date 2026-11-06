@@ -17,6 +17,7 @@ import { useCall } from '@/stores/call'
 import { radius } from '@/theme/tokens'
 
 import { CallRings } from './CallRings'
+import { TalkButton } from './TalkButton'
 
 interface Props {
   profile: string
@@ -64,8 +65,17 @@ export function CallBar({ profile, botName, meta, call, waiting, onOpen }: Props
               ) : null}
             </View>
           </Press>
-          <IconCircle icon={call.muted ? 'mic-off' : 'mic'} label={call.muted ? 'Unmute' : 'Mute'} diameter={44} disabled={!live} onPress={() => useCall.getState().setMuted(!call.muted)} />
-          <Pill label="Hang up" icon="phone-off" variant={waiting ? 'secondary' : 'primary'} height={44} disabled={call.phase === 'ended'} onPress={() => useCall.getState().hangUp()} />
+          {call.mode === 'walkie' ? (
+            <>
+              <TalkButton call={call} quiet={waiting} compact />
+              <Pill label="Hang up" icon="phone-off" height={44} disabled={call.phase === 'ended'} onPress={() => useCall.getState().hangUp()} />
+            </>
+          ) : (
+            <>
+              <IconCircle icon={call.muted ? 'mic-off' : 'mic'} label={call.muted ? 'Unmute' : 'Mute'} diameter={44} disabled={!live} onPress={() => useCall.getState().setMuted(!call.muted)} />
+              <Pill label="Hang up" icon="phone-off" variant={waiting ? 'secondary' : 'primary'} height={44} disabled={call.phase === 'ended'} onPress={() => useCall.getState().hangUp()} />
+            </>
+          )}
         </View>
       </Raised>
     </View>

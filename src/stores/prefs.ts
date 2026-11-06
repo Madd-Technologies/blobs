@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
+import type { CallMode } from '@/features/call/engine'
+
 export type ThemePref = 'system' | 'dark' | 'light'
 
 interface PrefsState {
@@ -17,12 +19,15 @@ interface PrefsState {
   lastChats: Record<string, string>
   /** The tutorial has been seen (or skipped), so it no longer opens on its own before Connect. Settings can replay it. */
   tourSeen: boolean
+  /** How you talk on a voice call: push to talk (the line is open only while it is used) or an open line. */
+  callMode: CallMode
   setTheme: (theme: ThemePref) => void
   setShowThinking: (on: boolean) => void
   setShowBotChatter: (on: boolean) => void
   toggleMuted: (profile: string) => void
   setReopenLast: (profile: string, on: boolean) => void
   setTourSeen: () => void
+  setCallMode: (mode: CallMode) => void
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -35,6 +40,7 @@ export const usePrefs = create<PrefsState>()(
       reopenLast: {},
       lastChats: {},
       tourSeen: false,
+      callMode: 'walkie',
       setTheme: theme => set({ theme }),
       setShowThinking: showThinking => set({ showThinking }),
       setShowBotChatter: showBotChatter => set({ showBotChatter }),
@@ -46,6 +52,7 @@ export const usePrefs = create<PrefsState>()(
           return on ? { reopenLast: { ...reopenLast, [profile]: true } } : { reopenLast, lastChats }
         }),
       setTourSeen: () => set({ tourSeen: true }),
+      setCallMode: callMode => set({ callMode }),
       toggleMuted: profile =>
         set(s => ({
           muted: s.muted.includes(profile) ? s.muted.filter(p => p !== profile) : [...s.muted, profile],

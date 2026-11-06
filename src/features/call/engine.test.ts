@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { CONTEXT_CHARS, createCall, GOODBYE_MS, QUIET_HANG_UP_MS, resultLine, voiceContext, type CallPorts, type CallSnapshot, type Minted, type SocketLike } from './engine.ts'
+import { CONTEXT_CHARS, createCall, GOODBYE_MS, MIN_TALK_MS, PARK_MS, QUIET_HANG_UP_MS, REPLY_NUDGE_MS, resultLine, voiceContext, type CallMode, type CallPorts, type CallSnapshot, type Minted, type SocketLike } from './engine.ts'
 
 const minted: Minted = {
   url: 'wss://api.x.ai/v1/realtime?model=grok-voice-latest',
@@ -47,7 +47,7 @@ class FakeSocket implements SocketLike {
   }
 }
 
-function harness(options: { delegate?: (request: string, context: string) => Promise<boolean>; mint?: () => Promise<Minted>; audioFails?: boolean } = {}) {
+function harness(options: { delegate?: (request: string, context: string) => Promise<boolean>; mint?: () => Promise<Minted>; audioFails?: boolean; mode?: CallMode } = {}) {
   const sockets: FakeSocket[] = []
   const played: string[] = []
   const log: string[] = []
@@ -56,9 +56,19 @@ function harness(options: { delegate?: (request: string, context: string) => Pro
   const pending = new Map<number, { run: () => void; ms: number }>()
   let nextTimer = 1
   let frame: ((pcm: string) => void) | null = null
+  let clock = 0
+  let mints = 0
 
   const ports: CallPorts = {
-    mint: options.mint ?? (() => Promise.resolve(minted)),
+    mint:
+      options.mint ??
+      (() => {
+        mints += 1
+
+        return Promise.resolve({ ...minted, client_secret: `secret-${mints}` })
+      }),
+    mode: options.mode,
+    now: () => clock,
     connect: (url, protocols) => {
       const socket = new FakeSocket(url, protocols)
       sockets.push(socket)
@@ -105,6 +115,10 @@ function harness(options: { delegate?: (request: string, context: string) => Pro
     delegated,
     snapshots,
     socket: () => sockets[0] as FakeSocket,
+    latest: () => sockets.at(-1) as FakeSocket,
+    later: (ms: number) => {
+      clock += ms
+    },
     speak: (pcm: string) => frame?.(pcm),
     /** Runs every timer of exactly this length. */
     fire: (ms: number) => {
@@ -373,5 +387,177 @@ describe('resultLine', () => {
     assert.equal(resultLine('Error: no such file', 'error'), 'The task failed. Error: no such file')
     assert.equal(resultLine('  ', 'complete'), 'It finished, with nothing to report.')
     assert.equal(resultLine('x'.repeat(5000)).length, 3000)
+  })
+})
+
+describe('a walkie-talkie call', () => {
+  const walkie = () => harness({ mode: 'walkie' })
+
+  it('turns xAI’s voice detection off, tells the voice it is push to talk, and sends nothing until you hold the button', async () => {
+    const h = walkie()
+
+    await live(h)
+    const session = h.socket().sent[0]?.session as Record<string, unknown>
+
+    assert.equal(session.turn_detection, null)
+    assert.equal(session.voice, 'eve')
+    assert.match(String(session.instructions), /^Be Orion\.\n\nThis call is push to talk/)
+    assert.equal(h.call.snapshot().mode, 'walkie')
+
+    h.speak('AAAA')
+    assert.deepEqual(h.socket().types(), ['session.update'])
+  })
+
+  it('sends what you say while you hold, and commits it when you let go (the commit starts the reply)', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.call.talk(true)
+    h.speak('AAAA')
+    h.later(MIN_TALK_MS + 500)
+    h.call.talk(false)
+
+    assert.deepEqual(h.socket().types(), ['session.update', 'input_audio_buffer.clear', 'input_audio_buffer.append', 'input_audio_buffer.commit'])
+    assert.equal(h.call.snapshot().talking, false)
+
+    // xAI started the reply on its own: no second one is asked for.
+    h.socket().emit({ type: 'response.created' })
+    h.fire(REPLY_NUDGE_MS)
+    assert.ok(!h.socket().types().includes('response.create'))
+  })
+
+  it('asks for the reply if the commit did not start one', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.call.talk(true)
+    h.later(1000)
+    h.call.talk(false)
+    h.fire(REPLY_NUDGE_MS)
+
+    assert.equal(h.socket().types().at(-1), 'response.create')
+  })
+
+  it('sends nothing for a slip of the finger', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.call.talk(true)
+    h.speak('AAAA')
+    h.later(MIN_TALK_MS - 1)
+    h.call.talk(false)
+
+    assert.ok(!h.socket().types().includes('input_audio_buffer.commit'))
+    assert.equal(h.socket().types().at(-1), 'input_audio_buffer.clear')
+  })
+
+  it('stops the voice when you press to talk over it', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.socket().emit({ type: 'response.created' })
+    h.socket().emit({ type: 'response.output_audio.delta', delta: 'UklG' })
+    h.call.talk(true)
+
+    assert.ok(h.log.includes('flush'))
+    assert.ok(h.socket().types().includes('response.cancel'))
+    assert.equal(h.call.snapshot().speaking, 'you')
+  })
+
+  it('puts the line down once nothing is going on, so the wait costs nothing; the call goes on', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.socket().emit({ type: 'response.created' })
+    h.socket().emit({ type: 'response.function_call_arguments.done', name: 'hermes_task', call_id: 'call-1', arguments: '{"request":"Check the backups"}' })
+    h.socket().emit({ type: 'response.output_audio.delta', delta: 'UklG' })
+    h.socket().emit({ type: 'response.done' })
+    await tick()
+    h.fire(PARK_MS)
+
+    assert.equal(h.socket().closed, true)
+    assert.equal(h.call.snapshot().line, 'parked')
+    assert.equal(h.call.snapshot().phase, 'live')
+    assert.equal(h.call.snapshot().tasks, 1)
+    assert.ok(!h.log.includes('stop'))
+  })
+
+  it('picks the line up again to say a result, with the call so far, then says it', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.socket().emit({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'Are the backups fine?' })
+    h.socket().emit({ type: 'response.created' })
+    h.socket().emit({ type: 'response.function_call_arguments.done', name: 'hermes_task', call_id: 'call-1', arguments: '{"request":"Check the backups"}' })
+    h.socket().emit({ type: 'response.output_audio.delta', delta: 'UklG' })
+    h.socket().emit({ type: 'response.done' })
+    await tick()
+    h.fire(PARK_MS)
+    assert.equal(h.call.snapshot().line, 'parked')
+
+    h.call.result('All three ran last night.')
+    await tick()
+    await tick()
+    assert.equal(h.sockets.length, 2)
+    assert.deepEqual(h.latest().protocols, ['xai-client-secret.secret-2'])
+    assert.equal(h.call.snapshot().line, 'opening')
+
+    h.latest().onopen?.()
+    const session = h.latest().sent[0]?.session as Record<string, unknown>
+
+    assert.equal(session.turn_detection, null)
+    assert.match(String(session.instructions), /picked up again[\s\S]*You: Are the backups fine\?/)
+    assert.deepEqual(h.latest().types(), ['session.update', 'conversation.item.create', 'response.create'])
+    assert.match(JSON.stringify(h.latest().sent[1]), /\[Hermes result\] All three ran last night\./)
+    assert.equal(h.call.snapshot().line, 'open')
+  })
+
+  it('keeps what you say while the line is picked up, and sends it once it is open, even if you let go first', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.fire(PARK_MS)
+    assert.equal(h.call.snapshot().line, 'parked')
+
+    h.call.talk(true)
+    h.speak('AAAA')
+    h.speak('BBBB')
+    h.later(1200)
+    h.call.talk(false)
+    await tick()
+    await tick()
+    h.latest().onopen?.()
+
+    assert.deepEqual(h.latest().types(), ['session.update', 'input_audio_buffer.append', 'input_audio_buffer.append', 'input_audio_buffer.commit'])
+  })
+
+  it('lets results wait while you talk', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.socket().emit({ type: 'response.created' })
+    h.socket().emit({ type: 'response.function_call_arguments.done', name: 'hermes_task', call_id: 'call-1', arguments: '{"request":"Check"}' })
+    h.socket().emit({ type: 'response.done' })
+    await tick()
+    h.call.talk(true)
+    h.call.result('Done.')
+
+    assert.ok(!JSON.stringify(h.socket().sent).includes('Done.'))
+
+    h.later(1000)
+    h.call.talk(false)
+    h.socket().emit({ type: 'response.created' })
+    h.socket().emit({ type: 'response.done' })
+    assert.match(JSON.stringify(h.socket().sent), /\[Hermes result\] Done\./)
+  })
+
+  it('treats xAI putting the line down as a pause, not the end of the call', async () => {
+    const h = walkie()
+
+    await live(h)
+    h.socket().onclose?.({ code: 1000, reason: 'idle' })
+
+    assert.equal(h.call.snapshot().phase, 'live')
+    assert.equal(h.call.snapshot().line, 'parked')
   })
 })
