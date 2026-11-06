@@ -8,10 +8,10 @@ import { IconCircle } from '@/components/ui/IconCircle'
 import { Sheet } from '@/components/ui/Sheet'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
-import { deviceRows, progressLabel, sizeLabel, splitStale, type DeviceRow } from '@/features/share/model'
+import { deviceRows, folderLabel, progressLabel, sizeLabel, splitStale, type DeviceRow } from '@/features/share/model'
 import { useConnection } from '@/stores/connection'
 import type { ViewerDoc } from '@/stores/documents'
-import { useLastTarget, useShare, type ShareLine } from '@/stores/share'
+import { canDownload, useDownloadFolder, useLastTarget, useShare, type ShareLine } from '@/stores/share'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
 
@@ -47,7 +47,13 @@ export function useShareHeader(key: string | undefined, doc: ViewerDoc | null): 
   const buttons = (
     <View style={styles.buttons}>
       {send ? <IconCircle icon="send" label="Taildrop from the server" diameter={40} onPress={() => useShare.getState().openSheet(key)} /> : null}
-      <IconCircle icon="share" label="Share from this phone" diameter={40} onPress={() => void useShare.getState().share(key, doc)} />
+      <IconCircle
+        icon="share"
+        label={canDownload ? 'Download or share from this phone' : 'Share from this phone'}
+        diameter={40}
+        // Android's share sheet has no "save": Download goes first in the app's own sheet (iOS has Save to Files there).
+        onPress={() => (canDownload ? useShare.getState().openPhoneSheet(key) : void useShare.getState().share(key, doc))}
+      />
     </View>
   )
 
@@ -62,6 +68,8 @@ function LineView({ docKey, doc, line }: { docKey: string; doc: ViewerDoc; line:
 
       if (line.retry === 'share') {
         void useShare.getState().share(docKey, doc)
+      } else if (line.retry === 'download') {
+        void useShare.getState().download(docKey, doc)
       } else if (line.target) {
         void useShare.getState().send(docKey, doc, line.target)
       }
@@ -82,7 +90,10 @@ function LineView({ docKey, doc, line }: { docKey: string; doc: ViewerDoc; line:
     )
   }
 
-  const words = line.kind === 'getting' ? `Getting it ready · ${progressLabel(line.done, line.total)}` : `Sending to ${line.target.you ? 'this phone' : line.target.name} · ${progressLabel(line.sent, line.total)}`
+  const words =
+    line.kind === 'getting'
+      ? `${line.purpose === 'download' ? 'Downloading' : 'Getting it ready'} · ${progressLabel(line.done, line.total)}`
+      : `Sending to ${line.target.you ? 'this phone' : line.target.name} · ${progressLabel(line.sent, line.total)}`
 
   return (
     <View style={styles.lineRow} accessibilityLiveRegion="polite">
@@ -96,6 +107,54 @@ function LineView({ docKey, doc, line }: { docKey: string; doc: ViewerDoc; line:
         </T>
       </Pressable>
     </View>
+  )
+}
+
+/** Android's sheet behind the Share button: Download to this phone first, then the share sheet, and another folder. */
+export function PhoneSheet({ docKey, doc }: { docKey: string | undefined; doc: ViewerDoc | null }) {
+  const { c } = useTheme()
+  const open = useShare(state => !!docKey && state.phoneSheetFor === docKey)
+  const folder = useDownloadFolder(state => state.uri)
+
+  if (!docKey || !doc || !canDownload) {
+    return null
+  }
+
+  const row = (icon: 'download' | 'share' | 'folder', title: string, line: string, onPress: () => void) => (
+    <Pressable
+      key={title}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}, ${line}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.device, { backgroundColor: pressed ? c.tone : 'transparent' }]}
+    >
+      <Feather name={icon} size={18} color={c.text2} />
+      <View style={styles.flex}>
+        <T variant="body" numberOfLines={1}>
+          {title}
+        </T>
+        <T variant="label" color="text2" numberOfLines={1}>
+          {line}
+        </T>
+      </View>
+    </Pressable>
+  )
+
+  return (
+    <Sheet visible={open} onClose={() => useShare.getState().closePhoneSheet()} label="Download or share">
+      <View style={styles.body}>
+        <View style={styles.head}>
+          <T variant="heading" numberOfLines={1}>
+            {doc.name}
+          </T>
+        </View>
+        <GroupedList>
+          {row('download', 'Download to this phone', folder ? `Saves to ${folderLabel(folder)}` : 'You pick the folder the first time', () => void useShare.getState().download(docKey, doc))}
+          {row('share', 'Share from this phone…', 'Send it to another app', () => void useShare.getState().share(docKey, doc))}
+          {folder ? row('folder', 'Save to another folder…', 'Then it saves there from now on', () => void useShare.getState().download(docKey, doc, { pick: true })) : null}
+        </GroupedList>
+      </View>
+    </Sheet>
   )
 }
 

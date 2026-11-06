@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Image, StyleSheet, View } from 'react-native'
 
 import { DiffView } from '@/components/viewer/DiffView'
-import { TaildropSheet, useShareHeader } from '@/components/viewer/ShareControls'
+import { PhoneSheet, TaildropSheet, useShareHeader } from '@/components/viewer/ShareControls'
 import { HtmlView } from '@/components/viewer/HtmlView'
 import { PdfView, type PdfEvent } from '@/components/viewer/PdfView'
 import { TextView } from '@/components/viewer/TextView'
@@ -165,6 +165,7 @@ export default function ViewerScreen() {
     <Screen edges={['top']}>
       <ScreenHeader compact title={doc?.name ?? 'File'} subtitle={subtitle} right={share.right} line={share.line} sideWidth={share.sideWidth} />
       <TaildropSheet docKey={key} doc={doc} size={size} />
+      <PhoneSheet docKey={key} doc={doc} />
       <View style={styles.fill}>
         {!doc || !config ? (
           <Centered text="Nothing to show." />
