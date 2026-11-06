@@ -8,10 +8,10 @@
 
 export const PLUGINS_REPO = 'Madd-Technologies/blobs-hermes-bot-plugins'
 /** `hermes plugins install --ref` takes an exact 40-character commit, so what installs is what was checked. */
-export const PLUGINS_COMMIT = 'c18f752239afa9a19897da97c7ccc65308d33063'
+export const PLUGINS_COMMIT = 'df6f44b63cb1ff5b6a94b0965a85f9cab96ae5dc'
 
 export const RELEASES = {
-  'hermes-bot-mobile': '0.2.0',
+  'hermes-bot-mobile': '0.3.1',
   'hermes-paperless': '0.3.0',
   'hermes-drive': '0.1.0',
   'hermes-dashboard': '0.7.0',
