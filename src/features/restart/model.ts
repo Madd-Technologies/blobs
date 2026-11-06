@@ -24,10 +24,10 @@ export interface RowView {
   /** `quiet`: the usual secondary color; `text`: something you might do; `amber`: it waits on you. */
   tone: 'quiet' | 'text' | 'amber'
   spinner: boolean
-  /** A right-hand word: Cancel (the wait) or Update (the plugin). */
-  action?: 'cancel' | 'update'
-  /** Where a tap goes: the sheet, Server plugins, or nowhere. */
-  opens: 'sheet' | 'plugins' | null
+  /** A right-hand word: Cancel (the wait). */
+  action?: 'cancel'
+  /** Where a tap goes: the sheet, or nowhere. */
+  opens: 'sheet' | null
 }
 
 /** A plugin installed but not loaded yet: it loads at the next restart. */
@@ -116,7 +116,8 @@ export function defaultChoice(status: RestartStatus, waiting: WaitingPlugin | nu
 }
 
 /**
- * The Settings row. `status`: undefined while unread, null when the plugin has no restart route. `phase`: what the app
+ * The Settings row. `status`: undefined while unread, null when the server has no restart plugin (then Hermes's own
+ * gateway restart is what the app can offer). `phase`: what the app
  * asked. `dismissedTimeout`: the id of a timed-out request already seen, which stops reading as amber.
  */
 export function rowView(input: {
@@ -140,7 +141,7 @@ export function rowView(input: {
   }
 
   if (status === null) {
-    return { line: 'Needs the Blobs plugin 0.1.7 on the server', tone: 'quiet', spinner: false, action: 'update', opens: 'plugins' }
+    return { line: 'The gateway: messaging and routines', tone: 'quiet', spinner: false, opens: 'sheet' }
   }
 
   if (!status.supported) {

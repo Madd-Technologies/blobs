@@ -69,8 +69,9 @@ describe('the Settings row', () => {
     assert.deepEqual([view.line, view.opens], ['This computer does not run systemd.', null])
   })
 
-  it('sends you to Server plugins when the plugin is too old to restart', () => {
-    assert.deepEqual(row({ status: null }), { line: 'Needs the Blobs plugin 0.1.7 on the server', tone: 'quiet', spinner: false, action: 'update', opens: 'plugins' })
+  it('offers Hermes’s own gateway restart when the server has no restart plugin', () => {
+    // Never a prompt to install or update anything: the plugin is optional.
+    assert.deepEqual(row({ status: null }), { line: 'The gateway: messaging and routines', tone: 'quiet', spinner: false, opens: 'sheet' })
   })
 
   it('mentions a restart that failed', () => {
