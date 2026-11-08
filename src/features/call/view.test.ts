@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import type { CallSnapshot } from './engine.ts'
 import { callStatus, captionTail } from './view.ts'
 
-const live: CallSnapshot = { phase: 'live', speaking: null, caption: null, tasks: 0, muted: false, note: null }
+const live: CallSnapshot = { phase: 'live', speaking: null, caption: null, tasks: 0, muted: false, note: null, mode: 'live', talking: false, line: 'open' }
 
 describe('callStatus', () => {
   it('says where the call is', () => {
@@ -14,6 +14,15 @@ describe('callStatus', () => {
     assert.deepEqual(callStatus({ ...live, muted: true }, 'Orion', false), { text: 'Muted', mark: null })
     assert.deepEqual(callStatus({ ...live, tasks: 1, speaking: 'voice' }, 'Orion', false), { text: 'Orion is on it', mark: 'spinner' })
     assert.deepEqual(callStatus({ ...live, tasks: 2 }, 'Orion', false), { text: 'Orion is on 2 things', mark: 'spinner' })
+  })
+
+  it('on a walkie-talkie call, says whose turn it is', () => {
+    const walkie: CallSnapshot = { ...live, mode: 'walkie', line: 'parked' }
+
+    assert.deepEqual(callStatus(walkie, 'Orion', false), { text: 'Your turn', mark: null })
+    assert.deepEqual(callStatus({ ...walkie, talking: true, tasks: 1 }, 'Orion', false), { text: 'Listening', mark: null })
+    assert.deepEqual(callStatus({ ...walkie, tasks: 1 }, 'Orion', false), { text: 'Orion is on it', mark: 'spinner' })
+    assert.deepEqual(callStatus({ ...walkie, speaking: 'voice' }, 'Orion', false), { text: 'Speaking', mark: null })
   })
 
   it('puts a card that waits for you first, and says why a call ended', () => {

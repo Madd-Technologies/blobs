@@ -26,8 +26,13 @@ export function callStatus(call: CallSnapshot, botName: string, waiting: boolean
     return { text: 'Waiting for you', mark: 'needs' }
   }
 
-  if (call.tasks > 0) {
+  if (call.tasks > 0 && !call.talking) {
     return { text: call.tasks === 1 ? `${botName} is on it` : `${botName} is on ${call.tasks} things`, mark: 'spinner' }
+  }
+
+  if (call.mode === 'walkie') {
+    // Push to talk: the voice hears you only while you hold the button.
+    return { text: call.talking ? 'Listening' : call.speaking === 'voice' ? 'Speaking' : 'Your turn', mark: null }
   }
 
   return { text: call.speaking === 'voice' ? 'Speaking' : call.muted ? 'Muted' : 'Listening', mark: null }

@@ -11,12 +11,23 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
 import { accountHint, accountLabel, PRIVACY_NOTE, VOICES, voiceLabel, type VoiceAccount, type VoiceChange } from '@/lib/hermes/voice'
+import type { CallMode } from '@/features/call/engine'
 import { useBotView } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
+import { usePrefs } from '@/stores/prefs'
 import { toast } from '@/stores/toast'
 import { useVoice } from '@/stores/voice'
 
 const ACCOUNTS: VoiceAccount[] = ['sign-in', 'key']
+const MODES: CallMode[] = ['walkie', 'live']
+
+const modeLabel = (mode: CallMode) => (mode === 'walkie' ? 'Push to talk' : 'Open line')
+
+function modeHint(mode: CallMode, name: string): string {
+  return mode === 'walkie'
+    ? `Hold the talk button while you speak, or tap it once and tap again to send. The line to xAI is put down while ${name} works, so a long task costs nothing to wait for.`
+    : `${name} hears you whenever you speak, like a phone call. The line to xAI stays open, and billed by the minute, for the whole call.`
+}
 
 /** A bot's voice calls (the hermes-voice plugin): on or off, the voice it speaks with, and which xAI account pays. */
 export default function BotVoice() {
@@ -24,7 +35,8 @@ export default function BotVoice() {
   const online = useConnection(state => state.status === 'online')
   const entry = useVoice(state => state.byBot[profile])
   const name = useBotView(profile)?.name ?? profile
-  const [choosing, setChoosing] = useState<'voice' | 'account' | null>(null)
+  const [choosing, setChoosing] = useState<'voice' | 'account' | 'mode' | null>(null)
+  const mode = usePrefs(state => state.callMode)
 
   useEffect(() => {
     if (online) {
@@ -64,11 +76,12 @@ export default function BotVoice() {
             </GroupedList>
 
             <GroupedList radius={20}>
+              <Row label="Talking" value={modeLabel(mode)} onPress={() => setChoosing('mode')} />
               <Row label="Voice" value={voiceLabel(voice.voice)} onPress={() => setChoosing('voice')} />
               <Row label="Account" value={accountLabel(voice.account)} onPress={() => setChoosing('account')} />
             </GroupedList>
             <T variant="label" color="text2" style={styles.note}>
-              {accountHint(voice.account, voice)}
+              {`${modeHint(mode, name)} ${accountHint(voice.account, voice)}`}
             </T>
 
             <T variant="label" color="text2" style={styles.note}>
@@ -83,6 +96,26 @@ export default function BotVoice() {
               <Row key={option.value} label={option.label} value={option.value === voice?.voice ? 'Selected' : undefined} chevron={false} onPress={() => void change({ voice: option.value })} />
             ))}
           </GroupedList>
+        </Sheet>
+
+        <Sheet visible={choosing === 'mode'} onClose={() => setChoosing(null)} label="Talking">
+          <GroupedList>
+            {MODES.map(option => (
+              <Row
+                key={option}
+                label={modeLabel(option)}
+                value={option === mode ? 'Selected' : undefined}
+                chevron={false}
+                onPress={() => {
+                  usePrefs.getState().setCallMode(option)
+                  setChoosing(null)
+                }}
+              />
+            ))}
+          </GroupedList>
+          <T variant="label" color="text2" style={styles.hints}>
+            {MODES.map(option => `${modeLabel(option)}: ${modeHint(option, name)}`).join('\n')}
+          </T>
         </Sheet>
 
         <Sheet visible={choosing === 'account'} onClose={() => setChoosing(null)} label="Account">

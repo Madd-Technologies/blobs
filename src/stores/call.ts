@@ -1,11 +1,14 @@
 import { create } from 'zustand'
 
 import { createCall, type Call, type CallSnapshot, type SocketLike } from '@/features/call/engine'
+import { pressIn, pressOut, type TalkHold } from '@/features/call/talk'
 import { asHermesEvent } from '@/lib/hermes/protocol'
 import { startVoiceSession } from '@/lib/hermes/voice'
 import { pendingPrompts } from '@/features/transcript/reduce'
 import { callAudio } from '@/lib/duplexAudio'
+import { haptic } from '@/lib/haptics'
 import { onGatewayEvent, useConnection } from '@/stores/connection'
+import { usePrefs } from '@/stores/prefs'
 import { sessions } from '@/stores/sessions'
 
 interface CallState {
@@ -19,10 +22,16 @@ interface CallState {
   /** How loud the voice is as it plays, 0 to 1. */
   voiceLevel: number
   speaker: boolean
+  /** Walkie-talkie: the talk button, shared by the call screen and the chat's call bar. */
+  hold: TalkHold
   start: (profile: string, caller: { name: string; about?: string }) => void
   hangUp: () => void
   setMuted: (muted: boolean) => void
   setSpeaker: (on: boolean) => void
+  /** The talk button went down. */
+  pressTalk: () => void
+  /** The talk button came up. */
+  releaseTalk: () => void
 }
 
 /** How long a finished call's last word stays on screen before the chat's composer comes back; longer when it says why. */
@@ -32,6 +41,9 @@ const ENDED_NOTE_MS = 5000
 let engine: Call | null = null
 let audio: ReturnType<typeof callAudio> | null = null
 let cleanup: (() => void) | null = null
+/** When the talk button went down, and whether it was locked on then (that press is the one that sends). */
+let pressedAt = 0
+let pressWasLocked = false
 
 /**
  * The one voice call the app can hold. It belongs to the chat it was started from: tasks the voice hands over are turns in that
@@ -44,6 +56,7 @@ export const useCall = create<CallState>((set, get) => ({
   level: 0,
   voiceLevel: 0,
   speaker: true,
+  hold: 'idle',
 
   start(profile, caller) {
     const config = useConnection.getState().config
@@ -64,13 +77,14 @@ export const useCall = create<CallState>((set, get) => ({
       },
       message => engine?.hangUp(message),
     )
-    set({ profile, call: null, since: null, level: 0, voiceLevel: 0, speaker: true })
+    set({ profile, call: null, since: null, level: 0, voiceLevel: 0, speaker: true, hold: 'idle' })
 
     const call = createCall({
       mint: () => startVoiceSession(config, profile, caller),
       connect: (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike,
       audio,
       delegate: (request, voiceContext) => sessions.send(profile, request, [], { voiceContext }),
+      mode: usePrefs.getState().callMode,
       onChange: snapshot => {
         const went = snapshot.phase === 'live' && !get().since
 
@@ -123,6 +137,7 @@ export const useCall = create<CallState>((set, get) => ({
 
     function finish(snapshot: CallSnapshot) {
       cleanup?.()
+      set({ hold: 'idle' })
 
       if (engine === call) {
         engine = null
@@ -151,5 +166,35 @@ export const useCall = create<CallState>((set, get) => ({
   setSpeaker(on) {
     audio?.setSpeaker(on)
     set({ speaker: on })
+  },
+
+  pressTalk() {
+    if (get().call?.phase !== 'live') {
+      return
+    }
+
+    pressWasLocked = get().hold === 'locked'
+    pressedAt = Date.now()
+    const step = pressIn(get().hold)
+    set({ hold: step.hold })
+
+    if (step.action === 'start') {
+      haptic('gestureStart')
+      engine?.talk(true)
+    }
+  },
+
+  releaseTalk() {
+    const step = pressOut(get().hold, Date.now() - pressedAt, pressWasLocked)
+    set({ hold: step.hold })
+
+    if (step.hold === 'locked' && !pressWasLocked) {
+      haptic('toggleOn')
+    }
+
+    if (step.action === 'send') {
+      haptic('gestureEnd')
+      engine?.talk(false)
+    }
   },
 }))

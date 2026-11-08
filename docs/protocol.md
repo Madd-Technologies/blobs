@@ -795,3 +795,22 @@ additive changes only. The gateway reaches the app in three places:
 
 `DELETE /api/sessions/{id}` (and REST rename/import) now needs `request_id` and `expected_revision`; the app deletes with
 the `session.delete` RPC, which is unchanged.
+
+## Voice calls: push to talk (xAI realtime)
+
+A call opens xAI's realtime voice from the phone with a one-time secret from hermes-voice (`POST …/session`), whose answer
+also carries the first `session.update` (voice, persona, tools, `turn_detection: {type: 'server_vad'}`). The app can
+change that session before sending it, so push to talk needs nothing new on the server:
+
+- **Open line** (`live`): the session as minted. xAI's voice detection hears you whenever you speak, and the line stays
+  open for the whole call.
+- **Push to talk** (`walkie`, the default): the app sends `turn_detection: null` and adds a line to the instructions.
+  Holding the button sends `input_audio_buffer.clear`, then the microphone's `input_audio_buffer.append` frames; letting go
+  sends `input_audio_buffer.commit`. On xAI the commit itself starts the reply (seen live by hermes-phone), so
+  `response.create` goes only if no `response.created` follows within 1.5 s. Pressing while the voice talks flushes the
+  speaker and sends `response.cancel`.
+- **The line is put down while unused.** Eight seconds after the voice has finished, with nobody talking and no result
+  waiting, the socket is closed; the call screen stays. Pressing to talk, or a result coming back from the bot's chat,
+  mints a new secret and opens a new socket, whose instructions carry the call so far (the same spoken turns that go to the
+  bot as `voice_context`). Audio said while it opens is kept and sent once it is open. xAI closing the socket mid-call is
+  treated the same way. Never switch detection on within one socket: xAI ignores a commit for audio begun with it off.
