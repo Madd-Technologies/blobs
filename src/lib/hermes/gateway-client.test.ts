@@ -141,6 +141,7 @@ describe('after a reconnect', () => {
     const b = client.connect('ws://h:1/api/ws')
     second.open()
     await b
+    await tick()
 
     const replay = second.sent.find(frame => frame.method === 'session.events.since')
     assert.ok(replay, 'asked the server what it missed')
@@ -149,5 +150,67 @@ describe('after a reconnect', () => {
 
     assert.deepEqual(got.map(frame => [frame.id, frame.method]), [['srq-9', 'clarify']])
     assert.equal((got[0]?.params as { session_id: string }).session_id, 's1')
+  })
+})
+
+function tick() {
+  return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+const event = (session: string, seq: number): Record<string, unknown> => ({ jsonrpc: '2.0', method: 'event', params: { type: 'message.delta', session_id: session, seq, payload: { text: `#${seq}` } } })
+
+describe('catching one session up', () => {
+  it('replays only what that session emitted since the last event seen, once, and says nothing is missing', async () => {
+    const { client, socket } = await connected()
+    const got: string[] = []
+    client.onAny(frame => got.push(`${frame.session_id}:${(frame as { seq?: number }).seq}`))
+    socket.receive(event('s1', 3))
+    socket.receive(event('s2', 7))
+
+    const caught = client.catchUp('s1')
+    await tick()
+    const asked = socket.sent.filter(frame => frame.method === 'session.events.since')
+    assert.deepEqual(asked.map(frame => frame.params), [{ session_id: 's1', last_seen: 3 }])
+
+    // A live frame racing the answer waits behind the replayed gap, and nothing is delivered twice.
+    socket.receive(event('s1', 6))
+    socket.receive({ jsonrpc: '2.0', id: asked[0]?.id, result: { events: [{ type: 'message.delta', session_id: 's1', seq: 4 }, { type: 'message.delta', session_id: 's1', seq: 5 }], truncated: false, epoch: 'e1' } })
+
+    assert.equal(await caught, true)
+    assert.deepEqual(got, ['s1:3', 's2:7', 's1:4', 's1:5', 's1:6'])
+  })
+
+  it('says something may be missing when the server’s window no longer reaches back', async () => {
+    const { client, socket } = await connected()
+    socket.receive(event('s1', 3))
+    const caught = client.catchUp('s1')
+    await tick()
+    const asked = socket.sent.find(frame => frame.method === 'session.events.since')
+    socket.receive({ jsonrpc: '2.0', id: asked?.id, result: { events: [{ type: 'message.delta', session_id: 's1', seq: 900 }], truncated: true } })
+
+    assert.equal(await caught, false)
+  })
+
+  it('cannot catch up a session it never saw an event from, and does not ask', async () => {
+    const { client, socket } = await connected()
+
+    assert.equal(await client.catchUp('s9'), false)
+    assert.equal(socket.sent.some(frame => frame.method === 'session.events.since'), false)
+  })
+
+  it('following a session starts from the server’s latest event, so a later catch-up asks only for what came after', async () => {
+    const { client, socket } = await connected()
+    const following = client.follow('s1')
+    const asked = socket.sent.find(frame => frame.method === 'session.events.since')
+    assert.equal(asked?.params.last_seen, Number.MAX_SAFE_INTEGER, 'asks for nothing, only where the session is')
+    socket.receive({ jsonrpc: '2.0', id: asked?.id, result: { events: [], latest_seq: 42, truncated: false, epoch: 'e1' } })
+    await following
+
+    const caught = client.catchUp('s1')
+    await tick()
+    const next = socket.sent.filter(frame => frame.method === 'session.events.since').at(-1)
+    assert.deepEqual(next?.params, { session_id: 's1', last_seen: 42 })
+    socket.receive({ jsonrpc: '2.0', id: next?.id, result: { events: [], truncated: false, epoch: 'e1' } })
+    assert.equal(await caught, true)
   })
 })

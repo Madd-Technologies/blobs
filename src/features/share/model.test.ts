@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import type { TaildropStatus, TaildropTarget } from '../../lib/hermes/taildrop.ts'
-import { deviceLine, deviceRows, progressLabel, sendFailure, sentToast, sizeLabel, splitStale } from './model.ts'
+import { deviceLine, deviceRows, folderLabel, freeName, progressLabel, savedToast, sendFailure, sentToast, sizeLabel, splitStale } from './model.ts'
 
 const target = (patch: Partial<TaildropTarget>): TaildropTarget => ({ name: 'device', ip: '100.64.0.10', online: true, detail: null, you: false, ...patch })
 const status = (targets: TaildropTarget[]): TaildropStatus => ({ supported: true, why: null, targets, you: { name: 'pixel-9', os: 'android', ip: '100.64.0.13' }, setup: null, max_bytes: 2 ** 31, sending: [] })
@@ -71,5 +71,30 @@ describe('the header line', () => {
   it('says where the file arrived', () => {
     assert.equal(sentToast(target({ name: 'macbook' })), 'Sent to macbook · it’s in Tailscale’s notification there')
     assert.equal(sentToast(target({ you: true })), 'Sent to this phone · it’s in Tailscale’s notification')
+  })
+})
+
+describe('downloading to this phone', () => {
+  it('keeps the name when it is free, else numbers it the way Android does', () => {
+    assert.equal(freeName('report.pdf', ['notes.txt']), 'report.pdf')
+    assert.equal(freeName('report.pdf', ['report.pdf']), 'report (1).pdf')
+    assert.equal(freeName('report.pdf', ['Report.PDF', 'report (1).pdf']), 'report (2).pdf')
+    assert.equal(freeName('Makefile', ['Makefile']), 'Makefile (1)')
+    // A leading dot is part of the name, not an extension.
+    assert.equal(freeName('.env', ['.env']), '.env (1)')
+    assert.equal(freeName('archive.tar.gz', ['archive.tar.gz']), 'archive.tar (1).gz')
+  })
+
+  it('names the picked folder by its last part', () => {
+    assert.equal(folderLabel('content://com.android.externalstorage.documents/tree/primary%3ADownload'), 'Download')
+    assert.equal(folderLabel('content://com.android.externalstorage.documents/tree/primary%3ADownload%2FReports'), 'Reports')
+    assert.equal(folderLabel('content://com.android.externalstorage.documents/tree/primary%3A'), 'your phone')
+    assert.equal(folderLabel('content://com.android.externalstorage.documents/tree/1A2B-3C4D%3AFiles'), 'Files')
+    assert.equal(folderLabel('content://com.example.provider/tree/%E0%A4'), 'your folder')
+    assert.equal(folderLabel(null), 'your folder')
+  })
+
+  it('says where it went', () => {
+    assert.equal(savedToast('Download', 'report (1).pdf'), 'Saved to Download · report (1).pdf')
   })
 })

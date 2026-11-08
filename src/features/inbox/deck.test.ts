@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import type { NeedsYouRecord } from '../../lib/hermes/dashboard.ts'
 import type { RoomView } from '../rooms/view.ts'
-import { buildDeck, leftLabel, orderDeck, skip, startAt } from './deck.ts'
+import { buildDeck, leftLabel, orderDeck, startAt, turn } from './deck.ts'
 import type { InboxEntry } from './derive.ts'
 
 const entry = (key: string, profile: string): InboxEntry => ({ key, profile, kind: 'approval', summary: 'Run a command', inline: true })
@@ -31,15 +31,31 @@ describe('Needs-you deck', () => {
     assert.equal(buildDeck({ entries: [], waitingBots: ['courier'], held: {}, rooms: [], nowS: 1 }).length, 0)
   })
 
-  it('moves skipped cards to the back, earliest skipped first', () => {
+  it('turns like a ring: up for the next card, down for the one before', () => {
     const deck = buildDeck({ entries: [entry('a', 'x'), entry('b', 'x'), entry('c', 'x')], waitingBots: [], held: {}, rooms: [], nowS: 1 })
-    let skipped = skip([], 'a')
-    skipped = skip(skipped, 'b')
+    const keys = (skipped: string[]) => orderDeck(deck, skipped).map(card => card.key)
 
-    assert.deepEqual(orderDeck(deck, skipped).map(card => card.key), ['c', 'a', 'b'])
+    let skipped = turn(deck, 'next')
+    assert.deepEqual(keys(skipped), ['b', 'c', 'a'])
 
-    skipped = skip(skipped, 'a')
-    assert.deepEqual(orderDeck(deck, skipped).map(card => card.key), ['c', 'b', 'a'], 'skipping again sends it to the very back')
+    skipped = turn(orderDeck(deck, skipped), 'next')
+    assert.deepEqual(keys(skipped), ['c', 'a', 'b'])
+
+    skipped = turn(orderDeck(deck, skipped), 'previous')
+    assert.deepEqual(keys(skipped), ['b', 'c', 'a'], 'back to the card before')
+
+    assert.deepEqual(keys(turn(deck, 'previous')), ['c', 'a', 'b'], 'the bottom card comes up from the start too')
+    assert.deepEqual(keys(turn(deck, 'next', 2)), ['c', 'a', 'b'], 'a card tapped behind the top one comes up')
+    assert.deepEqual(keys(turn(deck, 'next', 3)), ['a', 'b', 'c'], 'all the way round')
+    assert.deepEqual(turn(deck.slice(0, 1), 'next'), [], 'one card has nowhere to go')
+  })
+
+  it('keeps a new card among the cards not yet turned past', () => {
+    const deck = buildDeck({ entries: [entry('a', 'x'), entry('b', 'x')], waitingBots: [], held: {}, rooms: [], nowS: 1 })
+    const skipped = turn(deck, 'next')
+    const grown = buildDeck({ entries: [entry('a', 'x'), entry('b', 'x'), entry('c', 'x')], waitingBots: [], held: {}, rooms: [], nowS: 1 })
+
+    assert.deepEqual(orderDeck(grown, skipped).map(card => card.key), ['b', 'c', 'a'])
   })
 
   it('forgets skips for cards that are gone', () => {

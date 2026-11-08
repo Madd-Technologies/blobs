@@ -111,7 +111,7 @@ export default function ServerPlugins() {
         }
       >
         <T variant="secondary" color="text2" style={styles.note}>
-          Parts of HermesBot that run on your Hermes server. Each is a Hermes plugin your bot can install for you.
+          Optional extras for Blobs that run on your Hermes server. The app works without them; each is a Hermes plugin your bot can install for you.
         </T>
         {SERVER_PLUGINS.map(plugin => (
           <PluginBlock key={plugin.name} plugin={plugin} />

@@ -101,6 +101,19 @@ describe('buildBotViews', () => {
     assert.equal(plain?.preview, 'Working…')
   })
 
+  it('a working bot keeps its place: Home sorts by when you last talked, not by it being busy', () => {
+    const visible = { forge: { stamp: '5:0', ts: NOW - 600, text: 'Done.', yours: NOW - 3600 } }
+    const [view] = buildBotViews({ roster: [bot('forge', 5)], attention: { forge: { state: 'working', unread: false } }, inbox: new Map(), sessions: {}, now: NOW, visible })
+    assert.equal(view?.age, 'now')
+    assert.equal(view?.lastActive, NOW - 3600)
+  })
+
+  it('a bot background work woke last shows that line, but sorts by your last exchange with it', () => {
+    const visible = { forge: { stamp: '5:0', ts: NOW - 60, text: 'The deploy finished.', yours: NOW - 3600 } }
+    const [view] = buildBotViews({ roster: [bot('forge', 5)], attention: {}, inbox: new Map(), sessions: {}, now: NOW, visible })
+    assert.deepEqual([view?.preview, view?.age, view?.lastActive], ['The deploy finished.', '1m', NOW - 3600])
+  })
+
   it('a message from another bot names the sender', () => {
     const row = bot('forge', 5, { canonical_session: { id: 'f', last_active: 5, preview: "Message from 🤖 scout (@scout): found it" } })
     const [view] = buildBotViews({ roster: [row], attention: { forge: idle }, inbox: new Map(), sessions: {}, now: NOW })

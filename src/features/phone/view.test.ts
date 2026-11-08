@@ -4,6 +4,10 @@ import { describe, it } from 'node:test'
 import type { Call, Errand } from '../../lib/hermes/phone.ts'
 import {
   addNumber,
+  askSummary,
+  isApproval,
+  joinedRows,
+  whoHasLine,
   approveEdits,
   callingErrand,
   errandsForChat,
@@ -288,7 +292,7 @@ describe('settings', () => {
 
     assert.deepEqual(phonePluginLine(ready), { detail: 'Line ending …09, in the test stage: calls go only to your test numbers.', needsSetup: false })
     assert.match(phonePluginLine({ ...ready, stage: 'live' }).detail, /live: approved calls go to the numbers a brief names/)
-    assert.match(phonePluginLine({ ...ready, line: { set: false, number: '' }, public_url: false }).detail, /^No Twilio line yet/)
+    assert.match(phonePluginLine({ ...ready, line: { set: false, number: '' }, public_url: false }).detail, /^No Twilio line yet: .*HERMES_PHONE_TWILIO_ACCOUNT_SID/)
     assert.match(phonePluginLine({ ...ready, public_url: false, service: { running: false, live: 0 } }).detail, /^No public address yet/)
     assert.equal(phonePluginLine({ ...ready, service: { running: false, live: 0 } }).needsSetup, true)
   })
@@ -389,5 +393,68 @@ describe('the opening line', () => {
     assert.equal(openerProblem('Hi, I’m calling for {name}.'), null)
     assert.equal(openerProblem(`${'word '.repeat(39)}word`), null)
     assert.match(openerProblem('x'.repeat(201)) ?? '', /200 characters \(201 now\)/)
+  })
+})
+
+describe('questions and approvals on a call (hermes-phone 0.2)', () => {
+  const asked = { id: 'a1', text: 'Which day?', choices: ['Monday', 'Tuesday'], asked: 1_000, answer: null }
+
+  it('counts down to the deadline the server set, a minute without one', () => {
+    const longer = openQuestion(call({ status: 'live', question: { ...asked, kind: 'question', deadline: 1_180 } }), 1_030)
+    assert.deepEqual([longer?.left, longer?.of], [150, 180])
+    const old = openQuestion(call({ status: 'live', question: { text: 'Is the lid exposed?', asked: 1_000, answer: null } }), 1_030)
+    assert.deepEqual([old?.left, old?.of], [30, 60])
+  })
+
+  it('an answered approval waits on nothing', () => {
+    assert.equal(openQuestion(call({ status: 'live', question: { ...asked, kind: 'approval', approved: false } }), 1_010), null)
+  })
+
+  it('says what it waits on, and the call line says so', () => {
+    const approval = call({ status: 'live', started: 900, question: { ...asked, kind: 'approval', text: '8 pm instead of 7 pm', choices: [] } })
+    assert.equal(isApproval(approval.question), true)
+    assert.equal(askSummary(approval), 'Bayside Septic Service: 8 pm instead of 7 pm. Allow it?')
+    assert.equal(askSummary(call({ question: { ...asked, kind: 'question' } })), 'Bayside Septic Service asks: Which day?')
+    assert.match(callLine(approval, 1_010).status, /^needs your OK · 0:50$/)
+    assert.equal(callLine(call({ status: 'live', started: 900, mode: 'owner' }), 960).status, 'you’re on · 1:00')
+  })
+
+  it('reports approvals, joining and handing back', () => {
+    const done = call({
+      status: 'done',
+      started: 1_000,
+      answers: [
+        { question: '8 pm instead of 7 pm', answer: 'Allowed', asked: 1_030, kind: 'approval', how: 'allowed' },
+        { question: 'Which day?', answer: null, asked: 1_060, kind: 'question', how: 'joined' },
+      ],
+      log: [
+        { t: 1_050, what: 'listen' },
+        { t: 1_070, what: 'took_over' },
+        { t: 1_130, what: 'handed_back', text: 'Thursday works.' },
+      ],
+    })
+    const rows = duringCall(done)
+    assert.deepEqual(rows[0], { label: 'Needed your OK at 0:30 · you allowed it', text: '“8 pm instead of 7 pm”' })
+    assert.deepEqual(rows[1], { label: 'They asked at 1:00 · you joined the call', text: '“Which day?”' })
+    assert.deepEqual(rows[2], { label: 'You on the call', text: 'You listened in at 0:50, took over at 1:10, handed back at 2:10.' })
+    assert.deepEqual(rows[3], { label: 'Your note to the voice', text: '“Thursday works.”' })
+    assert.deepEqual(joinedRows({ log: [{ t: 1_100, what: 'dropped' }], started: 1_000 }), [{ label: 'You on the call', text: 'You lost the line at 1:40 (the voice took the call back).' }])
+  })
+
+  it('says the voice’s new notes plainly, and lines from your turn as both of you', () => {
+    assert.equal(quietNote('[asked Alex to allow: 8 pm instead of 7 pm]', 'Alex'), 'Asked for your OK: 8 pm instead of 7 pm')
+    assert.equal(quietNote('[Alex allowed: 8 pm instead of 7 pm]', 'Alex'), 'You allowed: 8 pm instead of 7 pm')
+    assert.equal(quietNote('[Alex said no to: 8 pm]', 'Alex'), 'You said no to: 8 pm')
+    assert.equal(quietNote('[Alex joined the call]', 'Alex'), 'You joined the call')
+    assert.equal(quietNote('[Alex handed the call back]', 'Alex'), 'You handed the call back')
+    assert.equal(quietNote('[the line to Alex dropped]', 'Alex'), 'Your line dropped; the voice took the call back')
+    const lines = transcriptLines(call({ transcript: [{ who: 'line', text: 'Thursday at nine works.', t: 70 }] }), 'Alex')
+    assert.deepEqual(lines[0], { kind: 'them', who: 'Bayside Septic and you', at: '1:10', text: 'Thursday at nine works.' })
+  })
+
+  it('says who has the line', () => {
+    assert.equal(whoHasLine('owner', true), 'You’re on the line')
+    assert.equal(whoHasLine('checking', false), 'They’re on a short hold while the voice checks with you')
+    assert.equal(whoHasLine(undefined, true), 'Listening · the voice is talking for you')
   })
 })

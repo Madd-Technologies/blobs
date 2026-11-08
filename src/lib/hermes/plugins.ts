@@ -135,17 +135,17 @@ export async function getDriveStatus(config: ServerConfig): Promise<DriveStatus 
 }
 
 /**
- * What each bot in a room is doing right now (hermes-bot-mobile's room activity), by member id; null when the server
- * has no such route (an older plugin, or none).
+ * What each bot in a room is doing right now (hermes-bot-mobile's room activity), by member id; 'absent' when the server
+ * has no such route (an older plugin, or none), so the room can stop asking.
  */
-export async function getRoomActivity(config: ServerConfig, roomId: string): Promise<Record<string, MemberActivity> | null> {
+export async function getRoomActivity(config: ServerConfig, roomId: string): Promise<Record<string, MemberActivity> | null | 'absent'> {
   try {
     const answer = await restJson<{ members?: Record<string, MemberActivity> }>(config, `/api/plugins/hermes-bot-mobile/rooms/${encodeURIComponent(roomId)}/activity`, {}, { timeoutMs: 8000 })
 
     return answer && typeof answer.members === 'object' && answer.members ? answer.members : null
   } catch (error) {
     if (isAbsent(error)) {
-      return null
+      return 'absent'
     }
 
     throw error

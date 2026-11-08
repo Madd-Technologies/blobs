@@ -8,6 +8,7 @@
  * (`/runs-on/check`): the private key never reaches the phone.
  */
 
+import { isAbsent } from './plugins.ts'
 import { HermesHttpError, restJson, type ServerConfig } from './server.ts'
 
 const qs = (profile: string) => `?profile=${encodeURIComponent(profile)}`
@@ -200,7 +201,7 @@ export async function runsOnKey(config: ServerConfig, profile: string): Promise<
   try {
     return await restJson<RunsOnKey>(config, `${PLUGIN}/key${qs(profile)}`)
   } catch (error) {
-    if (error instanceof HermesHttpError && error.status === 404 && !error.message.includes('No bot called')) {
+    if (isAbsent(error) && !(error instanceof HermesHttpError && error.message.includes('No bot called'))) {
       return null
     }
 

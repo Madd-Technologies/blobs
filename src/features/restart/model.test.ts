@@ -31,8 +31,8 @@ describe('the Settings row', () => {
   })
 
   it('says which plugin loads after a restart, in text color', () => {
-    const view = row({ waiting: { title: 'HermesBot', version: '0.1.7' } })
-    assert.equal(view.line, 'HermesBot 0.1.7 loads after a restart')
+    const view = row({ waiting: { title: 'Blobs plugin', version: '0.1.7' } })
+    assert.equal(view.line, 'Blobs plugin 0.1.7 loads after a restart')
     assert.equal(view.tone, 'text')
   })
 
@@ -69,8 +69,9 @@ describe('the Settings row', () => {
     assert.deepEqual([view.line, view.opens], ['This computer does not run systemd.', null])
   })
 
-  it('sends you to Server plugins when the plugin is too old to restart', () => {
-    assert.deepEqual(row({ status: null }), { line: 'Needs HermesBot 0.1.7 on the server', tone: 'quiet', spinner: false, action: 'update', opens: 'plugins' })
+  it('offers Hermes’s own gateway restart when the server has no restart plugin', () => {
+    // Never a prompt to install or update anything: the plugin is optional.
+    assert.deepEqual(row({ status: null }), { line: 'The gateway: messaging and routines', tone: 'quiet', spinner: false, opens: 'sheet' })
   })
 
   it('mentions a restart that failed', () => {
@@ -81,9 +82,9 @@ describe('the Settings row', () => {
 
 describe('the sheet', () => {
   it('chooses Both while a plugin waits to load and the gateway can restart, else the dashboard', () => {
-    assert.equal(defaultChoice(status(), { title: 'HermesBot', version: '0.1.7' }), 'both')
+    assert.equal(defaultChoice(status(), { title: 'Blobs plugin', version: '0.1.7' }), 'both')
     assert.equal(defaultChoice(status(), null), 'dashboard')
-    assert.equal(defaultChoice(status({ gateway: { route: false, restart: 'cli', same_unit: null } }), { title: 'HermesBot', version: null }), 'dashboard')
+    assert.equal(defaultChoice(status({ gateway: { route: false, restart: 'cli', same_unit: null } }), { title: 'Blobs plugin', version: null }), 'dashboard')
   })
 
   it('names what each busy chat is doing', () => {

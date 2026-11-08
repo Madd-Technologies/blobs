@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
 import { create } from 'zustand'
 
-import { buildRoomViews, type RoomData, type RoomView } from '@/features/rooms/view'
+import { buildRoomViews, roomNeedsRead, type RoomData, type RoomView } from '@/features/rooms/view'
 import { describeError, type ClarifyAnswer, type RespondResult } from '@/features/sessions/store'
-import type { ActiveSessionRow, HostedRoom, RoomMember, RoomPendingAction } from '@/lib/hermes/protocol'
+import type { ActiveSessionRow, HostedRoom, RoomLogPage, RoomMember, RoomPendingAction } from '@/lib/hermes/protocol'
 import {
   approveRoomAction,
   createRoom,
@@ -24,11 +24,14 @@ import {
   whoIsReplying,
   type RoomQuestion,
 } from '@/lib/hermes/rooms'
+import { absentGate } from '@/lib/absent'
+import { parseRoomLive, parseRoomsChanged, ROOM_LIVE, ROOMS_CHANGED, type RoomLive } from '@/lib/hermes/livepush'
 import { getRoomActivity } from '@/lib/hermes/plugins'
 import { call } from '@/lib/hermes/rpc'
 import { startPoller } from '@/lib/poller'
 import { useNow } from '@/lib/useNow'
-import { gateway, requests, useConnection } from '@/stores/connection'
+import { gateway, onGatewayEvent, requests, useConnection } from '@/stores/connection'
+import { pushes } from '@/stores/watch'
 
 interface RoomsState {
   /** Whether the server can run rooms (its worker is up). Null until asked. */
@@ -38,7 +41,10 @@ interface RoomsState {
   loaded: boolean
   error: string | null
   refresh: () => Promise<void>
-  refreshRoom: (id: string) => Promise<void>
+  /** Reads one room again; `moved` when the server already said it moved (no need to look for anything new first). */
+  refreshRoom: (id: string, moved?: boolean) => Promise<void>
+  /** Each watched room's members' turns as they stream (hermes-bot-mobile 0.2+), for the room screen. */
+  live: Record<string, RoomLive | undefined>
 }
 
 /** On the first look at a room, start this far back from its newest event instead of replaying everything. */
@@ -48,6 +54,26 @@ const FIRST_LOOK = 60
 const roomSessions = new Map<string, Record<string, string[] | undefined>>()
 const lookedFor = new Map<string, number>()
 const LOOK_AGAIN_MS = 15_000
+/** Room activity comes from hermes-bot-mobile, which is optional: without it the room asks only now and then. */
+const activityPlugin = absentGate()
+
+/** What each busy bot is doing, or `fallback` when the server can't say right now; null without the plugin. */
+async function readActivity(roomId: string, fallback: RoomData['activity'] | null) {
+  const config = useConnection.getState().config
+
+  if (!config || !activityPlugin.due()) {
+    return null
+  }
+
+  try {
+    const answer = await getRoomActivity(config, roomId)
+    activityPlugin.seen(answer !== 'absent')
+
+    return answer === 'absent' ? null : answer
+  } catch {
+    return fallback
+  }
+}
 
 /**
  * The hidden session each member answers this room in (`Group: <room id>`, made on its first turn there). A member on another
@@ -136,11 +162,12 @@ async function claimQuestions(room: HostedRoom, sessions: Record<string, string[
  * first: a copy fetched earlier would not say whether anything new has been logged since. While the room works, also which
  * bots are replying.
  */
-async function syncRoom(room: HostedRoom, previous: RoomData | undefined): Promise<RoomData> {
+async function syncRoom(room: HostedRoom, previous: RoomData | undefined, read?: RoomLogPage): Promise<RoomData> {
   const state = await roomState(gateway, room.room_id)
   const latest = state.room.latest_seq ?? 0
   const since = previous && previous.cursor > 0 ? previous.cursor : Math.max(0, latest - FIRST_LOOK)
-  const page = !previous || latest > previous.cursor ? await readLog(gateway, room.room_id, since) : null
+  // A log page read just before (the open room's check for anything new) is used rather than read again.
+  const page = read?.events.length ? read : !previous || latest > previous.cursor ? await readLog(gateway, room.room_id, since) : null
   const events = page ? mergeEvents(previous?.events ?? [], page.events) : (previous?.events ?? [])
   const status = state.driver_status ?? null
   // Members' sessions and the server's live ones, while a member is mid-turn: who is replying, and who is waiting on you.
@@ -151,8 +178,7 @@ async function syncRoom(room: HostedRoom, previous: RoomData | undefined): Promi
   const questions = members && liveRows ? await claimQuestions(state.room, members, liveRows) : []
   const sameReplying = (previous?.replying ?? []).join() === replying.join()
   // What each busy bot is doing (hermes-bot-mobile's room activity), asked only while the room works.
-  const config = useConnection.getState().config
-  const activity = status?.working && config ? currentActivity(await getRoomActivity(config, state.room.room_id).catch(() => previous?.activity ?? null), replying, events) : null
+  const activity = status?.working ? currentActivity(await readActivity(state.room.room_id, previous?.activity ?? null), replying, events) : null
   const found = Object.values(roomSessions.get(state.room.room_id) ?? {}).flatMap(ids => ids ?? [])
   const sessions = previous?.sessions && previous.sessions.join() === found.join() ? previous.sessions : found
   const unchanged =
@@ -181,8 +207,12 @@ function staler(data: RoomData, held: RoomData | undefined): boolean {
   return !!held && data.room.room_id === held.room.room_id && data.cursor < held.cursor
 }
 
+/** How long a server without a rooms worker is left before asking again whether it has one. */
+const AVAILABILITY_RECHECK_MS = 5 * 60_000
+
 export const useRooms = create<RoomsState>((set, get) => {
   let busy = false
+  let availabilityCheckedAt = 0
 
   const put = (id: string, data: RoomData) => {
     const current = get().rooms[id]
@@ -200,6 +230,7 @@ export const useRooms = create<RoomsState>((set, get) => {
     rooms: {},
     loaded: false,
     error: null,
+    live: {},
 
     refresh: async () => {
       if (busy || useConnection.getState().status !== 'online') {
@@ -209,7 +240,8 @@ export const useRooms = create<RoomsState>((set, get) => {
       busy = true
 
       try {
-        if (get().available !== true) {
+        if (get().available === null || (get().available === false && Date.now() - availabilityCheckedAt >= AVAILABILITY_RECHECK_MS)) {
+          availabilityCheckedAt = Date.now()
           set({ available: await roomsAvailable(gateway) })
         }
 
@@ -223,6 +255,11 @@ export const useRooms = create<RoomsState>((set, get) => {
         const known = get().rooms
         const results = await Promise.all(
           listed.map(async room => {
+            // Read in full only a room that moved (or is replying): the list alone says enough about the others.
+            if (!roomNeedsRead(room, known[room.room_id])) {
+              return [room.room_id, known[room.room_id]] as const
+            }
+
             try {
               return [room.room_id, await syncRoom(room, known[room.room_id])] as const
             } catch {
@@ -252,7 +289,7 @@ export const useRooms = create<RoomsState>((set, get) => {
       }
     },
 
-    refreshRoom: async id => {
+    refreshRoom: async (id, moved = false) => {
       const current = get().rooms[id]
 
       if (!current || reading.has(id) || useConnection.getState().status !== 'online') {
@@ -262,7 +299,20 @@ export const useRooms = create<RoomsState>((set, get) => {
       reading.add(id)
 
       try {
-        put(id, await syncRoom(current.room, current))
+        if (moved) {
+          put(id, await syncRoom(current.room, current))
+
+          return
+        }
+
+        // Anything new in its log first: an idle room with nothing new needs no state read (the slow part).
+        const read = await readLog(gateway, id, current.cursor, 1)
+
+        if (!read.events.length && !current.status?.working && !current.status?.blocked && (read.latest_seq ?? 0) <= current.cursor) {
+          return
+        }
+
+        put(id, await syncRoom(current.room, current, read))
       } catch {
         // The next poll tries again; the screen keeps what it has.
       } finally {
@@ -272,24 +322,73 @@ export const useRooms = create<RoomsState>((set, get) => {
   }
 })
 
-/** Polls every room every 5 s in the foreground, so Home shows who said what and which room needs you. */
+/**
+ * Keeps the rooms current, so Home shows who said what and which room needs you: the server pushes which rooms moved
+ * (hermes-bot-mobile 0.2+) and only those are read, with a safety read of the list every minute; without the push the list is
+ * read every 10 s. A room is read in full only when it moved (roomNeedsRead). The rooms on screen also get their members'
+ * turns as they stream.
+ */
 export function startRoomsSync(): () => void {
-  const stopPoll = startPoller(() => void useRooms.getState().refresh(), 5_000, () => useConnection.getState().status === 'online')
+  const stopPoll = startPoller(() => void useRooms.getState().refresh(), () => (pushes('roomsChanged') ? 60_000 : 10_000), () => useConnection.getState().status === 'online')
+  const stopEvents = onGatewayEvent(event => {
+    const type = event.type as string
+
+    if (type === ROOM_LIVE) {
+      const live = parseRoomLive(event.payload)
+
+      if (live) {
+        useRooms.setState(state => ({ live: { ...state.live, [live.room_id]: live } }))
+      }
+
+      return
+    }
+
+    if (type !== ROOMS_CHANGED) {
+      return
+    }
+
+    const marks = parseRoomsChanged(event.payload)
+
+    if (!marks) {
+      return
+    }
+
+    const store = useRooms.getState()
+    const known = store.rooms
+
+    // A new room (or one gone) needs the list for its name and members; the others are read only if they moved.
+    if (Object.keys(marks).some(id => !known[id] && !disbanded.has(id)) || Object.keys(known).some(id => !(id in marks))) {
+      void store.refresh()
+
+      return
+    }
+
+    for (const [id, mark] of Object.entries(marks)) {
+      if (roomNeedsRead(mark, known[id])) {
+        void store.refreshRoom(id, true)
+      }
+    }
+  })
   const stopConnection = useConnection.subscribe((state, previous) => {
     if (state.status === 'online' && previous.status !== 'online') {
+      activityPlugin.reset()
       void useRooms.getState().refresh()
     }
   })
 
   return () => {
     stopPoll()
+    stopEvents()
     stopConnection()
   }
 }
 
-/** One room, polled every 2 s while its screen is open (and the app is in front). */
+/**
+ * One room while its screen is open (and the app is in front): every 2 s, or a safety check every 15 s when the server pushes
+ * the room's changes and its members' turns as they stream.
+ */
 export function startRoomPoll(id: string): () => void {
-  return startPoller(() => void useRooms.getState().refreshRoom(id), 2_000, () => useConnection.getState().status === 'online')
+  return startPoller(() => void useRooms.getState().refreshRoom(id), () => (pushes('roomsChanged') && pushes('roomLive') ? 15_000 : 2_000), () => useConnection.getState().status === 'online')
 }
 
 /** Every room as a row, newest first. */

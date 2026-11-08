@@ -71,10 +71,13 @@ const DOCUMENT_EXT = 'pdf|md|markdown|txt|log|csv|tsv|json|html?|ya?ml|toml|py|s
  * An absolute path to a document, written out in a reply (`/home/orion/reports/q3.pdf`): not part of a longer word or a URL, no
  * spaces, possibly in backticks, quotes or a link.
  */
-const STATED_DOCUMENT = new RegExp(String.raw`(?<![\w:/.~-])(/(?:[^\s\`"'<>()\[\]{}*]+/)*[^\s\`"'<>()\[\]{}*/]+\.(?:${DOCUMENT_EXT}))(?![\w/-])`, 'gi')
+const STATED_DOCUMENT = new RegExp(String.raw`(?<![\w:/.~-])(/(?:[^\s\`"'<>()\[\]{}*/]+/)*[^\s\`"'<>()\[\]{}*/]+\.(?:${DOCUMENT_EXT}))(?![\w/-])`, 'gi')
 
 /** The most document tiles drawn under one reply. */
 const MAX_DOCUMENTS = 4
+
+/** A line longer than this is data (a pasted blob), never a path: it is not scanned. The same bound as `MAX_SCAN_LINE` in media.ts. */
+const MAX_SCAN_LINE = 2000
 
 const FENCE = /^\s*(```|~~~)/
 
@@ -101,11 +104,18 @@ function outsideCode(text: string): string {
 export function documentPaths(text: string): string[] {
   const found: string[] = []
 
-  for (const match of outsideCode(text).matchAll(STATED_DOCUMENT)) {
-    const path = match[1] as string
+  // Line by line, skipping a line too long to be a path (pasted data); a folder has no slash of its own, as in media.ts.
+  for (const line of outsideCode(text).split('\n')) {
+    if (line.length > MAX_SCAN_LINE) {
+      continue
+    }
 
-    if (!found.includes(path) && found.length < MAX_DOCUMENTS) {
-      found.push(path)
+    for (const match of line.matchAll(STATED_DOCUMENT)) {
+      const path = match[1] as string
+
+      if (!found.includes(path) && found.length < MAX_DOCUMENTS) {
+        found.push(path)
+      }
     }
   }
 

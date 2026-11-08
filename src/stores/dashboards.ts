@@ -2,11 +2,14 @@ import { create } from 'zustand'
 
 import { dashboardRoutines, refreshedSince } from '@/features/dashboard/view'
 import { describeError } from '@/features/sessions/store'
+import { absentGate } from '@/lib/absent'
 import { listCronJobs, triggerCronJob, type CronJob } from '@/lib/hermes/cron'
-import { addRecordNote, changeRecord, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
+import { addRecordNote, changeRecord, DraftChanged, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
+import { DASHBOARD_CHANGED, parseDashboardChanged } from '@/lib/hermes/livepush'
 import { startPoller } from '@/lib/poller'
-import { useConnection } from '@/stores/connection'
+import { onGatewayEvent, useConnection } from '@/stores/connection'
 import { sessions } from '@/stores/sessions'
+import { isShown, pushes } from '@/stores/watch'
 
 export interface BotBoard {
   dashboard: BotDashboard | null
@@ -28,6 +31,8 @@ interface DashboardsState {
   keepers: Record<string, CronJob[] | undefined>
   /** Bots whose dashboard routines were started with "Check now" and have not written yet. */
   checking: Record<string, true>
+  /** Each bot's dashboard version as the server last pushed it (hermes-dashboard 0.7+): an open record reloads when it moves. */
+  pushed: Record<string, string>
   refreshSummary: () => Promise<void>
   /** Re-reads a bot's dashboard (only what changed comes back); `fresh` reads its live panels' sources now. */
   load: (profile: string, options?: { fresh?: boolean }) => Promise<void>
@@ -42,6 +47,11 @@ interface DashboardsState {
   mute: (profile: string, id: string, until: number | null) => Promise<string | null>
   /** You pressed a record's button: a fresh side chat with the bot gets the job (and is then the chat the bot shows). */
   press: (profile: string, id: string, action: string) => Promise<string | null>
+  /**
+   * You approved a draft and pressed its button: like `press`, carrying the draft's digest as you saw it. `{ changed }` (its
+   * digest now) when it changed since: nothing was sent, and the record is read again for you to look at.
+   */
+  approve: (profile: string, id: string, action: string, digest: string) => Promise<string | null | { changed: string }>
   /** Runs the routines that keep this dashboard now. Returns how many started, or an error. */
   checkNow: (profile: string) => Promise<{ started: number } | { error: string }>
   /** A panel's "Refresh now" / "Check now": a live panel reads its source now, a panel with a recorded job runs that job,
@@ -55,6 +65,9 @@ const empty: BotBoard = { dashboard: null, loaded: false, error: null }
 /** After "Check now": read the dashboard this often, for at most this long (a routine that reads a whole inbox can take several minutes). */
 const WATCH_EVERY_MS = 5_000
 const WATCH_MS = 10 * 60_000
+
+/** hermes-dashboard is optional: once the server is found without it, the timers ask only now and then. */
+const plugin = absentGate()
 
 export const useDashboards = create<DashboardsState>((set, get) => {
   let summaryBusy = false
@@ -111,11 +124,12 @@ export const useDashboards = create<DashboardsState>((set, get) => {
     needsYou: {},
     keepers: {},
     checking: {},
+    pushed: {},
 
     refreshSummary: async () => {
       const current = config()
 
-      if (!current || summaryBusy) {
+      if (!current || summaryBusy || !plugin.due()) {
         return
       }
 
@@ -123,6 +137,7 @@ export const useDashboards = create<DashboardsState>((set, get) => {
 
       try {
         const answer = await getDashboardsSummary(current)
+        plugin.seen(!!answer)
         set(answer ? { available: true, summary: answer.bots } : { available: false, summary: {} })
       } catch {
         // The next poll tries again; what is shown stays.
@@ -135,6 +150,15 @@ export const useDashboards = create<DashboardsState>((set, get) => {
       const current = config()
 
       if (!current || (loading.has(profile) && !options.fresh)) {
+        return
+      }
+
+      if (!plugin.due() && !options.fresh) {
+        // The server has no dashboards plugin: the screen says so without asking again every few seconds.
+        if (!get().byBot[profile]?.loaded) {
+          set(state => ({ available: false, byBot: { ...state.byBot, [profile]: { ...empty, loaded: true } } }))
+        }
+
         return
       }
 
@@ -153,6 +177,7 @@ export const useDashboards = create<DashboardsState>((set, get) => {
           return
         }
 
+        plugin.seen(!!dashboard)
         set(state => (dashboard ? { available: true, byBot: { ...state.byBot, [profile]: { dashboard, loaded: true, error: null } } } : { available: false, byBot: { ...state.byBot, [profile]: { ...empty, loaded: true } } }))
       } catch (error) {
         const old = error instanceof OldDashboardPlugin
@@ -237,6 +262,38 @@ export const useDashboards = create<DashboardsState>((set, get) => {
       }
     },
 
+    approve: async (profile, id, action, digest) => {
+      const current = config()
+
+      if (!current) {
+        return 'Not connected to the server.'
+      }
+
+      const failed = await sessions.newChat(profile)
+
+      if (failed) {
+        return failed
+      }
+
+      try {
+        const { message } = await pressAction(current, id, action, sessions.store.getState().chosen[profile] ?? null, digest)
+        const sent = await sessions.send(profile, message)
+        void after(profile, id)
+
+        return sent ? null : 'The side chat didn’t take the job. Open it and try again.'
+      } catch (error) {
+        if (error instanceof DraftChanged) {
+          // Nothing started: leave the fresh side chat and show the new version.
+          void sessions.leaveSide(profile)
+          await get().loadRecord(id)
+
+          return { changed: error.current }
+        }
+
+        return describeError(error)
+      }
+    },
+
     checkNow: async profile => {
       const current = config()
 
@@ -313,14 +370,49 @@ export const useDashboards = create<DashboardsState>((set, get) => {
       }
     },
 
-    reset: () => set({ available: null, summary: {}, byBot: {}, records: {}, needsYou: {}, keepers: {}, checking: {} }),
+    reset: () => {
+      plugin.reset()
+      set({ available: null, summary: {}, byBot: {}, records: {}, needsYou: {}, keepers: {}, checking: {}, pushed: {} })
+    },
   }
 })
 
-/** Asks every 30 s in the foreground how many things wait on each bot's dashboard, for the dots on Home. */
+/**
+ * Keeps each bot's dashboard summary current for the dots on Home: pushed by the server when anything on a dashboard moves
+ * (hermes-dashboard 0.7+), which also reloads a dashboard that is on screen; otherwise asked every 30 s in the foreground.
+ * With the push, the ask is a safety check every 2 minutes.
+ */
 export function startDashboardsSync(): () => void {
   const online = () => useConnection.getState().status === 'online'
-  const stopPoll = startPoller(() => void useDashboards.getState().refreshSummary(), 30_000, online)
+  const stopPoll = startPoller(() => void useDashboards.getState().refreshSummary(), () => (pushes('dashboardChanged') ? 120_000 : 30_000), online)
+  const stopEvents = onGatewayEvent(event => {
+    if ((event.type as string) !== DASHBOARD_CHANGED) {
+      return
+    }
+
+    const change = parseDashboardChanged(event.payload)
+
+    if (!change) {
+      return
+    }
+
+    const store = useDashboards.getState()
+
+    if (change.summary && JSON.stringify(change.summary) !== JSON.stringify(store.summary)) {
+      useDashboards.setState({ available: true, summary: change.summary })
+    }
+
+    if (Object.keys(change.versions).length) {
+      useDashboards.setState(state => ({ pushed: { ...state.pushed, ...change.versions } }))
+    }
+
+    for (const [bot, version] of Object.entries(change.versions)) {
+      // Only what is on screen loads now; a dashboard opened later loads then.
+      if (isShown('dashboards', bot) && store.byBot[bot]?.dashboard?.version !== version) {
+        void store.load(bot)
+      }
+    }
+  })
   const stopConnection = useConnection.subscribe((state, previous) => {
     // Another server: nothing of the last one's dashboards applies.
     if (state.config?.baseUrl !== previous.config?.baseUrl) {
@@ -328,23 +420,26 @@ export function startDashboardsSync(): () => void {
     }
 
     if (state.status === 'online' && previous.status !== 'online') {
+      // Connected (or back after a restart, maybe with the plugin now installed): ask at once.
+      plugin.reset()
       void useDashboards.getState().refreshSummary()
     }
   })
 
   return () => {
     stopPoll()
+    stopEvents()
     stopConnection()
   }
 }
 
 /**
- * One bot's dashboard, asked about every 5 s while it is on screen (and the app is in front). Each ask sends the version it
- * has, so the server answers "unchanged" without computing anything unless something moved, and live panels re-read their
- * sources only when their short cache has run out.
+ * One bot's dashboard while it is on screen (and the app is in front): read when it opens, then pushed by the server when it
+ * changes (hermes-dashboard 0.7+, with a safety check every minute), or asked about every 5 s without the push. Each ask sends
+ * the version it has, so the server answers "unchanged" without computing anything unless something moved.
  */
 export function startDashboardPoll(profile: string): () => void {
-  return startPoller(() => void useDashboards.getState().load(profile), 5_000, () => useConnection.getState().status === 'online')
+  return startPoller(() => void useDashboards.getState().load(profile), () => (pushes('dashboardChanged') ? 60_000 : 5_000), () => useConnection.getState().status === 'online')
 }
 
 export function useBotBoard(profile: string): BotBoard {

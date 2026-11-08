@@ -35,6 +35,11 @@ function clock(date: Date): string {
   return `${hours % 12 || 12}:${minutes} ${hours < 12 ? 'AM' : 'PM'}`
 }
 
+/** "9:38 AM": a message's time of day, for the times a drag reveals beside each message (the date labels say the day). */
+export function timeOfDay(ms: number): string {
+  return clock(new Date(ms))
+}
+
 function startOfDay(ms: number): number {
   const date = new Date(ms)
   date.setHours(0, 0, 0, 0)

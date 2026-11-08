@@ -17,7 +17,13 @@ export interface AttentionSignals {
   hasPendingPrompt: boolean
   /** From `session.active_list`, matched to this bot. */
   activeStatus?: ActiveStatus
-  /** `worker_session.last_active` from the roster row, seconds. */
+  /**
+   * Whether the turn running in the bot's chat is yours (`VisibleActivity.lastTurnYours`): your message, or work you set going
+   * (a finished process or helper, a kanban event). False for one a routine or another bot started, which is not shown as
+   * working. Unknown (not read yet): shown as before.
+   */
+  turnByYou?: boolean
+  /** `worker_session.last_active` from the roster row, seconds: the bot working a kanban card, which counts as working. */
   workerLastActive?: number
   /** Latest activity on the bot's chat, seconds. */
   lastActive: number
@@ -55,7 +61,10 @@ export function deriveAttention(signals: AttentionSignals, context: AttentionCon
     return { state: 'needsYou', unread, reason: 'waiting' }
   }
 
-  if (signals.activeStatus === 'working' || signals.activeStatus === 'starting' || workerActive(signals.workerLastActive, context.now)) {
+  // Busy with your work only: a turn in its chat that a routine or another bot started stays out of sight.
+  const chatBusy = (signals.activeStatus === 'working' || signals.activeStatus === 'starting') && signals.turnByYou !== false
+
+  if (chatBusy || workerActive(signals.workerLastActive, context.now)) {
     return { state: 'working', unread }
   }
 

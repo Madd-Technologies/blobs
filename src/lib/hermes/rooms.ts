@@ -189,13 +189,23 @@ export function memberName(room: Pick<HostedRoom, 'members'>, memberId: string, 
   return member?.display_name || actor?.display_name || member?.profile || actor?.profile || memberId
 }
 
+/** Members who passed in a row, said in one line, and where in the timeline that line is. */
+interface PassRun {
+  at: number
+  id: string
+  names: string[]
+}
+
 /**
  * The room as a conversation, oldest first: your messages, the bots' messages (with who said it), a quiet line when
- * you stopped the room, and a red one when a bot's turn failed. Turn bookkeeping and system events are left out.
+ * you stopped the room or a bot had nothing to add, and a red one when a bot's turn failed. Other turn bookkeeping and
+ * system events are left out.
  */
 export function buildTimeline(room: Pick<HostedRoom, 'members'>, events: RoomEvent[]): TimelineItem[] {
   const items: TimelineItem[] = []
   let lastMessageTs = 0
+  // Bots that pass in a row get one line: "Orion and Juniper had nothing to add".
+  let passes = null as PassRun | null
 
   const stamp = (ts: number, seq: number) => {
     if (!lastMessageTs || ts - lastMessageTs > TIME_GAP_S) {
@@ -236,12 +246,123 @@ export function buildTimeline(room: Pick<HostedRoom, 'members'>, events: RoomEve
       const error = typeof event.payload.error === 'string' ? oneLine(event.payload.error, 140) : ''
 
       items.push({ kind: 'note', id: `e-${event.seq}`, text: `${memberName(room, memberId)} couldn’t reply`, detail: error || undefined, tone: 'danger' })
+    } else if (event.kind === 'turn.settled' && event.payload.passed === true) {
+      // Asked, with nothing to add: the server drops its "(pass)", so say so quietly, or a round that ends this way reads as a
+      // stuck room.
+      const name = memberName(room, typeof event.payload.member_id === 'string' ? event.payload.member_id : '')
+      const run: PassRun | null = passes && passes.at === items.length - 1 ? passes : null
+      const names: string[] = run ? [...new Set([...run.names, name])] : [name]
+      const item: TimelineItem = { kind: 'note', id: run?.id ?? `e-${event.seq}`, text: `${nameList(names)} had nothing to add`, tone: 'quiet' }
+
+      if (run) {
+        items[run.at] = item
+      } else {
+        items.push(item)
+      }
+
+      passes = { at: items.length - 1, id: item.id, names }
     } else if (event.kind === 'room.stop_requested') {
       items.push({ kind: 'note', id: `e-${event.seq}`, text: 'Stopped', tone: 'quiet' })
+    } else if (event.kind === 'turn.cancelled' && event.payload.reason === SUPERSEDED) {
+      // The reply was written but thrown away: only the newest message in the thread counts, and it starts the discussion over.
+      const memberId = typeof event.payload.member_id === 'string' ? event.payload.member_id : ''
+
+      items.push({ kind: 'note', id: `e-${event.seq}`, text: `${memberName(room, memberId)}’s reply was set aside for your newer message`, tone: 'quiet' })
     }
   }
 
   return items
+}
+
+/** Why the server threw a reply away: you sent a newer message while the bot was still writing it. */
+const SUPERSEDED = 'superseded_by_newer_user_event'
+
+/** The room's members a message @mentions (`@all` or `@everyone` is all of them). Member ids, in room order. */
+function askedIn(room: Pick<HostedRoom, 'members'>, text: string): string[] {
+  if (AT_EVERYONE.test(text)) {
+    return room.members.map(member => member.member_id)
+  }
+
+  const byHandle = new Map(room.members.map(member => [member.handle.toLowerCase(), member.member_id]))
+  const named = new Set(splitMentions(text, [...byHandle.keys()]).flatMap(part => (part.mention === 'member' ? [byHandle.get(part.text.slice(1).toLowerCase())] : [])))
+
+  return room.members.filter(member => named.has(member.member_id)).map(member => member.member_id)
+}
+
+/**
+ * The members a message asks to the exclusion of the rest, as Hermes reads it (`resolve_mentions`): the ones it @mentions. None
+ * when it mentions nobody or everyone, since then every member is asked. Others join only when a bot @mentions them.
+ */
+export function askedOnly(room: Pick<HostedRoom, 'members'>, text: string): string[] {
+  const asked = askedIn(room, text)
+
+  return asked.length < room.members.length ? asked : []
+}
+
+export interface PausedAsk {
+  /** The bot whose question was left hanging. */
+  askerId: string
+  /** The bots it asked that never got a turn to answer. Member ids, in room order. */
+  asked: string[]
+  /** Why the server stopped: after three rounds, or after ten bot messages for one message of yours. */
+  reason: 'max_rounds' | 'max_messages'
+}
+
+/**
+ * A bot conversation the server cut off with a question still open. The server lets bots go on for at most three rounds (and
+ * ten messages) per message of yours, and a bot @mentioned in the last round is never asked. Then the room just goes quiet
+ * until you write again. Null when the room's latest discussion ended any other way, nobody was left asked, or you have
+ * written since.
+ */
+export function pausedAsk(room: Pick<HostedRoom, 'members'>, events: RoomEvent[]): PausedAsk | null {
+  const end = events.findLastIndex(event => event.kind === 'room.activity')
+  const activity = events[end]
+
+  if (!activity || activity.payload.status !== 'bounded' || events.slice(end + 1).some(event => event.kind === 'message.user')) {
+    return null
+  }
+
+  const discussion = activity.payload.discussion_event_id
+  // Member id → who asked it. A bot that posts afterwards has answered.
+  const asked = new Map<string, string>()
+
+  for (const event of events.slice(0, end)) {
+    if (event.kind !== 'message.member' || event.payload.discussion_event_id !== discussion) {
+      continue
+    }
+
+    const author = typeof event.payload.member_id === 'string' ? event.payload.member_id : event.actor.id
+    asked.delete(author)
+
+    for (const id of askedIn(room, textOf(event))) {
+      if (id !== author) {
+        asked.set(id, author)
+      }
+    }
+  }
+
+  const open = room.members.map(member => member.member_id).filter(id => asked.has(id))
+  const last = open.at(-1)
+
+  if (!last) {
+    return null
+  }
+
+  return { askerId: asked.get(last) as string, asked: open, reason: activity.payload.reason_code === 'max_messages' ? 'max_messages' : 'max_rounds' }
+}
+
+/** "Paused after three rounds. Hermes asked Forge." */
+export function pausedLine(room: Pick<HostedRoom, 'members'>, paused: PausedAsk): string {
+  const limit = paused.reason === 'max_messages' ? 'ten bot messages' : 'three rounds'
+
+  return `Paused after ${limit}. ${memberName(room, paused.askerId)} asked ${nameList(paused.asked.map(id => memberName(room, id)))}.`
+}
+
+/** What to send so the bots left asked answer: their handles, and who asked them. */
+export function answerPausedText(room: Pick<HostedRoom, 'members'>, paused: PausedAsk): string {
+  const handles = paused.asked.map(id => `@${memberOf(room, id)?.handle ?? id}`).join(' ')
+
+  return `${handles}, ${memberName(room, paused.askerId)} asked you above.`
 }
 
 export interface RoomAttention {
@@ -313,7 +434,8 @@ function memberOfTask(events: RoomEvent[], taskId: string): string | undefined {
 /** The hidden session the server runs one member's turns of a room in (one per member and room, made on its first turn). */
 export const roomSessionTitle = (roomId: string): string => `Group: ${roomId}`
 
-const TURN_ENDS = new Set(['turn.settled', 'turn.failed', 'turn.cancelled', 'turn.deferred'])
+/** Log kinds that end a member's turn, with a message or without one. */
+export const TURN_ENDS = new Set(['turn.settled', 'turn.failed', 'turn.cancelled', 'turn.deferred'])
 const AT_EVERYONE = /(^|[^A-Za-z0-9_])@(all|everyone)(?![A-Za-z0-9_-])/i
 
 /**
@@ -387,15 +509,7 @@ export function replyingFromLog(room: Pick<HostedRoom, 'members'>, events: RoomE
   }
 
   const everyone = room.members.map(member => member.member_id)
-  const byHandle = new Map(room.members.map(member => [member.handle.toLowerCase(), member.member_id]))
-  const named = (text: string): string[] =>
-    AT_EVERYONE.test(text)
-      ? everyone
-      : splitMentions(text, [...byHandle.keys()]).flatMap(part => {
-          const id = part.mention === 'member' ? byHandle.get(part.text.slice(1).toLowerCase()) : undefined
-
-          return id ? [id] : []
-        })
+  const named = (text: string): string[] => askedIn(room, text)
   /** Member id → the index of the event that last asked it. */
   const asked = new Map<string, number>()
   const spoke = new Set<string>()
@@ -514,7 +628,7 @@ const TOOL_PHRASES: [RegExp, string][] = [
   [/^(image_generate|generate_image)$/, 'making a picture'],
   [/^(skill_view|skills_list|skill_manage)$/, 'checking its skills'],
   [/^(memory|memory_search|session_search)$/, 'checking its memory'],
-  [/^(send_message|clarify)$/, 'messaging'],
+  [/^send_message$/, 'messaging'],
   [/^(cronjob|cron)/, 'setting up a routine'],
   [/^computer_use|^screen_/, 'using its screen'],
 ]
@@ -540,7 +654,8 @@ export function toolPhrase(tool: string | null | undefined): string {
 export function activityPhrase(activity: MemberActivity | null | undefined): string {
   switch (activity?.phase) {
     case 'tool':
-      return `is ${toolPhrase(activity.tool)}`
+      // A question for the person, asked through clarify: the room shows it to answer once it reaches the app.
+      return activity.tool === 'clarify' ? 'has a question' : `is ${toolPhrase(activity.tool)}`
     case 'thinking':
       return 'is thinking'
     case 'writing':
@@ -647,7 +762,11 @@ export async function readLog(client: RpcClient, roomId: string, since: number, 
 export const sendRoomMessage = (client: RpcClient, roomId: string, text: string, id: string = newId('e')) =>
   call(client, 'groups.send', { room_id: roomId, event_id: id, payload: { text, thread_id: MAIN_THREAD } }).then(result => result.event)
 
-export const stopRoom = (client: RpcClient, roomId: string) => call(client, 'groups.stop', { room_id: roomId }).then(result => result.cancelled)
+/**
+ * Stops the room's replies. Each stop carries its own cancel id: the server names the stop's log event after it, so a
+ * repeated id (its default is one fixed id) only moves the room's stop fence the first time.
+ */
+export const stopRoom = (client: RpcClient, roomId: string, cancelId: string = newId('stop')) => call(client, 'groups.stop', { room_id: roomId, cancel_id: cancelId }).then(result => result.cancelled)
 
 export const approveRoomAction = (client: RpcClient, roomId: string, action: RoomPendingAction, choice: 'once' | 'deny') =>
   call(client, 'groups.approve', {

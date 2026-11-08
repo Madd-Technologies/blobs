@@ -41,6 +41,11 @@ export interface Step {
    * helpers (`deleg_…`). Its live state is the `Job` with this id, when the server reports it (Hermes 0.22+).
    */
   jobId?: string
+  /**
+   * Read light (hermes-bot-mobile's history): the output here is only the end of it. The id of the stored row that has it
+   * whole, fetched when the step comes near the screen (`stores/wholeRows.ts`).
+   */
+  partial?: string | number
 }
 
 /**

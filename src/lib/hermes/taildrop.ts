@@ -5,6 +5,7 @@
  */
 
 import { HermesHttpError, restJson, type ServerConfig } from './server.ts'
+import { isAbsent } from './plugins.ts'
 import { refusalOf } from './restart.ts'
 
 const ROUTE = '/api/plugins/hermes-bot-mobile/taildrop'
@@ -54,7 +55,7 @@ export async function getTaildrop(config: ServerConfig): Promise<TaildropStatus 
   try {
     return await restJson<TaildropStatus>(config, ROUTE, {}, { timeoutMs: 15_000 })
   } catch (error) {
-    if (error instanceof HermesHttpError && error.status === 404) {
+    if (isAbsent(error)) {
       return null
     }
 

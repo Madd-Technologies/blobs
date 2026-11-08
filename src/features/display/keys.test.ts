@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { chord, diffTyped, eventsForChange, eventsForTyped, KEY, keysymForChar } from './keys.ts'
+import { chord, diffTyped, eventsForChange, eventsForPaste, eventsForTyped, isLoneEnter, KEY, keysymForChar } from './keys.ts'
 
 describe('keysymForChar', () => {
   it('Latin-1 characters are their code point', () => {
@@ -119,5 +119,21 @@ describe('eventsForChange', () => {
 
   it('no change sends nothing', () => {
     assert.deepEqual(eventsForChange('x', 'x', []), { events: [], typedAny: false })
+  })
+})
+
+describe('pasting and Enter', () => {
+  it('types pasted text out, with line breaks as Enter but none at the end', () => {
+    assert.deepEqual(eventsForPaste('a\r\nb\n\n'), [{ keysym: 0x61 }, { keysym: KEY.Return }, { keysym: 0x62 }])
+    assert.deepEqual(eventsForPaste('ls -la\n'), Array.from('ls -la', char => ({ keysym: char.charCodeAt(0) })), 'a copied line does not run itself')
+    assert.deepEqual(eventsForPaste('héllo ✓').map(event => event.keysym), [0x68, 0xe9, 0x6c, 0x6c, 0x6f, 0x20, 0x01000000 + 0x2713])
+  })
+
+  it('knows the keyboard’s Enter from typed or pasted text', () => {
+    assert.equal(isLoneEnter('', '\n'), true)
+    assert.equal(isLoneEnter('abc', 'abc\n'), true)
+    assert.equal(isLoneEnter('', 'one\ntwo'), false, 'a paste with a line break is typed as it is')
+    assert.equal(isLoneEnter('abc', 'ab'), false)
+    assert.equal(isLoneEnter('ab', 'ac\n'), false)
   })
 })

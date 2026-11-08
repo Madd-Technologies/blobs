@@ -4,6 +4,7 @@
  * turn. A gateway-only restart is Hermes's own `POST /api/gateway/restart`. Pure: no React Native imports.
  */
 
+import { isAbsent } from './plugins.ts'
 import { HermesHttpError, restJson, type ServerConfig } from './server.ts'
 
 const ROUTE = '/api/plugins/hermes-bot-mobile/restart'
@@ -98,7 +99,7 @@ export async function getRestartStatus(config: ServerConfig): Promise<RestartSta
   try {
     return await restJson<RestartStatus>(config, ROUTE, {}, { timeoutMs: 10_000 })
   } catch (error) {
-    if (error instanceof HermesHttpError && error.status === 404) {
+    if (isAbsent(error)) {
       return null
     }
 

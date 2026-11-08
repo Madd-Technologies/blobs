@@ -3,7 +3,7 @@
  * results side by side, a call's transcript, and what waits on you. Pure.
  */
 
-import type { ApproveEdits, Brief, Call, CallAnswer, CallQuestion, Errand, ErrandStatus, Flag, PhoneSettings, PhoneStatus, RecordField } from '../../lib/hermes/phone.ts'
+import type { ApproveEdits, Brief, Call, CallAnswer, CallMode, CallQuestion, Errand, ErrandStatus, Flag, PhoneSettings, PhoneStatus, RecordField } from '../../lib/hermes/phone.ts'
 import type { ProbeAnswer } from '../plugins/check.ts'
 
 /** How long a live call holds a question for your answer (the service's QUESTION_WAIT_S). */
@@ -158,15 +158,51 @@ const withDuration = (text: string, call: Pick<Call, 'started' | 'ended'>) => {
   return length ? `${text} · ${length}` : text
 }
 
-/** The question a live call holds for you, with the seconds left (by the server's clock, never below 0). */
-export function openQuestion(call: Pick<Call, 'question' | 'status'>, nowS: number): (CallQuestion & { left: number }) | null {
+/**
+ * The question (or approval) a live call holds for you, with the seconds left (by the server's clock, never below 0) and the
+ * whole wait (`of`: a minute, three while you listen in).
+ */
+export function openQuestion(call: Pick<Call, 'question' | 'status'>, nowS: number): (CallQuestion & { left: number; of: number }) | null {
   const question = call.question
 
-  if (!question || question.answer || !['dialing', 'ringing', 'live'].includes(call.status)) {
+  if (!question || question.answer || typeof question.approved === 'boolean' || !['dialing', 'ringing', 'live'].includes(call.status)) {
     return null
   }
 
-  return { ...question, left: Math.max(0, Math.min(QUESTION_S, Math.round(question.asked + QUESTION_S - nowS))) }
+  const deadline = question.deadline ?? question.asked + QUESTION_S
+  const of = Math.max(1, Math.round(deadline - question.asked))
+
+  return { ...question, left: Math.max(0, Math.min(of, Math.round(deadline - nowS))), of }
+}
+
+/** An approval rather than a question. */
+export const isApproval = (question: Pick<CallQuestion, 'kind'> | null | undefined): boolean => question?.kind === 'approval'
+
+/** What a call is waiting on you for, in a line: "Pine Valley asks: Which day?" or "Pine Valley: 8 pm instead of 7. Allow it?" */
+export function askSummary(call: Pick<Call, 'name' | 'question'>): string {
+  const question = call.question
+
+  if (!question) {
+    return ''
+  }
+
+  return isApproval(question) ? `${call.name}: ${question.text}. Allow it?` : `${call.name} asks: ${question.text}`
+}
+
+/** Who has this side of a live call, said for the call's screen. */
+export function whoHasLine(mode: CallMode | '' | undefined, listening: boolean): string {
+  switch (mode) {
+    case 'owner':
+      return 'You’re on the line'
+    case 'handover':
+      return 'Putting you on the line…'
+    case 'checking':
+      return 'They’re on a short hold while the voice checks with you'
+    case 'hold':
+      return 'On hold: the voice waits quietly'
+    default:
+      return listening ? 'Listening · the voice is talking for you' : 'The voice is talking for you'
+  }
 }
 
 /** A call you hung up from the app: the service records it as a call back with this note. */
@@ -248,7 +284,11 @@ export function callLine(call: Call, nowS: number, next = false): CallLine {
       const length = call.started !== null ? clock(nowS - call.started) : ''
 
       if (question) {
-        return { icon: 'ask', status: `asks you · ${clock(question.left)}`, live: true }
+        return { icon: 'ask', status: `${isApproval(question) ? 'needs your OK' : 'asks you'} · ${clock(question.left)}`, live: true }
+      }
+
+      if (call.mode === 'owner' || call.mode === 'handover') {
+        return { icon: 'live', status: length ? `you’re on · ${length}` : 'you’re on', live: true }
       }
 
       return call.hold ? { icon: 'hold', status: length ? `on hold ${length}` : 'on hold', live: true } : { icon: 'live', status: length ? `live ${length}` : 'live', live: true }
@@ -406,13 +446,63 @@ export function yourAnswers(call: Pick<Call, 'answers' | 'question'>): CallAnswe
   return [...given, { question: pending.text, answer: pending.answer, asked: pending.asked }]
 }
 
-/** What happened during a call besides its fields: your answers, what is still open, and what they asked you to do. */
-export function duringCall(call: Pick<Call, 'answers' | 'outcome' | 'started'>): { label: string; text: string; quiet?: boolean }[] {
-  const rows: { label: string; text: string; quiet?: boolean }[] = call.answers.map(answer => {
-    const at = answer.asked !== undefined && call.started !== null ? ` at ${clock(answer.asked - call.started)}` : ''
+/** One answer on the call's report: what was asked, and what came of it. */
+function answerRow(answer: CallAnswer, started: number | null): { label: string; text: string } {
+  const at = answer.asked !== undefined && started !== null ? ` at ${clock(answer.asked - started)}` : ''
 
-    return answer.answer ? { label: `They asked · you answered${at}`, text: `“${answer.question}” “${answer.answer}”` } : { label: `They asked${at} · no answer in time`, text: `“${answer.question}”` }
-  })
+  if (answer.kind === 'approval') {
+    const how = answer.how === 'allowed' ? 'you allowed it' : answer.how === 'denied' ? 'you said no' : answer.how === 'joined' ? 'you joined the call' : 'no answer in time'
+
+    return { label: `Needed your OK${at} · ${how}`, text: `“${answer.question}”` }
+  }
+
+  if (answer.how === 'joined') {
+    return { label: `They asked${at} · you joined the call`, text: `“${answer.question}”` }
+  }
+
+  return answer.answer ? { label: `They asked · you answered${at}`, text: `“${answer.question}” “${answer.answer}”` } : { label: `They asked${at} · no answer in time`, text: `“${answer.question}”` }
+}
+
+/** Listening in and taking over, from the call's log (hermes-phone 0.2+): "You listened in at 0:42, took over at 1:10". */
+export function joinedRows(call: Pick<Call, 'log' | 'started'>): { label: string; text: string; quiet?: boolean }[] {
+  const at = (t: number) => (call.started !== null ? clock(Math.max(0, t - call.started)) : '')
+  const steps: string[] = []
+  const notes: string[] = []
+
+  for (const entry of call.log ?? []) {
+    const when = at(entry.t)
+
+    if (entry.what === 'listen') {
+      steps.push(`listened in${when ? ` at ${when}` : ''}`)
+    } else if (entry.what === 'took_over') {
+      steps.push(`took over${when ? ` at ${when}` : ''}`)
+    } else if (entry.what === 'handed_back') {
+      steps.push(`handed back${when ? ` at ${when}` : ''}`)
+
+      if (entry.text) {
+        notes.push(entry.text)
+      }
+    } else if (entry.what === 'dropped') {
+      steps.push(`lost the line${when ? ` at ${when}` : ''} (the voice took the call back)`)
+    }
+  }
+
+  if (!steps.length) {
+    return []
+  }
+
+  const rows = [{ label: 'You on the call', text: `You ${steps.join(', ')}.` }]
+
+  if (notes.length) {
+    rows.push({ label: 'Your note to the voice', text: notes.map(note => `“${note}”`).join(' ') })
+  }
+
+  return rows
+}
+
+/** What happened during a call besides its fields: your answers, what is still open, and what they asked you to do. */
+export function duringCall(call: Pick<Call, 'answers' | 'outcome' | 'started'> & Partial<Pick<Call, 'log'>>): { label: string; text: string; quiet?: boolean }[] {
+  const rows: { label: string; text: string; quiet?: boolean }[] = [...call.answers.map(answer => answerRow(answer, call.started)), ...joinedRows({ log: call.log, started: call.started })]
   const open = String(call.outcome?.open_questions ?? '').trim()
   const asked = String(call.outcome?.they_asked ?? '').trim()
   const notes = String(call.outcome?.notes ?? '').trim()
@@ -452,7 +542,14 @@ export function quietNote(text: string, name: string): string | null {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const rules: [RegExp, (rest: string) => string][] = [
     [/^pressed\s+(.+)$/i, rest => `Pressed ${rest}`],
+    [new RegExp(`^asked ${escaped} to allow:\\s*(.+)$`, 'i'), rest => `Asked for your OK: ${rest}`],
     [new RegExp(`^asked ${escaped}:\\s*(.+)$`, 'i'), rest => `Asked you: ${rest}`],
+    [new RegExp(`^${escaped} allowed:\\s*(.+)$`, 'i'), rest => `You allowed: ${rest}`],
+    [new RegExp(`^${escaped} said no to:\\s*(.+)$`, 'i'), rest => `You said no to: ${rest}`],
+    [new RegExp(`^${escaped} joined the call$`, 'i'), () => 'You joined the call'],
+    [new RegExp(`^${escaped} handed the call back$`, 'i'), () => 'You handed the call back'],
+    [new RegExp(`^the line to ${escaped} dropped$`, 'i'), () => 'Your line dropped; the voice took the call back'],
+    [/note held back/i, () => 'Your note was held back: it can’t go on a call'],
     [new RegExp(`^${escaped} answered:\\s*(.+)$`, 'i'), rest => `You answered: ${rest}`],
     [/^not asked:\s*(.+)$/i, rest => `Didn’t ask you (questions are off or used up): ${rest}`],
     [/answer held back/i, () => 'Your answer was held back: it can’t go on a call'],
@@ -476,6 +573,11 @@ export function transcriptLines(call: Pick<Call, 'transcript' | 'name'>, name: s
 
     if (quiet) {
       return { kind: 'quiet', who: '', at, text: quiet }
+    }
+
+    if (line.who === 'line') {
+      // While you had the line: both of you, as the voice heard it.
+      return { kind: 'them', who: `${shortName(call.name)} and you`, at, text: line.text }
     }
 
     return line.who === 'assistant' ? { kind: 'assistant', who: 'Assistant', at, text: line.text } : { kind: 'them', who: shortName(call.name), at, text: line.text }
@@ -521,7 +623,10 @@ export function hoursLabel(hours: PhoneSettings['hours']): string {
 /** Settings → Server plugins' line for hermes-phone: what is still to set up on the server, in the order it is needed, or the line ready. */
 export function phonePluginLine(status: Pick<PhoneStatus, 'line' | 'service' | 'public_url' | 'stage'>): ProbeAnswer {
   if (!status.line.set) {
-    return { detail: 'No Twilio line yet: your Twilio keys go in the server’s ~/.hermes/.env, added there by you. The setup message walks your bot through the rest.', needsSetup: true }
+    return {
+      detail: 'No Twilio line yet: add your keys in the default bot’s Details, Keys, as HERMES_PHONE_TWILIO_ACCOUNT_SID, HERMES_PHONE_TWILIO_AUTH_TOKEN and HERMES_PHONE_TWILIO_PHONE_NUMBER (never Hermes’s plain TWILIO_ names, which turn on its SMS channel).',
+      needsSetup: true,
+    }
   }
 
   if (!status.public_url) {

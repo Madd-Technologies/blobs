@@ -22,6 +22,7 @@ import { ageLabel } from '@/features/roster/derive'
 import { haptic } from '@/lib/haptics'
 import { faceColor } from '@/lib/hermes/faceColor'
 import type { BotMeta } from '@/lib/hermes/identity'
+import { approvalDraftOf } from '@/components/dashboard/useApprovals'
 import { answerApproval, answerQuestion, answerSecret, answerSudo } from '@/stores/actions'
 import { useDashboards } from '@/stores/dashboards'
 import { toast } from '@/stores/toast'
@@ -89,15 +90,21 @@ function Face({ card, context, size }: { card: DeckCard; context: DeckContext; s
 
 // ── the cards behind ─────────────────────────────────────────────────────────────────────────────
 
-/** A card behind the top one: flat, in its bot's paper, showing only who and what. `depth` 1 is next, 2 the one after. */
-export function BehindCard({ card, context, depth, behind }: { card: DeckCard; context: DeckContext; depth: 1 | 2; behind: number }) {
+/**
+ * A card behind the top one: flat, in its bot's paper, showing only who and what. `depth` 1 is next, 2 the one after.
+ * Tapping it brings it to the top.
+ */
+export function BehindCard({ card, context, depth, behind, onPress }: { card: DeckCard; context: DeckContext; depth: 1 | 2; behind: number; onPress: () => void }) {
   const { scheme, neutral } = useTheme()
   const face = cardFace(card, context)
   const fill = face ? tintLevel(scheme, depth === 1 ? 'tone' : 'sheet', face) : depth === 1 ? neutral.deckNext : neutral.deckThird
 
   return (
-    <View
+    <Press
+      accessibilityRole="button"
       accessibilityLabel={`${cardName(card, context)}, ${depth === 1 ? 'next' : 'after that'}`}
+      accessibilityHint="Brings it to the top"
+      onPress={onPress}
       style={[styles.behind, { top: (behind - depth) * 38, left: depth * 14, right: depth * 14, borderRadius: depth === 1 ? 24 : 22, backgroundColor: fill }]}
     >
       {card.kind === 'room' ? <RoomFaces members={card.view.data.room.members.slice(0, 2)} metas={context.metas} variant="header" ring={fill} /> : <BotFace name={card.profile} meta={context.metas[card.profile]} size={18} />}
@@ -110,7 +117,7 @@ export function BehindCard({ card, context, depth, behind }: { card: DeckCard; c
       <T variant="meta" color="text2" style={styles.behindAge}>
         {cardAge(card, context)}
       </T>
-    </View>
+    </Press>
   )
 }
 
@@ -220,6 +227,8 @@ function RecordBody({ card }: { card: Extract<DeckCard, { kind: 'board' }> }) {
   const draft = detail ? recordDrafts(detail)[0] : undefined
   const running = detail?.show?.running ?? null
   const button = running ? null : (detail?.show?.actions?.[0] ?? null)
+  // A button that sends a draft you approve is pressed on the record, where the draft is drawn exactly and its digest checked.
+  const approval = !!detail && !!button && !!approvalDraftOf(detail, button.id)
 
   async function press(action: { id: string; label: string }) {
     const error = await useDashboards.getState().press(card.profile, id, action.id)
@@ -233,14 +242,17 @@ function RecordBody({ card }: { card: Extract<DeckCard, { kind: 'board' }> }) {
 
   return (
     <>
+      {/* Kept short, so the card fits the screen and swiping up and down works (the record has the rest). */}
       <View style={styles.titles}>
-        <T variant="display">{title}</T>
-        <T variant="secondary" color="text2">
+        <T variant="display" numberOfLines={3}>
+          {title}
+        </T>
+        <T variant="secondary" color="text2" numberOfLines={3}>
           {under || card.record.view_title}
         </T>
       </View>
       {body ? (
-        <T variant="body" color="text2" style={styles.quote} numberOfLines={6}>
+        <T variant="body" color="text2" style={styles.quote} numberOfLines={4}>
           {body}
         </T>
       ) : null}
@@ -256,14 +268,26 @@ function RecordBody({ card }: { card: Extract<DeckCard, { kind: 'board' }> }) {
               </T>
             </Press>
           </View>
-          <T variant="body" style={styles.quote} numberOfLines={8}>
-            {draft.text}
-          </T>
+          {draft.field.format === 'html' ? (
+            <T variant="body" color="text2" style={styles.quote}>
+              An email to look at before it goes out.
+            </T>
+          ) : (
+            <T variant="body" style={styles.quote} numberOfLines={8}>
+              {draft.text}
+            </T>
+          )}
         </View>
       ) : null}
       <View style={styles.buttons}>
-        {button ? <Pill label={button.label} variant="primary" height={46} flex onPress={() => void press(button)} /> : null}
-        <Pill label="Open" variant={button || running ? 'secondary' : 'primary'} height={46} flex={!button} onPress={openRecord} />
+        {approval ? (
+          <Pill label="Review and approve" variant="primary" height={46} flex onPress={openRecord} />
+        ) : (
+          <>
+            {button ? <Pill label={button.label} variant="primary" height={46} flex onPress={() => void press(button)} /> : null}
+            <Pill label="Open" variant={button || running ? 'secondary' : 'primary'} height={46} flex={!button} onPress={openRecord} />
+          </>
+        )}
       </View>
     </>
   )
@@ -275,28 +299,75 @@ interface SwipeProps {
   children: ReactNode
   /** Swiped past the threshold (or flung) to the right or left; the card has left the screen. */
   onSwipe: (direction: 'right' | 'left') => void
+  /** Swiped up (the next card) or down (the one before); the card has left the screen. */
+  onTurn?: (way: 'next' | 'previous') => void
   /** Swipe left springs the card back instead of sending it away (muting asks until when first). */
   returnLeft?: boolean
-  enabled: boolean
+  sideways: boolean
+  /** Off while the page scrolls (a tall card, or the keyboard is up): scrolling wins then. */
+  upDown?: boolean
 }
+
+const still = () => {}
 
 /** A card let go short of the threshold eases back, with no overshoot. */
 const BACK = { duration: 200, easing: Easing.out(Easing.cubic) }
 
-/** The top card follows your finger sideways, tilting a little; past 30% of the width (or a fling) it goes. */
-export function SwipeCard({ children, onSwipe, returnLeft, enabled }: SwipeProps) {
-  const { width } = useWindowDimensions()
+/**
+ * The top card follows your finger, one way per swipe: sideways it tilts a little and past 30% of the width (or a fling) it
+ * goes; up or down it fades as it goes, past 15% of the height (or a fling), and the deck turns.
+ */
+export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sideways, upDown = false }: SwipeProps) {
+  const { width, height } = useWindowDimensions()
   const x = useSharedValue(0)
+  const y = useSharedValue(0)
+  // 0 until the swipe picks a way, then 1 sideways or 2 up and down.
+  const axis = useSharedValue(0)
   const side = useSharedValue(0)
   const threshold = width * 0.3
+  const lift = height * 0.15
 
-  const pan = Gesture.Pan()
-    .enabled(enabled)
-    .activeOffsetX([-14, 14])
-    .failOffsetY([-12, 12])
+  let pan = Gesture.Pan().enabled(sideways || upDown)
+  pan = sideways ? pan.activeOffsetX([-14, 14]) : pan.failOffsetX([-12, 12])
+  pan = upDown ? pan.activeOffsetY([-14, 14]) : pan.failOffsetY([-12, 12])
+
+  /** The way a swipe goes, once it has moved far enough to tell (1 sideways, 2 up and down), else 0. */
+  const wayOf = (dx: number, dy: number, far: number) => {
+    'worklet'
+
+    if (!upDown) {
+      return 1
+    }
+
+    if (!sideways) {
+      return 2
+    }
+
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < far) {
+      return 0
+    }
+
+    return Math.abs(dx) >= Math.abs(dy) ? 1 : 2
+  }
+
+  pan = pan
+    .onStart(() => {
+      // Picked from the movement, not here: Android measures a pan from where it was recognised, so it starts at zero.
+      axis.set(0)
+    })
     .onUpdate(event => {
-      x.set(event.translationX)
-      const now = Math.abs(event.translationX) > threshold ? Math.sign(event.translationX) : 0
+      if (axis.get() === 0) {
+        axis.set(wayOf(event.translationX, event.translationY, 6))
+      }
+
+      if (axis.get() === 0) {
+        return
+      }
+
+      const across = axis.get() === 1
+      const moved = across ? event.translationX : event.translationY
+      ;(across ? x : y).set(moved)
+      const now = Math.abs(moved) > (across ? threshold : lift) ? Math.sign(moved) : 0
 
       if (now !== side.get()) {
         side.set(now)
@@ -307,12 +378,32 @@ export function SwipeCard({ children, onSwipe, returnLeft, enabled }: SwipeProps
       }
     })
     .onEnd(event => {
-      const fling = Math.abs(event.velocityX) > motion.flingClose
-      const direction = Math.abs(x.get()) > threshold || fling ? Math.sign(fling ? event.velocityX : x.get()) : 0
+      // Decided from the release itself, so a quick flick that gave no update in between still counts.
+      const way = axis.get() || wayOf(event.translationX + event.velocityX / 20, event.translationY + event.velocityY / 20, 1)
+      const across = way === 1
+      const moved = across ? event.translationX : event.translationY
+      const velocity = across ? event.velocityX : event.velocityY
+      const fling = Math.abs(velocity) > motion.flingClose
+      const direction = way && (Math.abs(moved) > (across ? threshold : lift) || fling) ? Math.sign(fling ? velocity : moved) : 0
       side.set(0)
 
       if (direction === 0) {
         x.set(withTiming(0, BACK))
+        y.set(withTiming(0, BACK))
+
+        return
+      }
+
+      if (!across) {
+        const turnWay = direction < 0 ? 'next' : 'previous'
+        x.set(withTiming(0, BACK))
+        y.set(
+          withTiming(direction * height * 0.9, { duration: 220 }, finished => {
+            if (finished) {
+              runOnJS(onTurn)(turnWay)
+            }
+          }),
+        )
 
         return
       }
@@ -326,6 +417,7 @@ export function SwipeCard({ children, onSwipe, returnLeft, enabled }: SwipeProps
         return
       }
 
+      y.set(withTiming(0, BACK))
       x.set(
         withTiming(direction * width * 1.3, { duration: 200 }, finished => {
           if (finished) {
@@ -335,7 +427,10 @@ export function SwipeCard({ children, onSwipe, returnLeft, enabled }: SwipeProps
       )
     })
 
-  const style = useAnimatedStyle(() => ({ transform: [{ translateX: x.get() }, { rotate: `${(x.get() / width) * 6}deg` }] }))
+  const style = useAnimatedStyle(() => ({
+    opacity: 1 - Math.min(Math.abs(y.get()) / height, 1) * 0.8,
+    transform: [{ translateX: x.get() }, { translateY: y.get() }, { rotate: `${(x.get() / width) * 6}deg` }],
+  }))
 
   return (
     <GestureDetector gesture={pan}>

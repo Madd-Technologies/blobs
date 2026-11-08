@@ -11,7 +11,7 @@ import type { FaceMood } from '../../lib/hermes/face.ts'
 import type { DelegationStatusRow, ProfileRow } from '../../lib/hermes/protocol.ts'
 import { runningJobs } from '../transcript/jobs.ts'
 import { ageLabel, isPinned, previewOf, sortRoster, stripPreviewMarkdown } from './derive.ts'
-import { visibleState, type VisibleActivity } from './visible.ts'
+import { visibleState, yourLastExchange, type VisibleActivity } from './visible.ts'
 
 export interface BotView {
   profile: string
@@ -26,6 +26,10 @@ export interface BotView {
   /** "now", "3m", "2h". */
   age: string
   /** When that was (epoch seconds): what Home sorts by, so the list reads in the order of its ages. */
+  /**
+   * Where Home puts the row, in seconds: when you and the bot last talked (a message of yours, or its reply to one). Not when it
+   * last did anything: a routine, a kanban event or a finished background job does not move it, and neither does it working.
+   */
   lastActive: number
   mood: FaceMood
   pinned: boolean
@@ -123,7 +127,7 @@ export function buildBotViews(input: BuildInput): BotView[] {
       preview,
       urgent,
       age: attention.state === 'working' ? 'now' : known.kind === 'pending' ? '' : ageLabel(seen ? seen.ts : botLastActive(row), input.now),
-      lastActive: attention.state === 'working' ? input.now : seen ? seen.ts : botLastActive(row),
+      lastActive: seen ? yourLastExchange(seen) : botLastActive(row),
       mood: attention.state === 'working' ? 'work' : 'idle',
       pinned: isPinned(row),
       waiting: entries.length,

@@ -8,7 +8,9 @@ import { attentionFor, deriveInbox, type InboxEntry } from '@/features/inbox/der
 import { KANBAN_APPROVALS_PATH, NEEDS_YOU_EVENT, NEEDS_YOU_PATH } from '@/features/inbox/pushed'
 import { visibleState } from '@/features/roster/visible'
 import { createInbox } from '@/features/inbox/store'
+import { coalesce } from '@/lib/coalesce'
 import { supportsLiveHelpers } from '@/lib/hermes/capabilities'
+import { isAbsent } from '@/lib/hermes/plugins'
 import { HermesHttpError, restJson } from '@/lib/hermes/server'
 import { startPoller } from '@/lib/poller'
 import { useNow } from '@/lib/useNow'
@@ -34,7 +36,7 @@ export const inbox = createInbox({
       return await restJson(config, NEEDS_YOU_PATH, {}, { timeoutMs: 8_000 })
     } catch (error) {
       // No hermes-bot-mobile, or one older than 0.1.7: the app keeps its own check.
-      if (error instanceof HermesHttpError && error.status === 404) {
+      if (isAbsent(error)) {
         return null
       }
 
@@ -65,13 +67,13 @@ export const inbox = createInbox({
 
 /**
  * What waits on you arrives as the server's push, read once whenever the connection comes up or the app comes back to
- * the front. Status (who is working) is polled every 30 s in the foreground, and straight away when the server says
- * sessions changed.
+ * the front. Status (who is working) is read when the server says sessions changed (at most every 3 s while bots write),
+ * with a safety read every 60 s in the foreground.
  */
 export function startInboxSync(): () => void {
   const refresh = () => void inbox.refresh()
-  const stopPoll = startPoller(refresh, 30_000, () => useConnection.getState().status === 'online')
-  let debounce: ReturnType<typeof setTimeout> | null = null
+  const stopPoll = startPoller(refresh, 60_000, () => useConnection.getState().status === 'online')
+  const changed = coalesce(refresh, { delayMs: 600, minGapMs: 3_000 })
 
   const stopEvents = onGatewayEvent(event => {
     if ((event.type as string) === NEEDS_YOU_EVENT) {
@@ -80,11 +82,8 @@ export function startInboxSync(): () => void {
       return
     }
 
-    if (event.type === 'sessions.changed' && !debounce) {
-      debounce = setTimeout(() => {
-        debounce = null
-        refresh()
-      }, 600)
+    if (event.type === 'sessions.changed') {
+      changed.signal()
     }
   })
 
@@ -111,10 +110,7 @@ export function startInboxSync(): () => void {
     stopEvents()
     stopConnection()
     foreground.remove()
-
-    if (debounce) {
-      clearTimeout(debounce)
-    }
+    changed.cancel()
   }
 }
 
@@ -153,8 +149,10 @@ export function useAttentionMap(): Record<string, Attention> {
         const known = visibleState(visible[bot.name], bot.canonical_session)
         // Until it is read, nothing counts as unread: the server's activity time also counts messages between bots.
         const lastActive = known.kind === 'known' ? known.visible.ts : known.kind === 'pending' ? 0 : undefined
+        // A turn background work started (a routine, a wake-up, another bot) is not shown as the bot working.
+        const turnByYou = known.kind === 'known' ? known.visible.lastTurnYours : undefined
 
-        return [bot.name, attentionFor(bot, { inbox: byBot as Map<string, InboxEntry[]>, activeByBot, lastActive }, { now, seenAt: seenAt[bot.name], isOpen: openProfile === bot.name })]
+        return [bot.name, attentionFor(bot, { inbox: byBot as Map<string, InboxEntry[]>, activeByBot, lastActive, turnByYou }, { now, seenAt: seenAt[bot.name], isOpen: openProfile === bot.name })]
       }),
     )
   }, [roster, byBot, activeByBot, seenAt, openProfile, visible, now])

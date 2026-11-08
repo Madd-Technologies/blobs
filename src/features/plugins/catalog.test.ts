@@ -43,7 +43,7 @@ describe('plugin install messages', () => {
 
   it('a single plugin gets only its own steps', () => {
     const message = installMessage(['hermes-drive'])
-    assert.match(message, /this HermesBot plugin/)
+    assert.match(message, /this Blobs plugin/)
     assert.doesNotMatch(message, /hermes-push/)
     assert.doesNotMatch(message, /Paperless check/)
     assert.match(message, /Drive check/)
@@ -67,6 +67,9 @@ describe('plugin install messages', () => {
     assert.match(message, /already shows hermes-phone, update that copy/)
     assert.match(message, /Phone check, without showing any secret/)
     assert.match(message, /Never ask me to paste a Twilio key/)
+    // The plugin's own key names: Hermes's SMS channel turns on from the plain TWILIO_ ones.
+    assert.match(message, /are HERMES_PHONE_TWILIO_ACCOUNT_SID, HERMES_PHONE_TWILIO_AUTH_TOKEN and HERMES_PHONE_TWILIO_PHONE_NUMBER set/)
+    assert.match(message, /Is the plain TWILIO_ACCOUNT_SID set there too/)
     assert.match(message, /set nothing up until I say so/)
     assert.match(message, /hermes-phone\.service, if it runs/)
     assert.doesNotMatch(message, /Voice check|Drive check|Dashboard check/)

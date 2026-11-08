@@ -181,7 +181,8 @@ export function startRestartSync(): () => void {
   const busy = () => {
     const { sheet, status, phase } = useRestart.getState()
 
-    return sheet.open || phase.kind === 'restarting' || !!underWay(status)
+    // Without the restart plugin (null) an open sheet has nothing to follow: Hermes's gateway restart reports nothing here.
+    return (sheet.open && status !== null) || phase.kind === 'restarting' || !!underWay(status)
   }
   const tick = () => {
     if (busy() && useConnection.getState().status === 'online' && AppState.currentState === 'active') {

@@ -1,10 +1,12 @@
 import { Fragment, memo, useMemo } from 'react'
-import { View } from 'react-native'
+import { Text, View } from 'react-native'
 import { useMarkdown, type MarkedStyles } from 'react-native-marked'
 
 import { DiagramTile } from './DiagramTile'
 import { MathBlock } from './MathView'
 import { QuietRenderer } from './QuietRenderer'
+
+import { PieceBoundary } from '@/components/ui/RouteError'
 
 import { splitMarkdownBlocks } from '@/features/transcript/markdown'
 import { parseBlock, type MathItem } from '@/features/transcript/richMarkdown'
@@ -87,15 +89,21 @@ export const Markdown = memo(function Markdown({ text, size = 'body' }: { text: 
 
   return (
     <View style={{ gap: size === 'reply' ? 10 : 8 }}>
-      {blocks.map((block, index) =>
-        block.kind === 'math' ? (
-          <MathBlock key={index} tex={block.tex} color={c.text} />
-        ) : block.kind === 'diagram' ? (
-          <DiagramTile key={index} source={block.source} />
-        ) : (
-          <Block key={index} text={block.text} math={block.math} size={size} />
-        ),
-      )}
+      {blocks.map((block, index) => {
+        const source = block.kind === 'math' ? block.tex : block.kind === 'diagram' ? block.source : block.text
+        // A block that can't be drawn shows its words as they are, so one odd reply never takes the chat down.
+        const plain = (
+          <Text selectable style={{ fontFamily: block.kind === 'markdown' ? fonts.regular : fonts.mono, fontSize: size === 'reply' ? 16 : 15, lineHeight: size === 'reply' ? 25 : 21, color: c.text }}>
+            {source}
+          </Text>
+        )
+
+        return (
+          <PieceBoundary key={index} source={source} fallback={plain}>
+            {block.kind === 'math' ? <MathBlock tex={block.tex} color={c.text} /> : block.kind === 'diagram' ? <DiagramTile source={block.source} /> : <Block text={block.text} math={block.math} size={size} />}
+          </PieceBoundary>
+        )
+      })}
     </View>
   )
 })

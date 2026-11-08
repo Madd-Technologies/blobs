@@ -245,6 +245,10 @@ function readHistory(rows: StoredMessage[]): { items: Item[]; chatter: boolean; 
           step.diff = read.diff
           step.file = read.file
           step.durationS = started !== undefined && row.timestamp !== undefined ? Math.max(0, row.timestamp - started) : undefined
+
+          if (typeof row.omitted === 'number' && row.omitted > 0) {
+            step.partial = row.id
+          }
           // Work it left running is only followed when the server reports it (live work); otherwise this id is unused.
           const jobId = jobIdOfResult(step.name, parsed ?? row.content)
 

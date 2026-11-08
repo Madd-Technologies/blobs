@@ -142,7 +142,7 @@ export function Inbox({ active }: { active: boolean }) {
               <Animated.View style={nudging}>
                 <SwipeCard
                   key={top.id}
-                  enabled={active}
+                  sideways={active}
                   onSwipe={() => {
                     hold(false)
                     setDone(count => count + 1)

@@ -17,18 +17,22 @@ import {
   PhoneRefusal,
   setPhoneSettings,
   type ApproveEdits,
+  type CallReply,
   type Errand,
   type ErrandRow,
   type PhoneSettings,
   type PhoneStatus,
   type SettingsChange,
 } from '@/lib/hermes/phone'
+import { absentGate } from '@/lib/absent'
 import { startPoller } from '@/lib/poller'
 import { useConnection } from '@/stores/connection'
 
 /** While a call is being made, the errands are read this often; otherwise every 30 s. */
 const LIVE_MS = 5_000
 const IDLE_MS = 30_000
+/** hermes-phone is optional: once the server is found without it, it is asked about only now and then. */
+const plugin = absentGate()
 
 interface PhoneState {
   /** Whether the server has hermes-phone: null until known. Without it nothing about calls is shown. */
@@ -50,7 +54,8 @@ interface PhoneState {
   decline: (id: string) => Promise<string | null>
   cancel: (id: string) => Promise<string | null>
   hangUp: (errandId: string, callId: string) => Promise<string | null>
-  answer: (errandId: string, callId: string, text: string) => Promise<string | null>
+  /** Typed text, a choice, or Allow / Deny (pinned to the question's id when it has one). */
+  answer: (errandId: string, callId: string, reply: CallReply | string) => Promise<string | null>
   saveSettings: (change: SettingsChange) => Promise<string | null>
   dismiss: (id: string) => void
   reset: () => void
@@ -117,7 +122,7 @@ export const usePhone = create<PhoneState>()(
         refresh: async () => {
           const current = config()
 
-          if (!current || busy) {
+          if (!current || busy || !plugin.due()) {
             return
           }
 
@@ -125,6 +130,7 @@ export const usePhone = create<PhoneState>()(
 
           try {
             const status = await getPhoneStatus(current)
+            plugin.seen(!!status)
 
             if (!status) {
               set({ available: false, status: null, settings: null, rows: [], errands: {} })
@@ -201,7 +207,7 @@ export const usePhone = create<PhoneState>()(
         decline: id => act(id, () => declineErrand(config()!, id)),
         cancel: id => act(id, () => cancelErrand(config()!, id)),
         hangUp: (errandId, callId) => act(errandId, () => hangUpCall(config()!, errandId, callId)),
-        answer: (errandId, callId, text) => act(errandId, () => answerCall(config()!, errandId, callId, text)),
+        answer: (errandId, callId, reply) => act(errandId, () => answerCall(config()!, errandId, callId, reply)),
 
         saveSettings: async change => {
           const current = config()
@@ -222,7 +228,10 @@ export const usePhone = create<PhoneState>()(
 
         dismiss: id => set(state => ({ dismissed: state.dismissed.includes(id) ? state.dismissed : [...state.dismissed.slice(-199), id] })),
 
-        reset: () => set({ available: null, status: null, settings: null, rows: [], errands: {} }),
+        reset: () => {
+          plugin.reset()
+          set({ available: null, status: null, settings: null, rows: [], errands: {} })
+        },
       }
     },
     { name: 'blobs.phone', storage: createJSONStorage(() => AsyncStorage), partialize: state => ({ dismissed: state.dismissed }) },
@@ -231,7 +240,7 @@ export const usePhone = create<PhoneState>()(
 
 /**
  * Keeps phone errands current: every 5 s in the foreground while one is calling, every 30 s otherwise, and at once when the
- * connection comes back. Nothing polls when the server has no hermes-phone, except a check every 30 s in case it is added.
+ * connection comes back. Without hermes-phone on the server nothing polls, except a check every 10 min in case it is added.
  */
 export function startPhoneSync(): () => void {
   let last = 0
@@ -254,6 +263,7 @@ export function startPhoneSync(): () => void {
 
     if (state.status === 'online' && previous.status !== 'online') {
       last = Date.now()
+      plugin.reset()
       void usePhone.getState().refresh()
     }
   })

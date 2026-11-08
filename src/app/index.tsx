@@ -28,6 +28,7 @@ import { useDeck } from '@/stores/deck'
 import { useMessageSearch } from '@/stores/messageSearch'
 import { useRoomViews, useRooms } from '@/stores/rooms'
 import { useRoster } from '@/stores/roster'
+import { useWatch } from '@/stores/watch'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
@@ -153,6 +154,9 @@ export default function Home() {
 
   // The pinned bots' dashboards, for their tiles: read again when the server says one changed (the summary is polled).
   const dashboardKey = dashboardsReady ? pinned.map(view => `${view.profile}:${dashboardSummary[view.profile]?.updated ?? 0}`).join(',') : ''
+  // Their tiles are on screen too: the server then reads their live panels (a balance, the next events), which change no
+  // record and so never move the summary, and pushes when one moves, which reloads that dashboard.
+  useWatch('dashboards', dashboardsReady ? pinned.map(view => view.profile) : [])
 
   useEffect(() => {
     for (const entry of dashboardKey ? dashboardKey.split(',') : []) {

@@ -1,8 +1,10 @@
-import { useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useEffect, useRef, useState } from 'react'
 import { ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotPaper } from '@/components/bots/BotPaper'
+import { CallQuestionCard, useCanJoin, useQuestionLeft } from '@/components/phone/CallQuestion'
+import { LiveLines, LiveStatus, LiveTray } from '@/components/phone/LiveCall'
 import { PhoneHeader } from '@/components/phone/PhoneHeader'
 import { Sep } from '@/components/phone/parts'
 import { Pill } from '@/components/ui/Pill'
@@ -10,32 +12,81 @@ import { Screen } from '@/components/ui/Screen'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { timeLabel } from '@/features/dashboard/view'
-import { answeredBy, callLine, clock, duringCall, formatNumber, recorded, transcriptLines } from '@/features/phone/view'
+import { answeredBy, callLine, clock, duringCall, formatNumber, recorded, transcriptLines, whoHasLine } from '@/features/phone/view'
 import { useNow } from '@/lib/useNow'
-import { usePhone } from '@/stores/phone'
+import { useBotView } from '@/stores/bots'
+import { useListen } from '@/stores/listen'
+import { startPhonePoll, usePhone } from '@/stores/phone'
+import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts } from '@/theme/tokens'
 
 /** Lines of the transcript shown before "Show all". */
 const FIRST = 8
+/** The newest lines shown while the call is on the line. */
+const LIVE_LINES = 6
+const ON_THE_LINE = ['dialing', 'ringing', 'live']
 
 /**
- * One call's report: what it came to, what they said for each of the brief's fields, your answers and what is still open,
- * and the transcript when transcripts are on.
+ * One call. While it is on the line: who has it, what it waits on you for (raised), its newest lines, and the tray to listen
+ * in, join, take over and hand back. Once it is over, its report: what it came to, what they said for each of the brief's
+ * fields, your answers and what is still open, and the transcript when transcripts are on.
+ *
+ * `join=1` (from a card's or a push's "Join the call") listens in and takes the call over as soon as it is open.
  */
 export default function ErrandCallScreen() {
-  const { profile, errand: errandId, call: callId } = useLocalSearchParams<{ profile: string; errand: string; call: string }>()
+  const { profile, errand: errandId, call: callId, join } = useLocalSearchParams<{ profile: string; errand: string; call: string; join?: string }>()
+  const router = useRouter()
   const errand = usePhone(state => state.errands[errandId])
   const name = usePhone(state => state.settings?.name ?? '')
+  const view = useBotView(profile)
   const { c } = useTheme()
   const nowS = useNow()
   const [all, setAll] = useState(false)
   const call = errand?.calls.find(candidate => candidate.id === callId)
   const back = errandId ? ({ pathname: '/bot/[profile]/errand', params: { profile, id: errandId } } as const) : ({ pathname: '/bot/[profile]', params: { profile } } as const)
+  const onLine = !!call && ON_THE_LINE.includes(call.status)
+  const snap = useListen(state => (state.errandId === errandId && state.callId === callId ? state.snap : null))
+  const canJoin = useCanJoin(call)
+  const left = useQuestionLeft(call)
+  const joined = useRef(false)
 
   useEffect(() => {
     void usePhone.getState().loadErrand(errandId)
   }, [errandId])
+
+  // While the call is on the line, read it every few seconds.
+  useEffect(() => (onLine ? startPhonePoll() : undefined), [onLine])
+
+  const listen = (asJoin: boolean) => {
+    const problem = useListen.getState().start(errandId, callId, { join: asJoin })
+
+    if (problem) {
+      toast(problem)
+    }
+  }
+
+  // "Join the call" from a card or a push: once the call is known to be on the line.
+  useEffect(() => {
+    if (join === '1' && canJoin && !joined.current) {
+      joined.current = true
+      listen(true)
+      router.setParams({ join: undefined })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [join, canJoin])
+
+  // Leaving the screen stops listening (handing the call back first if you have it).
+  useEffect(
+    () => () => {
+      const state = useListen.getState()
+
+      if (state.errandId === errandId && state.callId === callId) {
+        state.leave()
+      }
+    },
+    [errandId, callId],
+  )
 
   if (!errand || !call) {
     return (
@@ -45,6 +96,51 @@ export default function ErrandCallScreen() {
           <View style={styles.center}>
             <Spinner size={16} />
           </View>
+        </Screen>
+      </BotPaper>
+    )
+  }
+
+  if (onLine) {
+    const lines = transcriptLines(snap?.lines.length ? { name: call.name, transcript: snap.lines } : call, name).slice(-LIVE_LINES)
+    const listening = !!snap && snap.phase !== 'ended'
+    const mode = listening ? snap.mode : call.mode
+    const length = call.started !== null && call.status === 'live' ? clock(nowS - call.started) : ''
+    const asking = left !== null && left > 0
+    const place = errand.calls.length > 1 ? ` · call ${errand.calls.indexOf(call) + 1} of ${errand.calls.length}` : ''
+
+    return (
+      <BotPaper profile={profile}>
+        <Screen edges={['top']}>
+          <PhoneHeader profile={profile} title={call.name} status={`${errand.brief.title}${place}`} fallback={back} />
+          <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            <View style={styles.titles}>
+              <T variant="title" style={styles.headline}>
+                {call.status === 'live' ? `On the line${length ? ` · ${length}` : ''}` : call.status === 'ringing' ? 'Ringing…' : 'Dialing…'}
+              </T>
+              {call.status === 'live' ? <LiveStatus text={whoHasLine(mode, listening)} busy={listening && (snap.joining || snap.mode === 'handover')} /> : null}
+              {snap?.note ? (
+                <T variant="secondary" color="text2">
+                  {snap.note}
+                </T>
+              ) : null}
+            </View>
+            {call.question ? <CallQuestionCard errand={errand} call={call} meta={view?.meta} onJoin={() => listen(true)} /> : null}
+            <LiveLines lines={lines} />
+          </ScrollView>
+          <LiveTray
+            snap={snap}
+            canListen={canJoin}
+            quiet={asking}
+            onListen={() => listen(false)}
+            onJoin={() => listen(true)}
+            onHangUp={() => {
+              void usePhone
+                .getState()
+                .hangUp(errandId, callId)
+                .then(error => error && toast(error))
+            }}
+          />
         </Screen>
       </BotPaper>
     )
