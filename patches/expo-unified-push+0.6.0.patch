@@ -1,8 +1,29 @@
 diff --git a/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/ExpoUPService.kt b/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/ExpoUPService.kt
-index e417a22..60b9365 100644
+index e417a22..7180211 100644
 --- a/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/ExpoUPService.kt
 +++ b/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/ExpoUPService.kt
-@@ -80,7 +80,14 @@ class ExpoUPService : PushService() {
+@@ -24,7 +24,10 @@ import java.net.HttpURLConnection
+ import java.net.URL
+ import kotlinx.serialization.json.Json
+ import kotlinx.serialization.json.boolean
++import kotlinx.serialization.json.JsonObject
++import kotlinx.serialization.json.contentOrNull
+ import kotlinx.serialization.json.int
++import kotlinx.serialization.json.jsonArray
+ import kotlinx.serialization.json.jsonObject
+ import kotlinx.serialization.json.jsonPrimitive
+ import kotlinx.serialization.json.long
+@@ -40,6 +43,9 @@ import org.unifiedpush.android.connector.data.PushMessage
+  */
+ const val PAYLOAD_RENDERER_META_DATA = "dev.djara.expounifiedpush.PAYLOAD_RENDERER"
+ 
++/** HermesBot patch: the only links a notification's buttons may open (the app's own scheme). */
++const val ACTION_SCHEME = "hermesbot"
++
+ class ExpoUPService : PushService() {
+     val TAG = "ExpoUPService"
+     private var _module: Module? = null
+@@ -80,7 +86,14 @@ class ExpoUPService : PushService() {
  
          val module = _module
          if (module != null) {
@@ -18,3 +39,65 @@ index e417a22..60b9365 100644
          } else {
              Log.e(TAG, "sendPushEvent called without a reference to the expo module")
          }
+@@ -151,6 +164,13 @@ class ExpoUPService : PushService() {
+             silent = data["silent"]?.jsonPrimitive?.boolean,
+             type = data["type"]?.jsonPrimitive?.content,
+             url = data["url"]?.jsonPrimitive?.content,
++            actions = kotlin.runCatching { data["actions"]?.jsonArray }.getOrNull()?.mapNotNull { item ->
++                // HermesBot patch: only the app's own links, so a button never opens anything else.
++                val action = item as? JsonObject ?: return@mapNotNull null
++                val title = action["title"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
++                val url = action["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.startsWith("$ACTION_SCHEME://") }
++                if (title != null && url != null) NotificationAction(title.take(30), url) else null
++            }?.take(3),
+         )
+     }
+ 
+@@ -187,6 +207,11 @@ class ExpoUPService : PushService() {
+             notification.setNumber(content.number)
+         }
+ 
++        // HermesBot patch: the payload's buttons, each with its own request code so their links stay apart.
++        content.actions?.forEachIndexed { index, action ->
++            notification.addAction(0, action.title, getOpenUrlIntent(action.url, content.id * 4 + index + 1))
++        }
++
+         if (content.imageUrl !== null) {
+             runBlocking {
+                 val bitmap = urlToBitmap(content.imageUrl)
+@@ -253,7 +278,7 @@ class ExpoUPService : PushService() {
+         }
+     }
+ 
+-    private fun getOpenUrlIntent(url: String?): PendingIntent {
++    private fun getOpenUrlIntent(url: String?, requestCode: Int = 0): PendingIntent {
+         var intent = applicationContext.packageManager.getLaunchIntentForPackage(
+             applicationContext.packageName
+         )
+@@ -266,7 +291,7 @@ class ExpoUPService : PushService() {
+             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+         }
+ 
+-        return PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
++        return PendingIntent.getActivity(this, requestCode, intent, PendingIntent.FLAG_IMMUTABLE)
+     }
+ 
+     override fun onNewEndpoint(endpoint: PushEndpoint, instance: String) {
+diff --git a/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/PushPayloadRenderer.kt b/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/PushPayloadRenderer.kt
+index b84bbca..cbe7411 100644
+--- a/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/PushPayloadRenderer.kt
++++ b/node_modules/expo-unified-push/android/src/main/java/dev/djara/expounifiedpush/PushPayloadRenderer.kt
+@@ -15,6 +15,13 @@ data class NotificationContent(
+   val silent: Boolean? = null,
+   val type: String? = null,
+   val url: String? = null,
++  // HermesBot patch: buttons, each opening one of the app's own links (at most three, as Android shows).
++  val actions: List<NotificationAction>? = null,
++)
++
++data class NotificationAction(
++  val title: String,
++  val url: String,
+ )
+ 
+ /**

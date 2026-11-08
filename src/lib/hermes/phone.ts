@@ -83,19 +83,45 @@ export interface TranscriptLine {
   t: number
 }
 
-/** A question a live call is holding for you (`ask_owner`). */
+export type AskKind = 'question' | 'approval'
+
+/** A question a live call is holding for you (`ask_owner`), or (hermes-phone 0.2+) an approval of something outside the brief. */
 export interface CallQuestion {
+  /** 0.2+: the ask's random id; an answer can be pinned to it. */
+  id?: string
+  kind?: AskKind
   text: string
+  /** 0.2+: up to three short answers to pick from (a question only). */
+  choices?: string[]
   /** Server clock, seconds. */
   asked: number
+  /** 0.2+: when the voice stops waiting (longer while you listen in). Before: a minute after `asked`. */
+  deadline?: number
   answer: string | null
+  /** 0.2+: Allow (true) or Deny (false) for an approval. */
+  approved?: boolean | null
 }
+
+/** How an ask ended (0.2+). `joined`: you took the call over instead. */
+export type AskHow = 'answered' | 'allowed' | 'denied' | 'no_answer' | 'joined'
 
 export interface CallAnswer {
   question: string
   answer: string | null
   asked?: number
+  kind?: AskKind
+  how?: AskHow
 }
+
+/** What you (or the voice, asking you) did on a call, newest last (0.2+). */
+export interface CallLogEntry {
+  t: number
+  what: 'asked' | 'asked_ok' | AskHow | 'listen' | 'took_over' | 'handed_back' | 'dropped' | 'stopped_listening' | (string & {})
+  text?: string
+}
+
+/** Who has this side of a live call (0.2+): the voice, on hold, checking with you, handing over to you, or you. */
+export type CallMode = 'voice' | 'hold' | 'checking' | 'handover' | 'owner'
 
 export interface Call {
   id: string
@@ -118,6 +144,10 @@ export interface Call {
   error: string
   /** On hold (hold music, a menu, a recording). */
   hold: boolean
+  /** 0.2+: who has the line now, as last saved (the listen socket says it live). */
+  mode?: CallMode | ''
+  /** 0.2+ */
+  log?: CallLogEntry[]
 }
 
 export interface Errand {
@@ -157,6 +187,8 @@ export interface PhoneStatus {
   line: { set: boolean; number: string }
   public_url: boolean
   stage: 'test' | 'live'
+  /** 0.2+: `ask_kinds` (choices and approvals), `listen` (listen in and take over). */
+  features?: string[]
 }
 
 /** A never-share entry as the server shows it: the value is never sent back, only its last two characters. */
@@ -309,7 +341,35 @@ export async function hangUpCall(config: ServerConfig, errandId: string, callId:
   return errandOrThrow(await call<unknown>(config, `/errands/${encodeURIComponent(errandId)}/calls/${encodeURIComponent(callId)}/hangup`, { method: 'POST', body: '{}' }))
 }
 
-/** Answers the question a live call is holding. The server screens it like a brief (refusal `not_on_a_call`), and refuses a late one (`late`). */
-export async function answerCall(config: ServerConfig, errandId: string, callId: string, text: string): Promise<Errand> {
-  return errandOrThrow(await call<unknown>(config, `/errands/${encodeURIComponent(errandId)}/calls/${encodeURIComponent(callId)}/answer`, { method: 'POST', body: JSON.stringify({ text }) }))
+/** An answer to what a live call holds: typed text, one of its choices, or Allow / Deny. `ask` pins it to that one question. */
+export type CallReply = ({ text: string } | { choice: string } | { approved: boolean }) & { ask?: string }
+
+/**
+ * Answers the question a live call is holding. The server screens text like a brief (refusal `not_on_a_call`), and refuses a
+ * late one or one for another question (`late`).
+ */
+export async function answerCall(config: ServerConfig, errandId: string, callId: string, reply: CallReply | string): Promise<Errand> {
+  const body = typeof reply === 'string' ? { text: reply } : reply
+
+  return errandOrThrow(await call<unknown>(config, `/errands/${encodeURIComponent(errandId)}/calls/${encodeURIComponent(callId)}/answer`, { method: 'POST', body: JSON.stringify(body) }))
 }
+
+/** A single-use ticket (30 s) for the call service's listen socket: open `url` with `protocols`, and never log either. */
+export interface ListenTicket {
+  url: string
+  protocols: string[]
+  expires: number
+}
+
+export async function listenTicket(config: ServerConfig, errandId: string, callId: string): Promise<ListenTicket> {
+  const answer = await call<Partial<ListenTicket>>(config, `/errands/${encodeURIComponent(errandId)}/calls/${encodeURIComponent(callId)}/listen`, { method: 'POST', body: '{}' })
+
+  if (typeof answer?.url !== 'string' || !answer.url.startsWith('wss://') || !Array.isArray(answer.protocols)) {
+    throw new Error('The server gave an unexpected answer.')
+  }
+
+  return { url: answer.url, protocols: answer.protocols.map(String), expires: Number(answer.expires) || 30 }
+}
+
+/** Whether the server's hermes-phone offers a feature (0.2+). */
+export const phoneHas = (status: Pick<PhoneStatus, 'features'> | null | undefined, feature: 'ask_kinds' | 'listen'): boolean => !!status?.features?.includes(feature)

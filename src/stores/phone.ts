@@ -17,6 +17,7 @@ import {
   PhoneRefusal,
   setPhoneSettings,
   type ApproveEdits,
+  type CallReply,
   type Errand,
   type ErrandRow,
   type PhoneSettings,
@@ -53,7 +54,8 @@ interface PhoneState {
   decline: (id: string) => Promise<string | null>
   cancel: (id: string) => Promise<string | null>
   hangUp: (errandId: string, callId: string) => Promise<string | null>
-  answer: (errandId: string, callId: string, text: string) => Promise<string | null>
+  /** Typed text, a choice, or Allow / Deny (pinned to the question's id when it has one). */
+  answer: (errandId: string, callId: string, reply: CallReply | string) => Promise<string | null>
   saveSettings: (change: SettingsChange) => Promise<string | null>
   dismiss: (id: string) => void
   reset: () => void
@@ -205,7 +207,7 @@ export const usePhone = create<PhoneState>()(
         decline: id => act(id, () => declineErrand(config()!, id)),
         cancel: id => act(id, () => cancelErrand(config()!, id)),
         hangUp: (errandId, callId) => act(errandId, () => hangUpCall(config()!, errandId, callId)),
-        answer: (errandId, callId, text) => act(errandId, () => answerCall(config()!, errandId, callId, text)),
+        answer: (errandId, callId, reply) => act(errandId, () => answerCall(config()!, errandId, callId, reply)),
 
         saveSettings: async change => {
           const current = config()

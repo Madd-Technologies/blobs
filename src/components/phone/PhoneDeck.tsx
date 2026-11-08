@@ -1,22 +1,21 @@
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
-import { StyleSheet, TextInput, View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 
 import { Pill } from '@/components/ui/Pill'
 import { T } from '@/components/ui/T'
 import type { DeckCard } from '@/features/inbox/deck'
 import type { Errand } from '@/lib/hermes/phone'
-import { askLine, clock, formatNumber, requestLine, spokenOpening, theyAsked } from '@/features/phone/view'
+import { askLine, askSummary, clock, formatNumber, isApproval, requestLine, spokenOpening, theyAsked } from '@/features/phone/view'
 import { ageLabel } from '@/features/roster/derive'
 import { useNowMs } from '@/lib/useNow'
 import { usePhone } from '@/stores/phone'
 import { useDrafts } from '@/stores/drafts'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
-import { fonts, radius } from '@/theme/tokens'
 
-import { Countdown, sendAnswer, useQuestionLeft } from './CallQuestion'
-import { NeedsDot, OpeningBlock, QuestionTrack } from './parts'
+import { AskBody, Countdown, useCanJoin, useJoinCall, useQuestionLeft } from './CallQuestion'
+import { NeedsDot, OpeningBlock } from './parts'
 
 type PhoneCard = Extract<DeckCard, { kind: 'phone' }>
 
@@ -37,7 +36,7 @@ export function askBotAbout(errand: Errand, push: ReturnType<typeof useRouter>['
 /** One line for a phone card behind the top one, and for Home's Needs-you sheet. */
 export function phoneCardLine(card: PhoneCard): string {
   if (card.need === 'question' && card.call?.question) {
-    return `${card.call.name} asks: ${card.call.question.text}`
+    return askSummary(card.call)
   }
 
   if (card.need === 'asked') {
@@ -64,7 +63,7 @@ export function PhoneQuestionHeader({ card, botName }: { card: PhoneCard; botNam
     <>
       <View style={styles.flex}>
         <T variant="rowTitle" numberOfLines={1}>
-          {call?.name ?? 'A call'} asks
+          {call?.name ?? 'A call'} {isApproval(call?.question) ? 'needs your OK' : 'asks'}
         </T>
         <T variant="label" color="text2" numberOfLines={1}>
           {botName}’s phone call{live}
@@ -147,61 +146,21 @@ function RequestBody({ card }: { card: PhoneCard }) {
 
 function QuestionBody({ card }: { card: PhoneCard }) {
   const router = useRouter()
-  const { c } = useTheme()
-  const left = useQuestionLeft(card.call)
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
+  const canJoin = useCanJoin(card.call)
+  const join = useJoinCall()
   const { errand, call } = card
-  const open = () => router.push({ pathname: '/bot/[profile]', params: { profile: errand.profile, ...(errand.session_id ? { chat: errand.session_id } : {}) } })
 
   if (!call?.question) {
     return null
   }
 
-  async function send() {
-    if (!call) {
-      return
-    }
-
-    setBusy(true)
-    const went = await sendAnswer(errand, call, text)
-    setBusy(false)
-
-    if (went) {
-      setText('')
-    }
-  }
-
-  const over = left === null || left <= 0
+  const open = () => router.push({ pathname: '/bot/[profile]/errand-call', params: { profile: errand.profile, errand: errand.id, call: call.id } })
 
   return (
     <>
-      <QuestionTrack left={left ?? 0} />
-      <T variant="display">“{call.question.text}”</T>
-      <T variant="secondary" color="text2">
-        {over ? 'The minute is up: they heard you’ll get back to them.' : 'They’re on a short hold. If you don’t answer within the minute, they hear you’ll get back to them.'}
-      </T>
-      {over ? null : (
-        <View style={styles.answer}>
-          <T variant="label" color="text2">
-            Your answer is checked like the brief, then the voice passes it on
-          </T>
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder={`Answer ${call.name}`}
-            placeholderTextColor={c.text2}
-            accessibilityLabel={`Answer ${call.name}`}
-            returnKeyType="send"
-            editable={!busy}
-            onSubmitEditing={() => text.trim() && void send()}
-            style={[styles.input, { backgroundColor: c.pressedIn, color: c.text }]}
-          />
-        </View>
-      )}
+      <AskBody errand={errand} call={call} size="deck" onJoin={canJoin ? () => join(errand, call) : undefined} />
       <View style={styles.buttons}>
-        {over ? null : <Pill label="Send answer" variant="primary" height={46} flex disabled={!text.trim()} loading={busy} onPress={() => void send()} />}
-        <Pill label="Open the call" variant={over ? 'primary' : 'secondary'} height={46} flex={over} onPress={open} />
+        <Pill label="Open the call" height={46} onPress={open} />
       </View>
     </>
   )
@@ -254,8 +213,6 @@ const styles = StyleSheet.create({
   tabular: { fontVariant: ['tabular-nums'] },
   gate: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   buttons: { flexDirection: 'row', gap: 8, paddingTop: 2 },
-  answer: { gap: 6 },
-  input: { height: 48, borderRadius: radius.field, paddingHorizontal: 14, fontFamily: fonts.regular, fontSize: 15 },
   tight: { gap: 2 },
   loose: { lineHeight: 22 },
 })
