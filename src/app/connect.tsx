@@ -8,7 +8,7 @@ import { Screen } from '@/components/ui/Screen'
 import { T } from '@/components/ui/T'
 import { authDeps } from '@/lib/auth-native'
 import { signInWithPassword, SignInError } from '@/lib/hermes/auth'
-import { normalizeBaseUrl, probeServer } from '@/lib/hermes/server'
+import { normalizeBaseUrl, plainOverInternet, probeServer } from '@/lib/hermes/server'
 import { useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -123,11 +123,17 @@ export default function Connect() {
     }
 
     const { status, lastError } = useConnection.getState()
-    setBusy(false)
 
     if (status !== 'online') {
+      // Keep nothing that did not work: a wrong token saved here would be retried on every launch, with Home in its way.
+      await useConnection.getState().forget()
+      setBusy(false)
       setError(lastError ?? 'The server answered, but refused the connection. Check the session token.')
+
+      return
     }
+
+    setBusy(false)
   }
 
   return (
@@ -158,6 +164,11 @@ export default function Connect() {
                 accessibilityLabel="Server address"
                 style={[field, { fontFamily: fonts.mono, fontSize: 14 }]}
               />
+              {url.trim() && plainOverInternet(url) ? (
+                <T variant="meta" color="text2">
+                  This address isn’t encrypted, so your sign-in and chats cross the internet in the clear. Use https, or reach the server over Tailscale or your own network.
+                </T>
+              ) : null}
             </View>
 
             {usePassword ? (

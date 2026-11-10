@@ -26,6 +26,37 @@ export function normalizeBaseUrl(input: string): string {
   return url.replace(/\/+$/, '')
 }
 
+/**
+ * Whether an address sends your token and chats unencrypted over a network you may not own: plain http to a host that is not this
+ * phone, a private network or a Tailscale address (Tailscale encrypts on its own). Shown as a warning on Connect, never a block.
+ */
+export function plainOverInternet(input: string): boolean {
+  const url = normalizeBaseUrl(input)
+
+  if (!/^http:\/\//i.test(url)) {
+    return false
+  }
+
+  const host = (/^http:\/\/(?:[^/?#@]*@)?(\[[^\]]*\]|[^/?#:]+)/i.exec(url)?.[1] ?? '').toLowerCase()
+
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.ts.net') || host === '[::1]') {
+    return false
+  }
+
+  const ip = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host)
+
+  if (ip) {
+    const a = Number(ip[1])
+    const b = Number(ip[2])
+
+    // Loopback, private ranges, link-local and Tailscale's 100.64.0.0/10.
+    return !(a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127))
+  }
+
+  // A one-word name (a machine on your network, or a Tailscale MagicDNS name) stays local.
+  return host.includes('.')
+}
+
 function wsOrigin(baseUrl: string): string {
   return baseUrl.replace(/^http/i, 'ws')
 }

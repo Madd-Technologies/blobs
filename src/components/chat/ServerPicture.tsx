@@ -4,7 +4,7 @@ import { Image, Pressable, StyleSheet, View } from 'react-native'
 
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
-import { isRemote } from '@/lib/hermes/media'
+import { isRemote, webHost } from '@/lib/hermes/media'
 import { shownHeight } from '@/lib/hermes/pictureCache'
 import { pictureKey, usePictures } from '@/stores/pictures'
 import { useViewer } from '@/stores/viewer'
@@ -13,6 +13,9 @@ import { useTheme } from '@/theme/ThemeProvider'
 
 /** How wide a picture a bot sent is drawn in the chat. */
 export const PICTURE_WIDTH = 260
+
+/** Web pictures you tapped to load, so scrolling back past one does not ask again while the app runs. */
+const allowedWebPictures = new Set<string>()
 
 interface Props {
   /** A file on the server, or an https address (a picture a tool made on the web). */
@@ -26,7 +29,7 @@ interface Props {
 /**
  * A picture a bot sent, drawn in the chat as soon as it is on screen (fetched from the server, kept so scrolling back is
  * instant). It opens full screen when tapped. While it loads there is a quiet block of the same width; if it cannot be loaded the
- * picture is a named chip that tries again when tapped.
+ * picture is a named chip that tries again when tapped. A picture from a web address is a chip naming its host until tapped.
  */
 export function ServerPicture({ path, name, profile, quiet }: Props) {
   const { c } = useTheme()
@@ -36,7 +39,10 @@ export function ServerPicture({ path, name, profile, quiet }: Props) {
   const remote = isRemote(path)
   // A picture on the web is not kept by the store, so it remembers its own shape.
   const [remoteRatio, setRemoteRatio] = useState<number | undefined>()
-  const url = remote ? path : entry?.status === 'ready' ? entry.url : null
+  // A web address in a reply is chosen by the bot (or by a page it read), and loading it tells that site you are reading: so a
+  // picture from the web waits for a tap, which is remembered while the app runs.
+  const [allowed, setAllowed] = useState(() => !remote || allowedWebPictures.has(path))
+  const url = remote ? (allowed ? path : null) : entry?.status === 'ready' ? entry.url : null
 
   // Fetched only while its row is on screen: a bot's picture can be megabytes, and a long chat has many.
   const visible = useRowVisible()
@@ -70,6 +76,27 @@ export function ServerPicture({ path, name, profile, quiet }: Props) {
         <Feather name="image" size={14} color={c.text2} />
         <T variant="label" color="text2" numberOfLines={2} style={styles.failedText}>
           {name} · {entry.error}
+        </T>
+      </Pressable>
+    )
+  }
+
+  if (remote && !allowed) {
+    const host = webHost(path) ?? 'the web'
+
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${name}, a picture from ${host}. Tap to load it.`}
+        onPress={() => {
+          allowedWebPictures.add(path)
+          setAllowed(true)
+        }}
+        style={[styles.failed, { backgroundColor: c.tone }]}
+      >
+        <Feather name="image" size={14} color={c.text2} />
+        <T variant="label" color="text2" numberOfLines={2} style={styles.failedText}>
+          Picture from {host} · Tap to load
         </T>
       </Pressable>
     )
