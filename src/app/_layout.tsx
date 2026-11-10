@@ -58,6 +58,7 @@ function RootStack() {
           <Stack.Screen name="settings" />
           <Stack.Screen name="notifications" />
           <Stack.Screen name="plugins" />
+          <Stack.Screen name="licences" />
           <Stack.Screen name="phone/index" />
           <Stack.Screen name="phone/never-share" />
           <Stack.Screen name="screens/index" />

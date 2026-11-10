@@ -22,9 +22,9 @@
   <!-- Keep every statement here in step with what the app does. -->
   <main class="wrap doc">
     <h1>Privacy</h1>
-    <p class="updated">Last updated 14 October 2026</p>
+    <p class="updated">Last updated 9 November 2026</p>
 
-    <p class="summary">Blobs collects nothing. There is no Blobs account, no analytics, no ads and no tracking, and Madd Technologies runs no server that your data passes through. The app talks only to the Hermes Agent server you connect it to.</p>
+    <p class="summary">Blobs collects nothing. There is no Blobs account, no analytics, no ads and no tracking, and Madd Technologies runs no server that your data passes through. The app talks to the Hermes Agent server you connect it to, and, only during a voice call, to the voice service that server is set up with.</p>
 
     <h2>What Blobs sends, and where</h2>
     <p>Everything you do in Blobs goes to the Hermes Agent server whose address you enter: your messages, the photos, files and voice memos you choose to send, your answers to approvals and questions, and your keyboard and mouse input when you take over a bot's screen. That server belongs to you or to someone you trust. It may pass your messages on to the AI model provider it is set up to use, under that provider's terms. Madd Technologies never receives any of it.</p>
@@ -37,12 +37,18 @@
     </ul>
     <p>Signing out removes the session. Deleting the app removes everything.</p>
 
+    <h2>Voice calls</h2>
+    <p>On Android, if your Hermes server has the optional voice plugin set up, you can call a bot. During a call, the app sends your microphone's audio straight to the voice service your server uses (today xAI's Grok voice), with a short-lived key your server issues from its owner's account, and plays the voice's replies. That service processes the audio under its own terms. What you ask for in a call also goes to your Hermes server, like a message. Nothing about a call passes through Madd Technologies, and Blobs keeps no recording.</p>
+
+    <h2>Phone errands</h2>
+    <p>If your Hermes server has the optional phone plugin set up, a bot can make phone calls for you, such as booking a table, through a phone number and phone provider (today Twilio) that the server's owner sets up and pays for. You approve each call first. If you listen in to a call or take it over, the call's audio and your microphone's audio pass between the app and your Hermes server, which connects them to the call. The server keeps each call's written record, as its owner has set it up. Nothing about a call passes through Madd Technologies.</p>
+
     <h2>Notifications</h2>
-    <p>On Android, if you turn notifications on, your Hermes server sends them through UnifiedPush and a distributor app you choose, such as ntfy, which delivers them under its own terms. Blobs doesn't use Google's Firebase messaging, and nothing passes through Madd Technologies. Your phone registers with your server so it can be reached. While notifications are on, the app also tells your server which chat you have open, so you aren't notified about something you're already looking at. On iPhone and iPad, Blobs doesn't offer notifications yet.</p>
+    <p>On Android, if you turn notifications on, your Hermes server sends them through UnifiedPush and a distributor app you choose, such as ntfy, which delivers them under its own terms. Blobs doesn't use Google's Firebase messaging, and nothing passes through Madd Technologies. Your phone registers with your server so it can be reached. While notifications are on, the app also tells your server which chat you have open, so you aren't notified about something you're already looking at. On iPhone, Blobs doesn't offer notifications yet.</p>
 
     <h2>Permissions</h2>
     <ul>
-      <li><b>Microphone:</b> only while you record a voice memo to send.</li>
+      <li><b>Microphone:</b> only while you record a voice memo, are in a voice call, or have the line in a phone errand you listen to or take over.</li>
       <li><b>Camera and photos:</b> only when you take or choose a picture to send.</li>
     </ul>
 

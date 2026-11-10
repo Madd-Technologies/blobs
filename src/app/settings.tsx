@@ -98,7 +98,8 @@ export default function Settings() {
           <Row label="How Blobs works" onPress={() => router.push('/tour')} />
           <Row label="Privacy" onPress={() => void openLink(PRIVACY_URL)} />
           <Row label="Support" onPress={() => void openLink(SUPPORT_URL)} />
-          <Row label="Source and licence" onPress={() => void openLink(SOURCE_URL)} />
+          <Row label="Source" onPress={() => void openLink(SOURCE_URL)} />
+          <Row label="Licences" onPress={() => router.push('/licences')} />
         </GroupedList>
 
         {__DEV__ ? (
