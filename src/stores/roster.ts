@@ -1,4 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
 
 import { reuseRows } from '@/features/roster/derive'
 import { describeError } from '@/features/sessions/store'
@@ -9,45 +11,90 @@ import { call } from '@/lib/hermes/rpc'
 import { gateway, onGatewayEvent, useConnection } from '@/stores/connection'
 
 interface RosterState {
+  server: string | null
   rows: ProfileRow[]
-  /** At least one roster response has arrived. */
+  /** At least one roster response (or cached roster for this server) is available. */
   loaded: boolean
   loading: boolean
   error: string | null
   refresh: () => Promise<void>
+  syncServer: (baseUrl: string | null) => void
 }
 
-export const useRoster = create<RosterState>((set, get) => ({
-  rows: [],
-  loaded: false,
-  loading: false,
-  error: null,
+export const useRoster = create<RosterState>()(
+  persist(
+    (set, get) => ({
+      server: null,
+      rows: [],
+      loaded: false,
+      loading: false,
+      error: null,
 
-  refresh: async () => {
-    if (get().loading || useConnection.getState().status !== 'online') {
-      return
-    }
+      syncServer: baseUrl => {
+        const state = get()
 
-    set({ loading: true })
+        if (baseUrl !== state.server) {
+          set({ server: baseUrl, rows: [], loaded: false, error: null })
+        } else if (baseUrl && state.rows.length > 0 && !state.loaded) {
+          set({ loaded: true })
+        }
+      },
 
-    try {
-      const { profiles } = await call(gateway, 'profiles.list', { include_sessions: true })
+      refresh: async () => {
+        const baseUrl = useConnection.getState().config?.baseUrl ?? null
 
-      // Most reads return the same data: skip the update so nothing re-renders, and keep unchanged rows as the same objects.
-      const rows = reuseRows(get().rows, profiles)
+        if (get().loading || useConnection.getState().status !== 'online' || !baseUrl) {
+          return
+        }
 
-      if (rows) {
-        set({ rows })
-      }
+        set({ loading: true })
 
-      set({ loaded: true, error: null })
-    } catch (error) {
-      set({ error: describeError(error) })
-    } finally {
-      set({ loading: false })
-    }
-  },
-}))
+        try {
+          const { profiles } = await call(gateway, 'profiles.list', { include_sessions: true })
+
+          // Most reads return the same data: skip the update so nothing re-renders, and keep unchanged rows as the same objects.
+          const currentRows = get().server === baseUrl ? get().rows : []
+          const rows = reuseRows(currentRows, profiles)
+
+          set({
+            server: baseUrl,
+            ...(rows ? { rows } : {}),
+            loaded: true,
+            error: null,
+          })
+        } catch (error) {
+          set({ error: describeError(error) })
+        } finally {
+          set({ loading: false })
+        }
+      },
+    }),
+    {
+      name: 'blobs.roster',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: state => ({ server: state.server, rows: state.rows }),
+      onRehydrateStorage: () => state => {
+        if (!state) {
+          return
+        }
+
+        const connection = useConnection.getState()
+
+        if (!connection.hydrated) {
+          return
+        }
+
+        const baseUrl = connection.config?.baseUrl ?? null
+
+        if (baseUrl && state.server === baseUrl && state.rows.length > 0) {
+          useRoster.setState({ loaded: true })
+        } else if (state.server !== baseUrl) {
+          useRoster.setState({ server: baseUrl, rows: [], loaded: false })
+        }
+      },
+    },
+  ),
+)
 
 /**
  * Refreshes the roster when the server says sessions changed, at most every 8 s while bots write (the roster is the costly
@@ -59,14 +106,28 @@ export function startRosterSync(): () => void {
   const stopPoll = startPoller(refresh, 30_000, () => useConnection.getState().status === 'online')
   const changed = coalesce(refresh, { delayMs: 400, minGapMs: 8_000 })
 
+  const syncServer = () => {
+    const connection = useConnection.getState()
+
+    if (connection.hydrated) {
+      useRoster.getState().syncServer(connection.config?.baseUrl ?? null)
+    }
+  }
+
+  syncServer()
+
   const stopEvents = onGatewayEvent(event => {
     if (event.type === 'sessions.changed') {
       changed.signal()
     }
   })
 
-  // A fresh connection has a fresh roster.
+  // A fresh connection has a fresh roster; switching servers clears the previous server's cached rows.
   const stopConnection = useConnection.subscribe((state, previous) => {
+    if (state.hydrated && (state.config?.baseUrl !== previous.config?.baseUrl || !previous.hydrated)) {
+      useRoster.getState().syncServer(state.config?.baseUrl ?? null)
+    }
+
     if (state.status === 'online' && previous.status !== 'online') {
       refresh()
     }

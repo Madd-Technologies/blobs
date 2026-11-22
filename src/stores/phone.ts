@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
-import { inMotion } from '@/features/phone/view'
+import { ASKED_DAYS, inMotion } from '@/features/phone/view'
 import { describeError } from '@/features/sessions/store'
 import {
   answerCall,
@@ -145,25 +145,52 @@ export const usePhone = create<PhoneState>()(
               void get().loadSettings()
             }
 
-            // Read in full what is new, what changed, and what is calling now.
+            // Read in full what is active, what changed, and recent un-dismissed errands within the Needs-you window
+            // using bounded concurrency and a single batched store update instead of N sequential fetches.
             const known = get().errands
-            const stale = rows.filter(row => moving(row, known[row.id]) || known[row.id]?.status !== row.status || known[row.id]?.calls.length !== row.calls)
-
-            for (const row of stale) {
-              try {
-                keep(await getErrand(current, row.id))
-              } catch {
-                // The next refresh tries again.
+            const dismissed = new Set(get().dismissed)
+            const cutoff = Date.now() / 1000 - ASKED_DAYS * 86_400
+            const urgentRows = rows.filter(row => moving(row, known[row.id]) || (!!known[row.id] && (known[row.id]?.status !== row.status || known[row.id]?.calls.length !== row.calls)))
+            const urgentIds = new Set(urgentRows.map(row => row.id))
+            const recentNew = rows
+              .filter(row => !urgentIds.has(row.id) && !known[row.id] && !dismissed.has(row.id) && row.created >= cutoff)
+              .sort((a, b) => b.created - a.created)
+              .slice(0, 10)
+            const queue = [...urgentRows, ...recentNew]
+            const fetched: Errand[] = []
+            const worker = async () => {
+              for (let row = queue.shift(); row; row = queue.shift()) {
+                try {
+                  fetched.push(await getErrand(current, row.id))
+                } catch {
+                  // The next refresh tries again.
+                }
               }
             }
 
-            // Forget errands the list no longer has (it keeps the newest 50).
-            const ids = new Set(rows.map(row => row.id))
-            const errands = get().errands
-
-            if (Object.keys(errands).some(id => !ids.has(id))) {
-              set({ errands: Object.fromEntries(Object.entries(errands).filter(([id]) => ids.has(id))) })
+            if (queue.length) {
+              await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker))
             }
+
+            // Merge fetched errands and drop ones the list no longer holds (it keeps the newest 50) in one write.
+            const ids = new Set(rows.map(row => row.id))
+            set(state => {
+              const next: Record<string, Errand> = {}
+
+              for (const [id, item] of Object.entries(state.errands)) {
+                if (ids.has(id)) {
+                  next[id] = item
+                }
+              }
+
+              for (const item of fetched) {
+                if (ids.has(item.id)) {
+                  next[item.id] = item
+                }
+              }
+
+              return { errands: next }
+            })
           } catch {
             // What is shown stays until the next read.
           } finally {

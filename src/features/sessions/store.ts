@@ -25,7 +25,7 @@ import { INBOX_TITLE, NOT_CHATS } from './chats.ts'
 import { createEventQueue, realTimers, type EventQueue, type QueueTimers } from './queue.ts'
 
 /** Rows fetched per page; the chat opens on the newest page and pages back from there. */
-export const PAGE_SIZE = 200
+export const PAGE_SIZE = 50
 /** Side chats read at a time on the Chats screen; more are read as you scroll. */
 const CHATS_PAGE = 30
 

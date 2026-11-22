@@ -220,6 +220,16 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
     })
 
     try {
+      // Probe server version in parallel with opening the socket, and don't hold 'online' up if /api/status is slow.
+      const probePromise = probeServer(config.baseUrl).then(
+        probe => probe.version ?? null,
+        () => null,
+      )
+      let versionTimer: ReturnType<typeof setTimeout> | undefined
+      const versionFallback = new Promise<string | null>(resolve => {
+        versionTimer = setTimeout(() => resolve(get().serverVersion), 1_500)
+      })
+
       const [asked, version] = await Promise.race([
         (async () => {
           await gateway.connect(await openUrl())
@@ -227,10 +237,16 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
           // Before any chat is opened: a newer server withdraws every prompt from a client that has not said
           // it can answer them. An older server has no such call and keeps using events. The version says what
           // else the server reports (`lib/hermes/capabilities.ts`), so it is known before chats open too.
-          return Promise.all([advertiseServerRequests(gateway), probeServer(config.baseUrl).then(probe => probe.version ?? null)])
+          return Promise.all([advertiseServerRequests(gateway), Promise.race([probePromise, versionFallback]).finally(() => clearTimeout(versionTimer))])
         })(),
         deadline,
       ])
+
+      void probePromise.then(resolved => {
+        if (resolved && get().config?.baseUrl === config.baseUrl && get().serverVersion !== resolved) {
+          set({ serverVersion: resolved })
+        }
+      })
 
       if (__DEV__) {
         console.log(`[gateway] server requests: ${asked.length ? asked.join(', ') : 'none (older server)'}`)

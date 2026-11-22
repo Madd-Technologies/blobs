@@ -17,6 +17,8 @@ import { BotFace } from '@/components/bots/BotFace'
 import { CROWD, crowdSvg, type CrowdId } from '@/features/tour/crowd'
 import { haptic } from '@/lib/haptics'
 import { useBoot } from '@/stores/boot'
+import { useConnection } from '@/stores/connection'
+import { usePrefs } from '@/stores/prefs'
 import { fonts, palettes } from '@/theme/tokens'
 
 /** Courier's size on the native splash, in points: `imageWidth` of expo-splash-screen in app.json. Change both together. */
@@ -140,16 +142,18 @@ function useCourierJump(play: boolean) {
  */
 export function BootSplash() {
   const reduced = useReducedMotion()
+  // Returning configured users go straight into Home with a brief fade; new launches get the full intro choreography.
+  const [quick] = useState(() => useConnection.getState().config !== null && usePrefs.getState().tourSeen)
   // The native splash follows the system's appearance, not the app's theme setting: match it until the splash is gone.
   const scheme = useColorScheme() === 'light' ? 'light' : 'dark'
   const c = palettes[scheme]
   const finishSplash = useBoot(state => state.finishSplash)
   const [play, setPlay] = useState(false)
   const [poke, setPoke] = useState(0)
-  const jump = useCourierJump(play && !reduced)
+  const jump = useCourierJump(play && !reduced && !quick)
   const courierXml = useMemo(() => crowdSvg('courier', SPLASH_FACE), [])
   const shown = useSharedValue(1)
-  const name = useSharedValue(reduced ? 1 : 0)
+  const name = useSharedValue(reduced || quick ? 1 : 0)
 
   // The overlay is drawn: hide the native splash under it (two frames later, so the faces have been painted) and play.
   function onLayout() {
@@ -168,6 +172,12 @@ export function BootSplash() {
 
     const done = () => finishSplash()
 
+    if (quick) {
+      shown.set(withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) }, finished => finished && runOnJS(done)()))
+
+      return
+    }
+
     if (reduced) {
       shown.set(withDelay(450, withTiming(0, { duration: 220 }, finished => finished && runOnJS(done)())))
 
@@ -179,23 +189,25 @@ export function BootSplash() {
     shown.set(withDelay(AT.exit, withTiming(0, { duration: AT.exitFor, easing: Easing.out(Easing.cubic) }, finished => finished && runOnJS(done)())))
 
     return () => timers.forEach(clearTimeout)
-  }, [play, reduced, finishSplash, shown, name])
+  }, [play, quick, reduced, finishSplash, shown, name])
 
   const fade = useAnimatedStyle(() => ({ opacity: shown.get() }))
   // As it lifts away, the crowd drifts up a little and grows, as if you walked past it into the app.
-  const crowd = useAnimatedStyle(() => ({ transform: reduced ? [] : [{ translateY: (1 - shown.get()) * -10 }, { scale: 1 + (1 - shown.get()) * 0.05 }] }))
+  const crowd = useAnimatedStyle(() => ({ transform: reduced || quick ? [] : [{ translateY: (1 - shown.get()) * -10 }, { scale: 1 + (1 - shown.get()) * 0.05 }] }))
   const nameStyle = useAnimatedStyle(() => ({ opacity: name.get(), transform: [{ translateY: (1 - name.get()) * 10 }] }))
 
   return (
     <Animated.View testID="boot-splash" accessible accessibilityLabel="Blobs" pointerEvents="none" onLayout={onLayout} style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: c.canvas }, fade]}>
       <Animated.View style={[styles.stage, crowd]}>
-        {reduced ? null : FRIENDS.map((friend, index) => <Friend key={friend.id} {...friend} index={index} play={play} />)}
+        {reduced || quick ? null : FRIENDS.map((friend, index) => <Friend key={friend.id} {...friend} index={index} play={play} />)}
         <Animated.View style={[styles.courier, jump]}>
-          <BotFace name="Courier" xml={courierXml} size={SPLASH_FACE} motion={reduced ? 'still' : 'idle'} poke={poke} />
+          <BotFace name="Courier" xml={courierXml} size={SPLASH_FACE} motion={reduced || quick ? 'still' : 'idle'} poke={poke} />
         </Animated.View>
-        <Animated.View style={[styles.name, nameStyle]}>
-          <Text style={[styles.word, { color: c.text }]}>Blobs</Text>
-        </Animated.View>
+        {quick ? null : (
+          <Animated.View style={[styles.name, nameStyle]}>
+            <Text style={[styles.word, { color: c.text }]}>Blobs</Text>
+          </Animated.View>
+        )}
       </Animated.View>
     </Animated.View>
   )
