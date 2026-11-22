@@ -20,7 +20,7 @@ import { timeLabel } from '@/features/dashboard/view'
 import { activeCall, callLine, callLines, callSummary, compare, headline, inMotion, openQuestion, resultsLine, shortName, theyAsked } from '@/features/phone/view'
 import type { Errand } from '@/lib/hermes/phone'
 import { useNowMs } from '@/lib/useNow'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { startPhonePoll, usePhone } from '@/stores/phone'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
@@ -34,8 +34,8 @@ export default function ErrandScreen() {
   const { profile, id } = useLocalSearchParams<{ profile: string; id: string }>()
   const errand = usePhone(state => state.errands[id])
   const settings = usePhone(state => state.settings)
-  const view = useBotView(profile)
-  const botName = view?.name ?? profile
+  const bot = useBotIdentity(profile)
+  const botName = bot?.name ?? profile
   // Live lines count each second while calls are being made; a request waiting for your OK needs no clock.
   const nowS = useNowMs(!!errand && inMotion(errand), 1000) / 1000
   const back = { pathname: '/bot/[profile]', params: { profile } } as const
@@ -77,7 +77,7 @@ export default function ErrandScreen() {
         <PhoneHeader profile={profile} title={errand.status === 'pending' ? botName : errand.brief.title} status={status} fallback={back} />
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           {errand.status === 'pending' ? (
-            <RequestCard errand={errand} botName={botName} meta={view?.meta} settings={settings} nowS={nowS} />
+            <RequestCard errand={errand} botName={botName} meta={bot?.meta} settings={settings} nowS={nowS} />
           ) : errand.status === 'declined' || errand.status === 'expired' ? (
             <View style={styles.titles}>
               <T variant="title" style={styles.headline}>
@@ -93,7 +93,7 @@ export default function ErrandScreen() {
           {calling
             ? errand.calls
                 .filter(call => openQuestion(call, nowS))
-                .map(call => <CallQuestionCard key={call.id} errand={errand} call={call} meta={view?.meta} />)
+                .map(call => <CallQuestionCard key={call.id} errand={errand} call={call} meta={bot?.meta} />)
             : null}
         </ScrollView>
         {live ? (

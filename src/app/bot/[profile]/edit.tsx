@@ -8,7 +8,7 @@ import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { saveBotMeta, saveDescription, saveInstructions, useProfileDetail } from '@/stores/profiles'
 import { toast } from '@/stores/toast'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -27,14 +27,14 @@ export default function EditBot() {
   const { profile, field } = useLocalSearchParams<{ profile: string; field: Field }>()
   const router = useRouter()
   const { c } = useTheme()
-  const view = useBotView(profile)
+  const bot = useBotIdentity(profile)
   const detail = useProfileDetail(state => state.byBot[profile]?.detail ?? null)
   const copy = COPY[field] ?? COPY.title
   // `undefined` until the person types: the field then shows the saved value, and nothing needs copying into state.
   const [draft, setDraft] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
 
-  const saved = field === 'soul' ? (detail?.soul ?? null) : field === 'description' ? (detail?.description ?? view?.row.description ?? '') : (view?.name ?? profile)
+  const saved = field === 'soul' ? (detail?.soul ?? null) : field === 'description' ? (detail?.description ?? bot?.row.description ?? '') : (bot?.name ?? profile)
 
   useEffect(() => {
     if (field === 'soul' && !detail) {

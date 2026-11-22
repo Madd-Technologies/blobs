@@ -29,7 +29,7 @@ import {
   type RunsOnKind,
   type SshTarget,
 } from '@/lib/hermes/runsOn'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { saveRunsOn, useRunsOn } from '@/stores/profiles'
 import { toast } from '@/stores/toast'
@@ -73,7 +73,7 @@ export default function RunsOnScreen() {
   const { c } = useTheme()
   const config = useConnection(state => state.config)
   const online = useConnection(state => state.status === 'online')
-  const name = useBotView(profile)?.name ?? profile
+  const name = useBotIdentity(profile)?.name ?? profile
   const current = useRunsOn(state => state.byBot[profile])
   const [draft, setDraft] = useState<Draft | null>(null)
   // The bot's key on the server: undefined while reading, null when the server's plugin cannot make one.

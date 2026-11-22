@@ -1,6 +1,6 @@
 import Feather from '@expo/vector-icons/Feather'
 import { useRouter } from 'expo-router'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, RefreshControl, StyleSheet, TextInput, View } from 'react-native'
 
 import { BotRow } from '@/components/bots/BotRow'
@@ -165,22 +165,25 @@ export default function Home() {
   }, [dashboardKey])
   const needsYou = views.filter(view => view.attention.state === 'needsYou')
   const roomsNeedYou = roomViews.filter(view => view.needsYou)
-  const open = (profile: string) => router.push({ pathname: '/bot/[profile]', params: { profile } })
+  const open = useCallback((profile: string) => router.push({ pathname: '/bot/[profile]', params: { profile } }), [router])
   // A pinned bot opens its dashboard where the server has hermes-dashboard; elsewhere its chat, as before.
-  const openPinned = (profile: string) => (dashboardsReady ? router.push({ pathname: '/bot/[profile]/dashboard', params: { profile } }) : open(profile))
-  const openRoom = (id: string) => router.push({ pathname: '/room/[id]', params: { id } })
+  const openPinned = useCallback((profile: string) => (dashboardsReady ? router.push({ pathname: '/bot/[profile]/dashboard', params: { profile } }) : open(profile)), [dashboardsReady, router, open])
+  const openRoom = useCallback((id: string) => router.push({ pathname: '/room/[id]', params: { id } }), [router])
 
   // A message found in a bot's main chat opens the bot as it always does. One in any other chat opens to read, because the
   // server will not hand every old chat back to a phone to write in (a Kanban worker's transcript, for one).
-  function openHit(hit: SessionHit) {
-    const canonical = useRoster.getState().rows.find(row => row.name === hit.profile)?.canonical_session
+  const openHit = useCallback(
+    (hit: SessionHit) => {
+      const canonical = useRoster.getState().rows.find(row => row.name === hit.profile)?.canonical_session
 
-    if (isMainChat(hit, canonical)) {
-      open(hit.profile)
-    } else {
-      router.push({ pathname: '/bot/[profile]/past', params: { profile: hit.profile, session: hit.sessionId, title: hit.title } })
-    }
-  }
+      if (isMainChat(hit, canonical)) {
+        open(hit.profile)
+      } else {
+        router.push({ pathname: '/bot/[profile]/past', params: { profile: hit.profile, session: hit.sessionId, title: hit.title } })
+      }
+    },
+    [open, router],
+  )
 
   // Things on bots' dashboards that need you count too, and name their bot once.
   const dashboardNames = views.filter(view => (dashboardNeeds[view.profile] ?? 0) > 0 && view.attention.state !== 'needsYou').map(view => view.name)
@@ -196,19 +199,18 @@ export default function Home() {
   function renderRow(item: Item) {
     switch (item.kind) {
       case 'bot':
-        return <BotRow view={item.view} onPress={() => open(item.view.profile)} />
+        return <BotRow view={item.view} onOpen={open} />
       case 'room':
-        return <RoomRow view={item.view} metas={metas} onPress={() => openRoom(item.view.id)} />
+        return <RoomRow view={item.view} metas={metas} onOpen={openRoom} />
       case 'hit':
         return (
           <HitRow
-            profile={item.hit.profile}
+            hit={item.hit}
             name={views.find(view => view.profile === item.hit.profile)?.name ?? item.hit.profile}
             meta={metas[item.hit.profile]}
             chatTitle={isMainChat(item.hit, useRoster.getState().rows.find(row => row.name === item.hit.profile)?.canonical_session) ? '' : item.hit.title}
-            snippet={item.hit.snippet}
             age={ageLabel(item.hit.lastActive, nowS)}
-            onPress={() => openHit(item.hit)}
+            onOpen={openHit}
           />
         )
       case 'unsearched':

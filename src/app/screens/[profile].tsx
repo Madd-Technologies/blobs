@@ -21,7 +21,8 @@ import { wording } from '@/features/transcript/activity'
 import type { Step } from '@/features/transcript/types'
 import { useKeyboardHeight } from '@/lib/useKeyboardHeight'
 import { useConnection } from '@/stores/connection'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
+import { useBotAttention } from '@/stores/inbox'
 import { display, useScreen } from '@/stores/display'
 import { sessions, useBotSession } from '@/stores/sessions'
 import { toast } from '@/stores/toast'
@@ -46,7 +47,8 @@ export default function ScreenWatch() {
   const { c } = useTheme()
   const router = useRouter()
   const { profile } = useLocalSearchParams<{ profile: string }>()
-  const view = useBotView(profile)
+  const identity = useBotIdentity(profile)
+  const attention = useBotAttention(profile)
   // The sheet under the picture runs to the bottom edge; its content stays clear of the home indicator.
   const insets = useSafeAreaInsets()
   const screen = useScreen(profile)
@@ -60,7 +62,7 @@ export default function ScreenWatch() {
   const running = !!status?.running
   const mine = isMine(status?.lease, screen?.viewer ?? null)
   const humanElsewhere = status?.lease.holder === 'human' && !mine
-  const name = view?.name ?? profile
+  const name = identity?.name ?? profile
 
   const { attach, onEvent, phase, notice, error, send, paste, setFit } = useScreenViewer(profile, { active: true, running, driving: mine })
   const keyboardHeight = useKeyboardHeight()
@@ -91,7 +93,7 @@ export default function ScreenWatch() {
     return w && h ? w / h : 1.6
   }, [status?.geometry])
 
-  const needsYou = view?.attention.state === 'needsYou'
+  const needsYou = attention?.state === 'needsYou'
   const steps = recentSteps(session?.transcript.items)
 
   const subtitle = !status ? '' : !running ? 'Off' : mine ? 'You have control' : humanElsewhere ? 'Someone has control' : needsYou ? 'Waiting for you' : 'Watching'

@@ -28,7 +28,7 @@ import {
 } from '@/lib/hermes/cron'
 import { chatInStack } from '@/lib/stack'
 import { useNow } from '@/lib/useNow'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useDrafts } from '@/stores/drafts'
 import { removeRoutine, runKey, runRoutineNow, setRoutineOn, useRoutines } from '@/stores/routines'
@@ -42,7 +42,7 @@ export default function BotRoutines() {
   const router = useRouter()
   const navigation = useNavigation()
   const { c } = useTheme()
-  const view = useBotView(profile)
+  const bot = useBotIdentity(profile)
   const online = useConnection(state => state.status === 'online')
   const state = useRoutines(store => store.byBot[profile])
   const nowS = useNow(30)
@@ -54,7 +54,7 @@ export default function BotRoutines() {
   const [deleting, setDeleting] = useState<CronJob | null>(null)
   // The server switches a paused routine back on when it is run, so that is asked first.
   const [runningPaused, setRunningPaused] = useState<CronJob | null>(null)
-  const name = view?.name ?? profile
+  const name = bot?.name ?? profile
 
   useEffect(() => {
     if (online) {

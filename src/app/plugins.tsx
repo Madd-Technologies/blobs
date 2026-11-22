@@ -8,7 +8,7 @@ import { Screen } from '@/components/ui/Screen'
 import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { T } from '@/components/ui/T'
 import { installMessage } from '@/features/plugins/catalog'
-import { useBotViews } from '@/stores/bots'
+import { useBotDirectory } from '@/stores/bots'
 import { pluginView } from '@/features/plugins/view'
 import { useConnection } from '@/stores/connection'
 import { useRestart } from '@/stores/restart'
@@ -19,9 +19,11 @@ import { radius } from '@/theme/tokens'
 
 /** The pinned bots: a per-bot plugin (Dashboards) is installed for each of them too. */
 function usePinnedProfiles(): string[] {
-  const views = useBotViews()
+  const directory = useBotDirectory()
 
-  return views.filter(view => view.pinned).map(view => view.profile)
+  return Object.entries(directory)
+    .filter(([, bot]) => bot.pinned)
+    .map(([profile]) => profile)
 }
 
 function copySetup(plugin: ServerPlugin, bots: string[]) {

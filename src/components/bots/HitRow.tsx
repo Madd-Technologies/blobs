@@ -3,35 +3,34 @@ import { Pressable, StyleSheet, View } from 'react-native'
 
 import { T } from '@/components/ui/T'
 import type { BotMeta } from '@/lib/hermes/identity'
-import { snippetParts } from '@/lib/hermes/search'
+import { snippetParts, type SessionHit } from '@/lib/hermes/search'
 import { useTheme } from '@/theme/ThemeProvider'
 
 import { BotFace } from './BotFace'
 
 interface Props {
-  profile: string
+  hit: SessionHit
   name: string
   meta: BotMeta | undefined
   /** The chat's own title when it is a side chat, so two chats of one bot can be told apart. */
   chatTitle: string
-  snippet: string
   age: string
-  onPress: () => void
+  onOpen: (hit: SessionHit) => void
 }
 
 /** A message a search found: whose chat it is in, the words around the match with the match itself brighter, and when. */
-export const HitRow = memo(function HitRow({ profile, name, meta, chatTitle, snippet, age, onPress }: Props) {
+export const HitRow = memo(function HitRow({ hit, name, meta, chatTitle, age, onOpen }: Props) {
   const { c } = useTheme()
-  const parts = snippetParts(snippet)
+  const parts = snippetParts(hit.snippet)
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${name}${chatTitle ? `, ${chatTitle}` : ''}. ${parts.map(part => part.text).join('')}`}
-      onPress={onPress}
+      onPress={() => onOpen(hit)}
       style={({ pressed }) => [styles.row, { backgroundColor: pressed ? c.tone : 'transparent' }]}
     >
-      <BotFace name={profile} meta={meta} size={36} />
+      <BotFace name={hit.profile} meta={meta} size={36} />
       <View style={styles.text}>
         <T variant="rowTitle" numberOfLines={1}>
           {chatTitle ? `${name} · ${chatTitle}` : name}

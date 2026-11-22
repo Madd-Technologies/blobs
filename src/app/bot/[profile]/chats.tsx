@@ -15,7 +15,7 @@ import { buildChatEntries, type ChatEntry } from '@/features/sessions/chats'
 import { afterSheetCloses } from '@/lib/afterSheet'
 import { chatInStack } from '@/lib/stack'
 import { useNow } from '@/lib/useNow'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { useChatList } from '@/stores/chats'
 import { useConnection } from '@/stores/connection'
 import { useRoster } from '@/stores/roster'
@@ -52,7 +52,7 @@ export default function Chats() {
   const router = useRouter()
   const navigation = useNavigation()
   const { c } = useTheme()
-  const view = useBotView(profile)
+  const bot = useBotIdentity(profile)
   const session = useBotSession(profile)
   const chosen = useChosenChat(profile)
   const online = useConnection(state => state.status === 'online')
@@ -66,7 +66,7 @@ export default function Chats() {
   const [pressed, setPressed] = useState<ChatEntry | null>(null)
   const [deleting, setDeleting] = useState<ChatEntry | null>(null)
   const [busy, setBusy] = useState(false)
-  const name = view?.name ?? profile
+  const name = bot?.name ?? profile
 
   useEffect(() => {
     if (online) {
@@ -185,7 +185,7 @@ export default function Chats() {
                 onPress={() => void open(main)}
                 style={({ pressed: down }) => [styles.mainRow, { backgroundColor: down ? c.sheet : 'transparent' }]}
               >
-                <BotFace name={profile} meta={view?.meta} size={40} />
+                <BotFace name={profile} meta={bot?.meta} size={40} />
                 <View style={styles.rowText}>
                   <T variant="rowTitle" numberOfLines={1}>
                     Main chat

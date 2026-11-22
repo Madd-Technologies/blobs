@@ -18,11 +18,11 @@ import { Screen } from '@/components/ui/Screen'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { callingErrand, errandsForChat, placeErrands, type Placed } from '@/features/phone/view'
-import type { BotView } from '@/features/roster/view'
+import { botLastActive, type Attention } from '@/features/attention/derive'
+import type { ProfileRow } from '@/lib/hermes/protocol'
 import type { BotSession } from '@/features/sessions/store'
 import { pendingPrompts } from '@/features/transcript/reduce'
 import { buildDisplay, type DisplayItem } from '@/features/transcript/display'
-import { botLastActive } from '@/features/attention/derive'
 import { runningLine } from '@/features/transcript/display'
 import { jobsLine, runningJobs } from '@/features/transcript/jobs'
 import { ageLabel } from '@/features/roster/derive'
@@ -34,13 +34,13 @@ import { canCall } from '@/lib/duplexAudio'
 import { useNow, useNowMs } from '@/lib/useNow'
 import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useViewableRows } from '@/lib/useViewableRows'
-import { useBotView, useFaceColor } from '@/stores/bots'
+import { useBotIdentity, useFaceColor } from '@/stores/bots'
 import { useCall } from '@/stores/call'
 import { useCommands } from '@/stores/commands'
 import { useConnection } from '@/stores/connection'
 import { useSpeech } from '@/stores/speech'
 import { useDrafts } from '@/stores/drafts'
-import { useOpenChat } from '@/stores/inbox'
+import { useBotAttention, useOpenChat } from '@/stores/inbox'
 import { usePhone } from '@/stores/phone'
 import { usePrefs } from '@/stores/prefs'
 import { useSeen } from '@/stores/seen'
@@ -54,7 +54,7 @@ import { BotTint } from '@/theme/ThemeProvider'
  * The quiet line under the bot's name. Once the chat is open its own transcript is the truth about
  * what the bot is doing; the polled status (which lags by seconds) only fills in before that.
  */
-function statusLine(view: BotView | undefined, session: BotSession | undefined, nowS: number, jobNowMs: number): string {
+function statusLine(view: { row: ProfileRow; attention: Attention } | undefined, session: BotSession | undefined, nowS: number, jobNowMs: number): string {
   const transcript = session?.phase === 'ready' ? session.transcript : undefined
 
   if (transcript) {
@@ -103,7 +103,12 @@ export default function BotChat() {
   const { profile, chat } = useLocalSearchParams<{ profile: string; chat?: string }>()
   const router = useRouter()
   const openedByLink = useRef(!!chat)
-  const view = useBotView(profile)
+  const identity = useBotIdentity(profile)
+  const attention = useBotAttention(profile)
+  const view = useMemo(
+    () => (identity ? { ...identity, attention: attention ?? { state: 'idle' as const, unread: false } } : undefined),
+    [identity, attention],
+  )
   const session = useBotSession(profile)
   const chosen = useChosenChat(profile)
   const draft = useDrafts(state => state.byBot[profile])

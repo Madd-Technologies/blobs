@@ -12,7 +12,7 @@ import { isPicture, splitMedia, type MediaRef } from '@/lib/hermes/media'
 import { openDocument, openFile } from '@/stores/documents'
 import { pictureKey, usePictures } from '@/stores/pictures'
 import { useViewer } from '@/stores/viewer'
-import { useBotViews } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { Press } from '@/components/ui/Press'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
@@ -222,7 +222,7 @@ export const AssistantBubble = memo(function AssistantBubble({ text, interrupted
  */
 export const TeammateBubble = memo(function TeammateBubble({ handle, text }: { handle: string; text: string }) {
   const profile = profileOfHandle(handle)
-  const sender = useBotViews({ includeHidden: true }).find(view => view.profile === profile)
+  const sender = useBotIdentity(profile)
 
   return (
     <View style={styles.teammateRow}>

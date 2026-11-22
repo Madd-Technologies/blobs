@@ -25,7 +25,7 @@ import { T } from '@/components/ui/T'
 import { askAboutRecord, fileCard, longLabel, nextStage, recordDrafts, recordHeading, timeLabel, untilLabel } from '@/features/dashboard/view'
 import type { Field } from '@/lib/hermes/dashboard'
 import { useNow } from '@/lib/useNow'
-import { useBotView, useBotViews } from '@/stores/bots'
+import { useBotDirectory, useBotIdentity } from '@/stores/bots'
 import { useDashboards } from '@/stores/dashboards'
 import { useWatch } from '@/stores/watch'
 import { useDrafts } from '@/stores/drafts'
@@ -39,8 +39,8 @@ export default function DashboardRecord() {
   const router = useRouter()
   const { c } = useTheme()
   const detail = useDashboards(state => state.records[id])
-  const bots = useBotViews({ includeHidden: true })
-  const owner = useBotView(detail?.record.created_by ?? profile)
+  const bots = useBotDirectory()
+  const owner = useBotIdentity(detail?.record.created_by ?? profile)
   const [error, setError] = useState<string | null>(null)
   const [pulling, setPulling] = useState(false)
   const [editing, setEditing] = useState<Field | null>(null)
@@ -48,13 +48,13 @@ export default function DashboardRecord() {
   const [busy, setBusy] = useState<'next' | 'close' | 'note' | 'press' | null>(null)
   const [more, setMore] = useState(false)
 
-  const botName = (who: string) => bots.find(bot => bot.profile === who)?.name ?? who
+  const botName = (who: string) => bots[who]?.name ?? who
   const name = botName(profile)
   const clock = useNow(60)
   const rows = useRowActions(detail?.now ?? clock, botName)
   const approvals = useApprovals(detail)
   /** A bot's name when it is one of yours (an "asked by" byline names only those). */
-  const nameOf = (who: string) => bots.find(bot => bot.profile === who)?.name ?? null
+  const nameOf = (who: string) => bots[who]?.name ?? null
 
   useFocusEffect(
     useCallback(() => {

@@ -271,9 +271,9 @@ export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'id
   const shape = appearance.shape
 
   const blob = useMemo(() => (xml ?? (isBlobShape(shape) && !image ? blobSvg(shape, name, size) : null)), [xml, shape, name, size, image])
-  // An unrenderable blobatar falls back to the name's classic shape, like Desktop's older SDKs.
+  // Skip generating classic geometry when a photo or blobatar SVG is drawn.
   const classic = isBlobShape(shape) ? botAppearance(name, { ...meta, shape: undefined }).shape : shape
-  const face = useMemo(() => buildFace(classic, color, name, mood), [classic, color, name, mood])
+  const face = useMemo(() => (image || blob ? null : buildFace(classic, color, name, mood)), [image, blob, classic, color, name, mood])
   // A dozing face is drawn live even under Reduce Motion: its shut eyes are a state, not an animation.
   const live = (!reduced && (motion !== 'still' || poke > 0 || !!gaze)) || motion === 'doze'
   const parts = useMemo(() => (live && blob ? splitBlob(blob) : null), [live, blob])
@@ -285,14 +285,14 @@ export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'id
           <Image source={{ uri: image }} style={{ width: size, height: size, borderRadius: size * 0.22 }} />
         ) : blob ? (
           <SvgXml xml={blob} width={size} height={size} />
-        ) : (
+        ) : face ? (
           <>
             <ClassicBody face={face} color={color} size={size} />
             <View style={StyleSheet.absoluteFill}>
               <ClassicEyes face={face} color={color} mood={mood} size={size} />
             </View>
           </>
-        )}
+        ) : null}
       </View>
     )
   }
@@ -303,7 +303,7 @@ export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'id
       ? parts
         ? { body: <SvgXml xml={parts.body} width={size} height={size} />, eyes: <SvgXml xml={parts.eyes} width={size} height={size} />, eyeLine: parts.eyeLine }
         : { body: <SvgXml xml={blob} width={size} height={size} />, eyes: null, eyeLine: 0.5 }
-      : { body: <ClassicBody face={face} color={color} size={size} />, eyes: <ClassicEyes face={face} color={color} mood={mood} size={size} />, eyeLine: classicEyeLine(face) }
+      : { body: <ClassicBody face={face!} color={color} size={size} />, eyes: <ClassicEyes face={face!} color={color} mood={mood} size={size} />, eyeLine: classicEyeLine(face!) }
 
   return (
     <View aria-hidden style={{ width: size, height: size }}>

@@ -6,15 +6,16 @@ import { BotFace } from '@/components/bots/BotFace'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Press } from '@/components/ui/Press'
 import { T } from '@/components/ui/T'
+import type { Attention } from '@/features/attention/derive'
 import { motionFor } from '@/features/face/motion'
-import type { BotView } from '@/features/roster/view'
+import type { BotMeta } from '@/lib/hermes/identity'
 import { useDashboards } from '@/stores/dashboards'
 import { useRoster } from '@/stores/roster'
 import { useTheme } from '@/theme/ThemeProvider'
 
 interface Props {
   profile: string
-  view: BotView | undefined
+  view: { name: string; meta?: BotMeta; attention?: Attention } | undefined
   /** The quiet line under the name. */
   status: string
   /** It is your turn (a prompt waits): a small amber dot leads the status line. */
@@ -46,7 +47,7 @@ export function ChatHeader({ profile, view, status, waiting, working }: Props) {
         onPressIn={() => setPoke(count => count + 1)}
         style={styles.identity}
       >
-        <BotFace name={profile} meta={view?.meta} size={30} mood={working ? 'work' : 'idle'} motion={motionFor({ needsYou: view?.attention.state === 'needsYou', working })} poke={poke} />
+        <BotFace name={profile} meta={view?.meta} size={30} mood={working ? 'work' : 'idle'} motion={motionFor({ needsYou: view?.attention?.state === 'needsYou', working })} poke={poke} />
         <View style={styles.title}>
           <T variant="heading" numberOfLines={1}>
             {view || known ? name : ' '}

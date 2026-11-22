@@ -15,7 +15,7 @@ import { buildDisplay, type DisplayItem } from '@/features/transcript/display'
 import { itemsFromHistory, settleStaleSteps } from '@/features/transcript/history'
 import { useNow } from '@/lib/useNow'
 import { useViewableRows } from '@/lib/useViewableRows'
-import { useBotView, useFaceColor } from '@/stores/bots'
+import { useBotIdentity, useFaceColor } from '@/stores/bots'
 import { usePast } from '@/stores/past'
 import { usePrefs } from '@/stores/prefs'
 import { sessions } from '@/stores/sessions'
@@ -32,7 +32,7 @@ export default function PastChatScreen() {
   const inbox = inboxParam === '1' || isInboxTitle(title ?? '')
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const view = useBotView(profile)
+  const bot = useBotIdentity(profile)
   const tint = useFaceColor(profile)
   const past = usePast(state => state.byId[session])
   const showThinking = usePrefs(state => state.showThinking)
@@ -43,7 +43,7 @@ export default function PastChatScreen() {
   const [continuing, setContinuing] = useState(false)
   // Why the server would not open this chat for writing, kept on screen: it is a sentence to read, not a blip.
   const [refusal, setRefusal] = useState<string | null>(null)
-  const name = view?.name ?? profile
+  const name = bot?.name ?? profile
   // Only what is on screen loads its pictures.
   const viewable = useViewableRows(`past:${session}`)
 
@@ -83,7 +83,7 @@ export default function PastChatScreen() {
       <Screen edges={['top']}>
         <View style={styles.header}>
           <IconCircle icon="chevron-left" label="Back" bare diameter={40} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
-          <BotFace name={profile} meta={view?.meta} size={30} />
+          <BotFace name={profile} meta={bot?.meta} size={30} />
           <View style={styles.title}>
             <T variant="heading" numberOfLines={1}>
               {inbox ? 'Between bots' : title?.trim() || 'Earlier chat'}

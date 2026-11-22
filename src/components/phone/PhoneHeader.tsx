@@ -6,17 +6,17 @@ import { StyleSheet, View } from 'react-native'
 import { BotFace } from '@/components/bots/BotFace'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { T } from '@/components/ui/T'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 
 /** A phone screen's header, on the bot's paper: back, the bot's face, a title and a status line. */
 export function PhoneHeader({ profile, title, status, fallback }: { profile: string; title: string; status?: ReactNode; fallback: Href }) {
   const router = useRouter()
-  const view = useBotView(profile)
+  const bot = useBotIdentity(profile)
 
   return (
     <View style={styles.header}>
       <IconCircle icon="chevron-left" label="Back" bare diameter={40} onPress={() => (router.canGoBack() ? router.back() : router.replace(fallback))} />
-      <BotFace name={profile} meta={view?.meta} size={30} />
+      <BotFace name={profile} meta={bot?.meta} size={30} />
       <View style={styles.titles}>
         <T variant="heading" numberOfLines={1}>
           {title}

@@ -18,6 +18,9 @@ export type RichBlock =
   /** Markdown, with each inline formula replaced by a placeholder for `math[n]`. */
   | { kind: 'markdown'; text: string; math: MathItem[] }
 
+/** Shared empty array so plain markdown blocks keep reference equality across streaming chunks. */
+const EMPTY_MATH: MathItem[] = []
+
 /** Private-use characters: they mean nothing to markdown, so it leaves them alone. */
 const OPEN = '\uE000'
 const CLOSE = '\uE001'
@@ -162,7 +165,7 @@ export function parseBlock(block: string): RichBlock {
     }
 
     // Any other code block is for the markdown renderer, which must not see formulas in it.
-    return { kind: 'markdown', text: block, math: [] }
+    return { kind: 'markdown', text: block, math: EMPTY_MATH }
   }
 
   const alone = DISPLAY_DOLLARS.exec(trimmed) ?? DISPLAY_BRACKETS.exec(trimmed)
@@ -175,7 +178,7 @@ export function parseBlock(block: string): RichBlock {
   const math: MathItem[] = []
   const text = liftInline(block, math)
 
-  return { kind: 'markdown', text, math }
+  return { kind: 'markdown', text, math: math.length ? math : EMPTY_MATH }
 }
 
 /** A rendered string cut into its words and the formulas that stood in them: strings, and indexes into `math`. */
