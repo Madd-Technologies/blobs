@@ -2,10 +2,12 @@ import Feather from '@expo/vector-icons/Feather'
 import { useRouter } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, RefreshControl, StyleSheet, TextInput, View } from 'react-native'
+import { useStore } from 'zustand'
 
 import { BotRow } from '@/components/bots/BotRow'
 import { DashboardStrip } from '@/components/bots/DashboardStrip'
 import { HitRow } from '@/components/bots/HitRow'
+import { InFlightStrip } from '@/components/bots/InFlightStrip'
 import { NeedsYouSheet } from '@/components/bots/NeedsYouSheet'
 import { RoomRow } from '@/components/rooms/RoomRow'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
@@ -17,6 +19,7 @@ import { T } from '@/components/ui/T'
 import { roomMatches, type RoomView } from '@/features/rooms/view'
 import { ageLabel, filterRoster } from '@/features/roster/derive'
 import { homeList } from '@/features/roster/home'
+import { deriveInFlight, type InFlightItem } from '@/features/roster/inflight'
 import type { BotView } from '@/features/roster/view'
 import { isMainChat, type SessionHit } from '@/lib/hermes/search'
 import { holdOrder } from '@/lib/holdOrder'
@@ -25,9 +28,12 @@ import { useBotMetas, useBotViews } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useDashboards } from '@/stores/dashboards'
 import { useDeck } from '@/stores/deck'
+import { inbox } from '@/stores/inbox'
 import { useMessageSearch } from '@/stores/messageSearch'
+import { usePhone } from '@/stores/phone'
 import { useRoomViews, useRooms } from '@/stores/rooms'
 import { useRoster } from '@/stores/roster'
+import { sessions } from '@/stores/sessions'
 import { useWatch } from '@/stores/watch'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
@@ -57,6 +63,13 @@ export default function Home() {
   const dashboardNeeds = useMemo(() => Object.fromEntries(Object.entries(dashboardSummary).map(([profile, entry]) => [profile, entry.needs_you])), [dashboardSummary])
   const metas = useBotMetas()
   const deck = useDeck()
+  const errands = usePhone(state => state.errands)
+  const botSessions = useStore(sessions.store, state => state.bots)
+  const background = useStore(inbox.store, state => state.background)
+  const inFlight = useMemo(
+    () => deriveInFlight({ views, rooms: roomViews, errands, sessions: botSessions, background }),
+    [views, roomViews, errands, botSessions, background],
+  )
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [pulling, setPulling] = useState(false)
@@ -169,6 +182,18 @@ export default function Home() {
   // A pinned bot opens its dashboard where the server has hermes-dashboard; elsewhere its chat, as before.
   const openPinned = useCallback((profile: string) => (dashboardsReady ? router.push({ pathname: '/bot/[profile]/dashboard', params: { profile } }) : open(profile)), [dashboardsReady, router, open])
   const openRoom = useCallback((id: string) => router.push({ pathname: '/room/[id]', params: { id } }), [router])
+  const openInFlight = useCallback(
+    (item: InFlightItem) => {
+      if (item.kind === 'errand') {
+        router.push({ pathname: '/bot/[profile]/errand', params: { profile: item.profile, id: item.errandId } })
+      } else if (item.kind === 'room') {
+        openRoom(item.roomId)
+      } else {
+        open(item.profile)
+      }
+    },
+    [open, openRoom, router],
+  )
 
   // A message found in a bot's main chat opens the bot as it always does. One in any other chat opens to read, because the
   // server will not hand every old chat back to a phone to write in (a Kanban worker's transcript, for one).
@@ -307,8 +332,11 @@ export default function Home() {
                 names={namesLine}
                 loaded={loaded}
                 onReview={() => router.push('/inbox')}
+                onReviewBucket={bucket => router.push({ pathname: '/inbox', params: { bucket } })}
                 onOpen={card => router.push({ pathname: '/inbox', params: { start: card.key } })}
               />
+              {/* Active calls, working bots, replying rooms, and background helpers in motion right now. */}
+              <InFlightStrip items={inFlight} metas={metas} onOpen={openInFlight} />
               {/* The pinned bots' dashboards, where the server has them; their chats are the first rows below. */}
               {dashboardsReady ? <DashboardStrip views={pinned} onOpen={openPinned} nowS={nowS} /> : null}
               {/* The list is a sheet of paper over the canvas: its rounded top here, the rows on it, and its foot to the bottom. */}

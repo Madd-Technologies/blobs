@@ -5,7 +5,7 @@ import { cardAge, cardLine, cardName, type DeckContext } from '@/components/inbo
 import { Pill } from '@/components/ui/Pill'
 import { Raised } from '@/components/ui/Raised'
 import { T } from '@/components/ui/T'
-import type { DeckCard } from '@/features/inbox/deck'
+import { deckSummary, filterDeck, type DeckCard } from '@/features/inbox/deck'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
@@ -26,6 +26,8 @@ interface Props {
   names: string
   /** Needs you, from the top. */
   onReview: () => void
+  /** Needs you, opened directly into a filtered bucket. */
+  onReviewBucket?: (bucket: 'blocked' | 'review') => void
   /** Needs you, on this card. */
   onOpen: (card: DeckCard) => void
   /** The roster has loaded, so "nothing needs you" is true and not just early. */
@@ -33,10 +35,10 @@ interface Props {
 }
 
 /**
- * Home's first thing: what waits on you, several at once, on one raised sheet with Review all as the white pill. Each row is
- * who and what they ask; a row opens Needs you on it. When nothing waits, one quiet line says so.
+ * Home's first thing: what blocks your bots right now comes first on one raised sheet, while high-volume dashboard items
+ * stay grouped in a quiet footer row so 60+ items never overwhelm Home.
  */
-export function NeedsYouSheet({ count, cards, context, names, onReview, onOpen, loaded }: Props) {
+export function NeedsYouSheet({ count, cards, context, names, onReview, onReviewBucket, onOpen, loaded }: Props) {
   const { c } = useTheme()
 
   if (count < 1) {
@@ -50,9 +52,15 @@ export function NeedsYouSheet({ count, cards, context, names, onReview, onOpen, 
     ) : null
   }
 
-  const label = `${count} ${count === 1 ? 'thing needs' : 'things need'} you`
-  const shown = cards.slice(0, SHOWN)
-  const more = count - shown.length
+  const pendingBoard = Math.max(0, count - cards.length)
+  const summary = deckSummary(cards, pendingBoard)
+  const hasBlocked = summary.blockedCount > 0
+  const label = hasBlocked
+    ? `${summary.blockedCount} ${summary.blockedCount === 1 ? 'thing waiting' : 'things waiting'} on you`
+    : `${summary.reviewCount} ${summary.reviewCount === 1 ? 'item' : 'items'} to review`
+  const shown = (hasBlocked ? filterDeck(cards, { urgency: 'blocked' }) : cards).slice(0, SHOWN)
+  const more = (hasBlocked ? summary.blockedCount : summary.reviewCount) - shown.length
+  const reviewAction = () => (onReviewBucket ? onReviewBucket('review') : onReview())
 
   return (
     <Raised radius={radius.card} style={styles.sheet} accessibilityLabel={label}>
@@ -61,7 +69,7 @@ export function NeedsYouSheet({ count, cards, context, names, onReview, onOpen, 
         <T variant="heading" style={styles.flex} accessibilityRole="header" numberOfLines={1}>
           {label}
         </T>
-        <Pill label="Review all" variant="primary" height={36} onPress={onReview} />
+        <Pill label="Review all" variant="primary" height={36} onPress={hasBlocked ? onReview : reviewAction} />
       </View>
       {shown.map(card => (
         <Pressable
@@ -94,10 +102,23 @@ export function NeedsYouSheet({ count, cards, context, names, onReview, onOpen, 
           {names}
         </T>
       ) : null}
-      {shown.length && more > 0 ? (
+      {shown.length > 0 && more > 0 ? (
         <T variant="label" color="text2" style={styles.more}>
-          and {more} more
+          and {more} more{hasBlocked ? ' waiting' : ''}
         </T>
+      ) : null}
+      {hasBlocked && summary.reviewCount > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${summary.reviewCount} dashboard ${summary.reviewCount === 1 ? 'item' : 'items'} to review`}
+          onPress={reviewAction}
+          style={({ pressed }) => [styles.footerRow, pressed && { backgroundColor: c.tone }]}
+        >
+          <T variant="secondary" color="text2" style={styles.flex}>
+            {summary.reviewCount} dashboard {summary.reviewCount === 1 ? 'item' : 'items'} to review
+          </T>
+          <Feather name="chevron-right" size={15} color={c.text2} />
+        </Pressable>
       ) : null}
     </Raised>
   )
@@ -129,5 +150,6 @@ const styles = StyleSheet.create({
   command: { fontFamily: fonts.mono, fontSize: 13 },
   names: { paddingHorizontal: 16, paddingBottom: 6 },
   more: { paddingHorizontal: 16, paddingTop: 2, paddingBottom: 4 },
+  footerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, paddingHorizontal: 16, paddingVertical: 10, borderRadius: radius.list },
   quiet: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingTop: 10 },
 })

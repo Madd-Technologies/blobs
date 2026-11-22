@@ -7,7 +7,7 @@ import { describeError } from '@/lib/hermes/errors'
 import { sameJson } from '@/lib/equal'
 import { absentGate } from '@/lib/absent'
 import { listCronJobs, triggerCronJob, type CronJob } from '@/lib/hermes/cron'
-import { addRecordNote, changeRecord, DraftChanged, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
+import { addRecordNote, bulkRecords, changeRecord, DraftChanged, getBotDashboard, type BulkRecordAction, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
 import { DASHBOARD_CHANGED, parseDashboardChanged } from '@/lib/hermes/livepush'
 import { startPoller } from '@/lib/poller'
 import { onGatewayEvent, useConnection } from '@/stores/connection'
@@ -49,6 +49,10 @@ interface DashboardsState {
   note: (profile: string, id: string, text: string) => Promise<string | null>
   /** Mutes a record until a time (server seconds), or unmutes it (null). */
   mute: (profile: string, id: string, until: number | null) => Promise<string | null>
+  /** Bulk closes/reopens many records across profiles with one batched refresh. */
+  bulkSetClosed: (items: { profile: string; id: string }[], closed: boolean) => Promise<{ failed: { id: string; error: string }[]; error?: string }>
+  /** Bulk mutes/unmutes many records across profiles with one batched refresh. */
+  bulkMute: (items: { profile: string; id: string }[], until: number | null) => Promise<{ failed: { id: string; error: string }[]; error?: string }>
   /** You pressed a record's button: a fresh side chat with the bot gets the job (and is then the chat the bot shows). */
   press: (profile: string, id: string, action: string) => Promise<string | null>
   /**
@@ -98,6 +102,31 @@ export const useDashboards = create<DashboardsState>()(
           return null
         } catch (error) {
           return describeError(error)
+        }
+      }
+
+      async function runBulk(items: { profile: string; id: string }[], action: BulkRecordAction, until?: number | null): Promise<{ failed: { id: string; error: string }[]; error?: string }> {
+        const current = config()
+
+        if (!current) {
+          return { failed: [], error: 'Not connected to the server.' }
+        }
+
+        if (items.length === 0) {
+          return { failed: [] }
+        }
+
+        try {
+          const result = await bulkRecords(current, items.map(item => item.id), action, until)
+          const profiles = [...new Set(items.map(item => item.profile))]
+          await Promise.all([
+            ...profiles.map(profile => Promise.all([get().load(profile), get().loadNeedsYou(profile)])),
+            get().refreshSummary(),
+          ])
+
+          return { failed: result.failed }
+        } catch (error) {
+          return { failed: [], error: describeError(error) }
         }
       }
 
@@ -243,6 +272,8 @@ export const useDashboards = create<DashboardsState>()(
         setClosed: (profile, id, closed) => act(profile, id, () => setRecordClosed(config()!, id, closed)),
         note: (profile, id, text) => act(profile, id, () => addRecordNote(config()!, id, text)),
         mute: (profile, id, until) => act(profile, id, () => muteRecord(config()!, id, until)),
+        bulkSetClosed: (items, closed) => runBulk(items, closed ? 'close' : 'reopen'),
+        bulkMute: (items, until) => runBulk(items, 'mute', until),
 
         press: async (profile, id, action) => {
           const current = config()

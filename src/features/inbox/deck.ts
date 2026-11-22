@@ -90,3 +90,106 @@ export function startAt(cards: DeckCard[], key: string | undefined): string[] {
 
   return at > 0 ? cards.slice(0, at).map(card => card.key) : []
 }
+
+export type CardUrgency = 'blocked' | 'review'
+
+export interface DeckFilter {
+  urgency?: 'all' | CardUrgency
+  profile?: string | null
+}
+
+export interface BotDeckCounts {
+  profile: string
+  total: number
+  blocked: number
+  review: number
+}
+
+export interface DeckSummary {
+  blockedCount: number
+  reviewCount: number
+  totalCount: number
+  byBot: Record<string, { total: number; blocked: number; review: number }>
+  bots: BotDeckCounts[]
+}
+
+/**
+ * Interactive decisions that block a live turn or call come first ('blocked'); queued dashboard cards and asked phone
+ * follow-ups sit under 'review' so triage stays calm even at 60+ items.
+ */
+export function cardUrgency(card: DeckCard): CardUrgency {
+  if (card.kind === 'board') {
+    return 'review'
+  }
+
+  if (card.kind === 'phone') {
+    return card.need === 'asked' ? 'review' : 'blocked'
+  }
+
+  return 'blocked'
+}
+
+export function filterDeck(cards: readonly DeckCard[], filter: DeckFilter): DeckCard[] {
+  const urgency = filter.urgency && filter.urgency !== 'all' ? filter.urgency : null
+  const profile = filter.profile ?? null
+
+  if (!urgency && !profile) {
+    return [...cards]
+  }
+
+  return cards.filter(card => {
+    if (urgency && cardUrgency(card) !== urgency) {
+      return false
+    }
+
+    if (profile && deckProfile(card) !== profile) {
+      return false
+    }
+
+    return true
+  })
+}
+
+export function deckSummary(cards: readonly DeckCard[], pendingBoardCount = 0): DeckSummary {
+  let blockedCount = 0
+  let reviewCount = 0
+  const byBot: Record<string, { total: number; blocked: number; review: number }> = {}
+
+  for (const card of cards) {
+    const urgency = cardUrgency(card)
+
+    if (urgency === 'blocked') {
+      blockedCount++
+    } else {
+      reviewCount++
+    }
+
+    const profile = deckProfile(card)
+
+    if (profile) {
+      const bucket = byBot[profile] ?? (byBot[profile] = { total: 0, blocked: 0, review: 0 })
+      bucket.total++
+
+      if (urgency === 'blocked') {
+        bucket.blocked++
+      } else {
+        bucket.review++
+      }
+    }
+  }
+
+  reviewCount += Math.max(0, pendingBoardCount)
+  const bots: BotDeckCounts[] = Object.entries(byBot)
+    .map(([profile, counts]) => ({ profile, ...counts }))
+    .sort((a, b) => b.blocked - a.blocked || b.total - a.total || a.profile.localeCompare(b.profile))
+
+  return { blockedCount, reviewCount, totalCount: blockedCount + reviewCount, byBot, bots }
+}
+
+/** Prompt sent to a bot's side chat when the user asks it to triage a crowded Needs-you queue. */
+export function triagePrompt(botName: string, count: number, viewTitle?: string): string {
+  const noun = count === 1 ? 'item' : 'items'
+  const where = viewTitle ? ` in "${viewTitle}" (${botName})` : ` on ${botName}'s dashboard`
+
+  return `I have ${count} ${noun} waiting for review${where}. Triage them for me: list which genuinely need my decision now, which can be closed or snoozed safely, and your recommended action for each.`
+}

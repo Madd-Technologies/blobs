@@ -1,80 +1,156 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { NeedsYouRecord } from '../../lib/hermes/dashboard.ts'
-import type { RoomView } from '../rooms/view.ts'
-import { buildDeck, leftLabel, orderDeck, startAt, turn } from './deck.ts'
-import type { InboxEntry } from './derive.ts'
+import { buildDeck, cardUrgency, deckSummary, filterDeck, triagePrompt, type DeckCard } from './deck.ts'
 
-const entry = (key: string, profile: string): InboxEntry => ({ key, profile, kind: 'approval', summary: 'Run a command', inline: true })
-const record = (id: string): NeedsYouRecord => ({ view: 'v', view_title: 'Inbox', row: { id, done: false, needs_you: true } })
-const room = (id: string, needsYou: boolean) => ({ id, needsYou }) as RoomView
+const errand = (id: string, profile: string) => ({
+  id,
+  profile,
+  session_id: `sess-${id}`,
+  created: 100,
+  status: 'running' as const,
+  brief: {
+    title: `Task ${id}`,
+    mode: 'ask' as const,
+    goal: `Complete ${id}`,
+    opening: '',
+    facts: [],
+    questions: [],
+    record: [],
+    accept: '',
+    notes: '',
+    calls: [],
+  },
+  flags: [],
+  ticked: [],
+  decided: null,
+  calls: [],
+})
 
-describe('Needs-you deck', () => {
-  it('puts bots’ prompts first, then dashboard records, then rooms that need you', () => {
-    const deck = buildDeck({
-      entries: [entry('e1', 'forge')],
-      waitingBots: ['concierge'],
-      held: { concierge: { records: [record('r1'), record('r2')], now: 500 } },
-      rooms: [room('a', false), room('b', true)],
-      nowS: 100,
+const boardCard = (profile: string, id: string): DeckCard => ({
+  kind: 'board',
+  key: `board:${profile}:${id}`,
+  profile,
+  nowS: 1000,
+  record: {
+    view: 'v1',
+    view_title: 'Tasks',
+    row: { id, title: { key: 'title', type: 'text', value: `Row ${id}` }, done: false, needs_you: true },
+  },
+})
+
+const entryCard = (profile: string, id: string): DeckCard => ({
+  kind: 'entry',
+  key: `entry:${profile}:${id}`,
+  profile,
+  entry: {
+    key: `entry:${profile}:${id}`,
+    profile,
+    kind: 'approval',
+    summary: 'Approve command',
+    command: 'ls -la',
+    inline: true,
+  },
+})
+
+const roomCard = (id: string): DeckCard => ({
+  kind: 'room',
+  key: `room:${id}`,
+  view: {
+    id,
+    name: 'Planning Room',
+    data: {
+      room: {
+        room_id: id,
+        name: 'Planning Room',
+        members: [],
+        authority_gateway_id: 'gw-1',
+        authority_epoch: 1,
+        revision: 1,
+        created_at: 900,
+        updated_at: 1000,
+      },
+      events: [],
+      cursor: 0,
+      status: null,
+    },
+    preview: 'Waiting for your answer',
+    age: 'now',
+    lastActive: 1000,
+    working: false,
+    attention: { actions: [], mention: null, needsYou: true },
+    needsYou: true,
+  },
+})
+
+describe('deck urgency, filtering, summary, and triage prompt', () => {
+  it('classifies blocked vs review cards', () => {
+    assert.equal(cardUrgency(entryCard('alpha', '1')), 'blocked')
+    assert.equal(cardUrgency(roomCard('r1')), 'blocked')
+    assert.equal(cardUrgency({ kind: 'phone', key: 'phone:q', profile: 'alpha', need: 'question', errand: errand('e1', 'alpha') }), 'blocked')
+    assert.equal(cardUrgency({ kind: 'phone', key: 'phone:req', profile: 'alpha', need: 'request', errand: errand('e2', 'alpha') }), 'blocked')
+    assert.equal(cardUrgency({ kind: 'phone', key: 'phone:asked', profile: 'alpha', need: 'asked', errand: errand('e3', 'alpha') }), 'review')
+    assert.equal(cardUrgency(boardCard('beta', '1')), 'review')
+  })
+
+  it('filters by urgency and profile independently or together', () => {
+    const cards: DeckCard[] = [
+      entryCard('alpha', '1'),
+      boardCard('alpha', '2'),
+      boardCard('beta', '3'),
+      roomCard('r1'),
+    ]
+
+    assert.equal(filterDeck(cards, {}).length, 4)
+    assert.deepEqual(filterDeck(cards, { urgency: 'blocked' }).map(c => c.key), ['entry:alpha:1', 'room:r1'])
+    assert.deepEqual(filterDeck(cards, { urgency: 'review' }).map(c => c.key), ['board:alpha:2', 'board:beta:3'])
+    assert.deepEqual(filterDeck(cards, { profile: 'alpha' }).map(c => c.key), ['entry:alpha:1', 'board:alpha:2'])
+    assert.deepEqual(filterDeck(cards, { urgency: 'review', profile: 'alpha' }).map(c => c.key), ['board:alpha:2'])
+  })
+
+  it('summarizes counts including pending unloaded dashboard items and sorts bots by blocked then total', () => {
+    const cards: DeckCard[] = [
+      entryCard('beta', '1'),
+      boardCard('alpha', '1'),
+      boardCard('alpha', '2'),
+      boardCard('alpha', '3'),
+      roomCard('r1'),
+    ]
+
+    const summary = deckSummary(cards, 10)
+    assert.equal(summary.blockedCount, 2)
+    assert.equal(summary.reviewCount, 13)
+    assert.equal(summary.totalCount, 15)
+    assert.deepEqual(summary.byBot.alpha, { total: 3, blocked: 0, review: 3 })
+    assert.deepEqual(summary.byBot.beta, { total: 1, blocked: 1, review: 0 })
+    assert.deepEqual(summary.bots.map(b => b.profile), ['beta', 'alpha'])
+  })
+
+  it('builds a clear triage prompt with or without a panel title', () => {
+    const withTitle = triagePrompt('Harper', 14, 'Follow ups')
+    assert.match(withTitle, /14 items/)
+    assert.match(withTitle, /Follow ups/)
+    assert.match(withTitle, /Harper/)
+
+    const single = triagePrompt('Scout', 1)
+    assert.match(single, /1 item waiting/)
+    assert.match(single, /Scout/)
+  })
+
+  it('keeps buildDeck ordering stable across mixed sources', () => {
+    const e = entryCard('alpha', '1')
+    const b = boardCard('beta', '1')
+    const r = roomCard('r1')
+    if (e.kind !== 'entry' || b.kind !== 'board' || r.kind !== 'room') throw new Error('unexpected kind')
+
+    const cards = buildDeck({
+      entries: [e.entry],
+      waitingBots: ['beta'],
+      held: { beta: { records: [b.record], now: 2000 } },
+      rooms: [r.view],
+      nowS: 1000,
     })
 
-    assert.deepEqual(
-      deck.map(card => card.key),
-      ['e1', 'board:concierge:r1', 'board:concierge:r2', 'room:b'],
-    )
-    assert.equal(deck[1]?.kind === 'board' && deck[1].nowS, 500, 'records use the server’s clock')
-  })
-
-  it('leaves out bots whose records are not loaded yet', () => {
-    assert.equal(buildDeck({ entries: [], waitingBots: ['courier'], held: {}, rooms: [], nowS: 1 }).length, 0)
-  })
-
-  it('turns like a ring: up for the next card, down for the one before', () => {
-    const deck = buildDeck({ entries: [entry('a', 'x'), entry('b', 'x'), entry('c', 'x')], waitingBots: [], held: {}, rooms: [], nowS: 1 })
-    const keys = (skipped: string[]) => orderDeck(deck, skipped).map(card => card.key)
-
-    let skipped = turn(deck, 'next')
-    assert.deepEqual(keys(skipped), ['b', 'c', 'a'])
-
-    skipped = turn(orderDeck(deck, skipped), 'next')
-    assert.deepEqual(keys(skipped), ['c', 'a', 'b'])
-
-    skipped = turn(orderDeck(deck, skipped), 'previous')
-    assert.deepEqual(keys(skipped), ['b', 'c', 'a'], 'back to the card before')
-
-    assert.deepEqual(keys(turn(deck, 'previous')), ['c', 'a', 'b'], 'the bottom card comes up from the start too')
-    assert.deepEqual(keys(turn(deck, 'next', 2)), ['c', 'a', 'b'], 'a card tapped behind the top one comes up')
-    assert.deepEqual(keys(turn(deck, 'next', 3)), ['a', 'b', 'c'], 'all the way round')
-    assert.deepEqual(turn(deck.slice(0, 1), 'next'), [], 'one card has nowhere to go')
-  })
-
-  it('keeps a new card among the cards not yet turned past', () => {
-    const deck = buildDeck({ entries: [entry('a', 'x'), entry('b', 'x')], waitingBots: [], held: {}, rooms: [], nowS: 1 })
-    const skipped = turn(deck, 'next')
-    const grown = buildDeck({ entries: [entry('a', 'x'), entry('b', 'x'), entry('c', 'x')], waitingBots: [], held: {}, rooms: [], nowS: 1 })
-
-    assert.deepEqual(orderDeck(grown, skipped).map(card => card.key), ['b', 'c', 'a'])
-  })
-
-  it('forgets skips for cards that are gone', () => {
-    const deck = buildDeck({ entries: [entry('b', 'x')], waitingBots: [], held: {}, rooms: [], nowS: 1 })
-
-    assert.deepEqual(orderDeck(deck, ['a']).map(card => card.key), ['b'])
-  })
-
-  it('counts what is left', () => {
-    assert.equal(leftLabel(3), '3 left')
-    assert.equal(leftLabel(0), '')
-  })
-
-  it('opens on the card a Home row was showing, the ones before it after the rest', () => {
-    const deck = buildDeck({ entries: [entry('a', 'x'), entry('b', 'x'), entry('c', 'x')], waitingBots: [], held: {}, rooms: [], nowS: 1 })
-
-    assert.deepEqual(orderDeck(deck, startAt(deck, 'b')).map(card => card.key), ['b', 'c', 'a'])
-    assert.deepEqual(startAt(deck, 'a'), [], 'already first')
-    assert.deepEqual(startAt(deck, 'gone'), [], 'answered meanwhile')
-    assert.deepEqual(startAt(deck, undefined), [])
+    assert.deepEqual(cards.map(c => c.kind), ['entry', 'board', 'room'])
   })
 })
