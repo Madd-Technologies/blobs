@@ -6,6 +6,7 @@ import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 
 import { BotFace } from '@/components/bots/BotFace'
 import { PanelMenu } from '@/components/dashboard/PanelMenu'
+import { PanelStarterSheet } from '@/components/dashboard/PanelStarterSheet'
 import { useRowActions } from '@/components/dashboard/useRowActions'
 import { NumbersBlock, ViewBlock } from '@/components/dashboard/ViewBlock'
 import { IconCircle } from '@/components/ui/IconCircle'
@@ -47,6 +48,7 @@ export default function BotDashboard() {
   const checking = useDashboards(state => !!state.checking[profile])
   const [pulling, setPulling] = useState(false)
   const [menu, setMenu] = useState<DashboardView | null>(null)
+  const [starter, setStarter] = useState(false)
   const clock = useNow(60)
   const name = view?.name ?? profile
   const working = view?.attention.state === 'working'
@@ -83,7 +85,7 @@ export default function BotDashboard() {
 
   async function onPull() {
     setPulling(true)
-    await useDashboards.getState().load(profile)
+    await useDashboards.getState().load(profile, { fresh: true })
     setPulling(false)
   }
 
@@ -121,6 +123,9 @@ export default function BotDashboard() {
               ) : null}
             </View>
           </Press>
+          {available !== false && board.dashboard?.installed !== false && !board.old ? (
+            <IconCircle icon="plus" label={`Add panel for ${name}`} onPress={() => setStarter(true)} />
+          ) : null}
           <IconCircle icon="more-horizontal" label={`${name}'s details`} onPress={openDetails} />
         </View>
 
@@ -182,7 +187,7 @@ export default function BotDashboard() {
                 <T variant="secondary" color="text2" style={styles.centered}>
                   {name} can track things for you here: what it found, things to follow up, reminders, numbers over time. Tell it what to track and how often to check.
                 </T>
-                <Pill label="Set up a panel" variant="primary" height={42} onPress={() => openChat(SET_UP)} />
+                <Pill label="Set up a panel" variant="primary" height={42} onPress={() => setStarter(true)} />
               </View>
             )
           ) : null}
@@ -220,6 +225,19 @@ export default function BotDashboard() {
           onOpenFull={target => {
             setMenu(null)
             openFull(target)
+          }}
+        />
+        <PanelStarterSheet
+          visible={starter}
+          botName={name}
+          onClose={() => setStarter(false)}
+          onPick={prompt => {
+            setStarter(false)
+            openChat(prompt)
+          }}
+          onCustom={() => {
+            setStarter(false)
+            openChat(SET_UP)
           }}
         />
       </Screen>

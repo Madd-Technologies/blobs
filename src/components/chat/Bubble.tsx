@@ -4,7 +4,7 @@ import { Image, Pressable, StyleSheet, View } from 'react-native'
 
 import { BotFace } from '@/components/bots/BotFace'
 import { T } from '@/components/ui/T'
-import { dashboardButton, profileOfHandle } from '@/features/transcript/injected'
+import { dashboardButton, dashboardSetup, profileOfHandle } from '@/features/transcript/injected'
 import { splitReply } from '@/features/transcript/reply'
 import { documentPaths, fileName, hidePaths, routeLinks } from '@/features/viewer/kind'
 import type { AttachmentChip } from '@/lib/hermes/attachments'
@@ -102,6 +102,7 @@ function Attachments({ chips, profile, dim }: { chips: AttachmentChip[]; profile
 export const UserBubble = memo(function UserBubble({ text, pending, attachments, profile }: { text: string; pending?: boolean; attachments?: AttachmentChip[]; profile?: string }) {
   const { c } = useTheme()
   const button = dashboardButton(text)
+  const setup = button ? null : dashboardSetup(text)
 
   if (button) {
     // A dashboard button's job: the button, the record and the draft's first line, not the instructions written for the bot.
@@ -117,6 +118,26 @@ export const UserBubble = memo(function UserBubble({ text, pending, attachments,
           {button.draft ? (
             <T variant="label" color="userBubbleText" numberOfLines={1} style={styles.buttonDraft}>
               “{button.draft}”
+            </T>
+          ) : null}
+        </View>
+        <T variant="meta" color="text2">
+          From your dashboard
+        </T>
+      </View>
+    )
+  }
+
+  if (setup) {
+    return (
+      <View style={styles.userGroup}>
+        <View style={[styles.base, styles.user, styles.button, { backgroundColor: c.userBubble, opacity: pending ? 0.6 : 1 }]} accessibilityLabel={`${setup.title}, ${setup.what}, from your dashboard`}>
+          <T variant="bodySemibold" color="userBubbleText">
+            {setup.title}
+          </T>
+          {setup.what ? (
+            <T variant="body" color="userBubbleText">
+              {setup.what}
             </T>
           ) : null}
         </View>

@@ -16,6 +16,14 @@ import { fonts, radius } from '@/theme/tokens'
 
 /** In development the simulator reaches the dev server on its own loopback. */
 const DEFAULT_URL = __DEV__ ? 'http://127.0.0.1:9119' : ''
+/** Optional build-time demo gateway for reviewers and first-time visitors trying Blobs without a server yet. */
+const DEMO_URL = process.env.EXPO_PUBLIC_DEMO_URL?.trim() ?? ''
+
+const safeHttpUrl = (candidate: string | undefined): string => {
+  const value = candidate?.trim() ?? ''
+
+  return /^https?:\/\//i.test(value) ? value : ''
+}
 
 /** What to tell the user when signing in failed. The server's own wording is kept where it is already plain. */
 function signInMessage(error: unknown, baseUrl: string): string {
@@ -41,14 +49,15 @@ export default function Connect() {
   const saveConfig = useConnection(state => state.saveConfig)
   // Set when a saved session ran out: come back to the same server, ready to sign in again.
   const signedOut = useConnection(state => state.signedOut)
-  // Development only: `/connect?url=…` prefills the address, to point the simulator at a throwaway server. Never a token.
+  // Optional `/connect?url=https://...` deep link prefill across builds (http/https only; never accepts a token).
   const { url: linked } = useLocalSearchParams<{ url?: string }>()
-  const [url, setUrl] = useState(signedOut?.baseUrl ?? ((__DEV__ && linked) || DEFAULT_URL))
-  const [prefilled, setPrefilled] = useState(linked)
+  const linkedUrl = safeHttpUrl(linked)
+  const [url, setUrl] = useState(signedOut?.baseUrl ?? (linkedUrl || DEFAULT_URL))
+  const [prefilled, setPrefilled] = useState(linkedUrl)
 
-  if (__DEV__ && linked && linked !== prefilled) {
-    setPrefilled(linked)
-    setUrl(linked)
+  if (linkedUrl && linkedUrl !== prefilled) {
+    setPrefilled(linkedUrl)
+    setUrl(linkedUrl)
   }
   const [token, setToken] = useState('')
   const [username, setUsername] = useState(signedOut?.user ?? '')
@@ -66,11 +75,11 @@ export default function Connect() {
 
   const canSubmit = !busy && !!url.trim() && (usePassword ? !!username.trim() && !!password : !!token.trim())
 
-  async function connect() {
+  async function connect(overrideUrl?: string) {
     setBusy(true)
     setError(null)
     setNotice(null)
-    const baseUrl = normalizeBaseUrl(url)
+    const baseUrl = normalizeBaseUrl(overrideUrl ?? url)
     const probe = await probeServer(baseUrl)
 
     if (probe.apiServer) {
@@ -247,6 +256,18 @@ export default function Connect() {
             ) : null}
 
             <Pill label={usePassword ? 'Sign in' : 'Connect'} variant="primary" height={52} loading={busy} disabled={!canSubmit} onPress={() => void connect()} style={styles.primary} />
+            {DEMO_URL ? (
+              <Pill
+                label="Try live demo"
+                variant="secondary"
+                height={46}
+                disabled={busy}
+                onPress={() => {
+                  setUrl(DEMO_URL)
+                  void connect(DEMO_URL)
+                }}
+              />
+            ) : null}
             <Pill
               label={usePassword ? 'Use a session token instead' : 'Use a username and password'}
               variant="ghost"

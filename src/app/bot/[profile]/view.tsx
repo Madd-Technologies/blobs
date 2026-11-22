@@ -43,7 +43,7 @@ export default function PanelFullView() {
 
   async function onPull() {
     setPulling(true)
-    await useDashboards.getState().load(profile)
+    await useDashboards.getState().load(profile, { fresh: true })
     setPulling(false)
   }
 

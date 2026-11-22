@@ -13,8 +13,10 @@ import { RoomRow } from '@/components/rooms/RoomRow'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
+import { Press } from '@/components/ui/Press'
 import { Screen } from '@/components/ui/Screen'
 import { Sheet } from '@/components/ui/Sheet'
+import { SkeletonRows } from '@/components/ui/Skeleton'
 import { T } from '@/components/ui/T'
 import { roomMatches, type RoomView } from '@/features/rooms/view'
 import { ageLabel, filterRoster } from '@/features/roster/derive'
@@ -31,9 +33,11 @@ import { useDeck } from '@/stores/deck'
 import { inbox } from '@/stores/inbox'
 import { useMessageSearch } from '@/stores/messageSearch'
 import { usePhone } from '@/stores/phone'
+import { saveBotMeta } from '@/stores/profiles'
 import { useRoomViews, useRooms } from '@/stores/rooms'
 import { useRoster } from '@/stores/roster'
 import { sessions } from '@/stores/sessions'
+import { toast } from '@/stores/toast'
 import { useWatch } from '@/stores/watch'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
@@ -74,6 +78,7 @@ export default function Home() {
   const [query, setQuery] = useState('')
   const [pulling, setPulling] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [quickBot, setQuickBot] = useState<BotView | null>(null)
   const nowS = useNow(60)
   const hits = useMessageSearch(state => state.hits)
   const messagesSearching = useMessageSearch(state => state.searching)
@@ -224,7 +229,7 @@ export default function Home() {
   function renderRow(item: Item) {
     switch (item.kind) {
       case 'bot':
-        return <BotRow view={item.view} onOpen={open} />
+        return <BotRow view={item.view} onOpen={open} onLongPress={setQuickBot} />
       case 'room':
         return <RoomRow view={item.view} metas={metas} onOpen={openRoom} />
       case 'hit':
@@ -291,7 +296,17 @@ export default function Home() {
         </View>
       ) : (
         <View style={styles.header}>
-          <IconCircle icon="server" label={`Settings, ${hostOf(baseUrl)}, ${status}`} muted dot={serverDot} onPress={() => router.push('/settings')} />
+          <Press
+            accessibilityRole="button"
+            accessibilityLabel={`Settings, ${hostOf(baseUrl)}, ${status}`}
+            onPress={() => router.push('/settings')}
+            style={[styles.serverPill, { backgroundColor: c.control }]}
+          >
+            <View style={[styles.serverDot, { backgroundColor: serverDot }]} />
+            <T variant="label" numberOfLines={1} style={styles.serverHost}>
+              {hostOf(baseUrl) || 'Server'}
+            </T>
+          </Press>
           <View style={styles.fill} />
           <IconCircle icon="search" label="Search" onPress={() => setSearching(true)} />
           <IconCircle icon="monitor" label="Bot screens" onPress={() => router.push('/screens')} />
@@ -347,24 +362,26 @@ export default function Home() {
         ListFooterComponent={<View style={[styles.sheetFoot, { backgroundColor: c.sheet }]} />}
         ListFooterComponentStyle={styles.fill}
         ListEmptyComponent={
-          <View style={[styles.empty, { backgroundColor: c.sheet }]}>
-            {!loaded ? (
-              <T variant="secondary" color="text2">
-                {status === 'online' ? 'Loading your bots…' : 'Connecting…'}
-              </T>
-            ) : query.trim() ? (
-              <T variant="secondary" color="text2">
-                Nothing matches “{query.trim()}”.
-              </T>
-            ) : (
-              <>
-                <T variant="heading">No bots yet</T>
-                <T variant="secondary" color="text2" style={styles.centered}>
-                  Bots are Hermes profiles. Create one on your server and it will appear here.
+          !loaded ? (
+            <View style={{ backgroundColor: c.sheet }}>
+              <SkeletonRows />
+            </View>
+          ) : (
+            <View style={[styles.empty, { backgroundColor: c.sheet }]}>
+              {query.trim() ? (
+                <T variant="secondary" color="text2">
+                  Nothing matches “{query.trim()}”.
                 </T>
-              </>
-            )}
-          </View>
+              ) : (
+                <>
+                  <T variant="heading">No bots yet</T>
+                  <T variant="secondary" color="text2" style={styles.centered}>
+                    Bots are Hermes profiles. Create one on your server and it will appear here.
+                  </T>
+                </>
+              )}
+            </View>
+          )
         }
         contentContainerStyle={styles.content}
       />
@@ -387,6 +404,66 @@ export default function Home() {
           />
         </GroupedList>
       </Sheet>
+
+      <Sheet visible={!!quickBot} onClose={() => setQuickBot(null)} label={quickBot?.name ?? 'Bot actions'}>
+        {quickBot ? (
+          <GroupedList>
+            <Row
+              label="Open chat"
+              onPress={() => {
+                const target = quickBot
+                setQuickBot(null)
+                open(target.profile)
+              }}
+            />
+            {dashboardsReady ? (
+              <Row
+                label="Open dashboard"
+                onPress={() => {
+                  const target = quickBot
+                  setQuickBot(null)
+                  router.push({ pathname: '/bot/[profile]/dashboard', params: { profile: target.profile } })
+                }}
+              />
+            ) : null}
+            <Row
+              label="New chat"
+              onPress={() => {
+                const target = quickBot
+                setQuickBot(null)
+                void sessions.newChat(target.profile).then(failed => {
+                  if (failed) {
+                    toast(failed)
+                  } else {
+                    open(target.profile)
+                  }
+                })
+              }}
+            />
+            <Row
+              label={quickBot.pinned ? 'Unpin from dashboards' : 'Pin to dashboards'}
+              chevron={false}
+              onPress={() => {
+                const target = quickBot
+                setQuickBot(null)
+                void saveBotMeta(target.profile, { pinned: target.pinned ? null : true }).then(error => {
+                  if (error) {
+                    toast(error)
+                  }
+                })
+              }}
+            />
+            <Row
+              label="Bot details"
+              onPress={() => {
+                const target = quickBot
+                setQuickBot(null)
+                router.push({ pathname: '/bot/[profile]/details', params: { profile: target.profile } })
+              }}
+            />
+          </GroupedList>
+        ) : null}
+      </Sheet>
     </Screen>
   )
 }
@@ -394,6 +471,9 @@ export default function Home() {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingLeft: 20, paddingTop: 8, paddingBottom: 8, minHeight: 56 },
+  serverPill: { height: 40, borderRadius: radius.pill, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: 196 },
+  serverDot: { width: 8, height: 8, borderRadius: 4 },
+  serverHost: { flexShrink: 1, fontFamily: fonts.medium },
   search: { flex: 1, height: 40, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14 },
   searchInput: { flex: 1, padding: 0, fontFamily: fonts.regular, fontSize: 15 },
   content: { flexGrow: 1 },

@@ -20,7 +20,7 @@ import { Pill } from '@/components/ui/Pill'
 import { Raised } from '@/components/ui/Raised'
 import { Screen } from '@/components/ui/Screen'
 import { Sheet } from '@/components/ui/Sheet'
-import { Spinner } from '@/components/ui/Spinner'
+import { SkeletonRecord } from '@/components/ui/Skeleton'
 import { T } from '@/components/ui/T'
 import { askAboutRecord, fileCard, longLabel, nextStage, recordDrafts, recordHeading, timeLabel, untilLabel } from '@/features/dashboard/view'
 import type { Field } from '@/lib/hermes/dashboard'
@@ -105,15 +105,15 @@ export default function DashboardRecord() {
             <View style={styles.flex} />
             <View style={styles.spacer} />
           </View>
-          <View style={styles.center}>
-            {error ? (
+          {error ? (
+            <View style={styles.center}>
               <T variant="secondary" color="text2" style={styles.centered}>
                 {error}
               </T>
-            ) : (
-              <Spinner size={16} />
-            )}
-          </View>
+            </View>
+          ) : (
+            <SkeletonRecord />
+          )}
         </Screen>
       </BotPaper>
     )

@@ -3,16 +3,12 @@ import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { BackHandler, StyleSheet, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn, runOnJS, useAnimatedReaction, useAnimatedRef, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, type SharedValue } from 'react-native-reanimated'
 
-import { Ask } from '@/components/tour/Ask'
 import { Dashboard } from '@/components/tour/Dashboard'
 import { Inbox } from '@/components/tour/Inbox'
 import { PagerHold } from '@/components/tour/kit'
 import { Meet } from '@/components/tour/Meet'
 import { PageDots } from '@/components/tour/PageDots'
-import { Ready } from '@/components/tour/Ready'
-import { Rooms } from '@/components/tour/Rooms'
 import { TakeOver } from '@/components/tour/TakeOver'
-import { Work } from '@/components/tour/Work'
 import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
 import { T } from '@/components/ui/T'
@@ -29,14 +25,10 @@ interface Page {
 }
 
 const PAGES: Page[] = [
-  { key: 'meet', title: 'Meet your blobs', body: 'Every Hermes bot gets a face. Blobs shows you what each one is up to, and only calls on you when it’s your turn. Give one a poke.', Scene: Meet },
-  { key: 'work', title: 'Watch them work', body: 'Each step a bot takes is one quiet line, live as it happens. Tap the line to see every step and what it printed.', Scene: Work },
-  { key: 'ask', title: 'Answer when they ask', body: 'Approvals and questions arrive as a card you can answer from anywhere. Go on, it’s your call.', Scene: Ask },
-  { key: 'inbox', title: 'Needs you', body: 'Every approval and question from every bot, gathered in one place, one card at a time. Swipe a card away once it’s handled.', Scene: Inbox },
-  { key: 'screen', title: 'Take over the screen', body: 'Watch a bot’s desktop live. When it gets stuck, take the mouse and keyboard, then hand it back.', Scene: TakeOver },
-  { key: 'rooms', title: 'Rooms and routines', body: 'Put several bots in one room and @mention who should answer. Routines run on a schedule, even while you sleep.', Scene: Rooms },
-  { key: 'dashboard', title: 'Need a dashboard panel? Just ask', body: 'Here’s a dashboard a bot keeps for you. Tell it what to track and it adds the panel. Dashboards are an optional plugin for your server.', Scene: Dashboard },
-  { key: 'ready', title: 'Ready when you are', body: 'Blobs connects straight to your own Hermes server. No account, no analytics.', Scene: Ready },
+  { key: 'meet', title: 'Meet your blobs', body: 'Every Hermes bot gets a face. Watch what is in flight at a glance, and only step in when it’s your turn.', Scene: Meet },
+  { key: 'inbox', title: 'Triage Needs you', body: 'Approvals, questions, and dashboard items gather in one stack. Filter, swipe to clear, or bulk-triage when a queue grows.', Scene: Inbox },
+  { key: 'dashboard', title: 'Dashboards built for you', body: 'Ask any bot to track follow-ups, metrics, or briefings. Pull to refresh live panels whenever you want.', Scene: Dashboard },
+  { key: 'screen', title: 'Take over the screen', body: 'Watch a bot’s desktop live and jump in with mouse or keyboard whenever needed. Direct to your server—no account or analytics.', Scene: TakeOver },
 ]
 
 const LAST = PAGES.length - 1
