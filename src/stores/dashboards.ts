@@ -3,7 +3,8 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
 import { dashboardRoutines, refreshedSince } from '@/features/dashboard/view'
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
+import { sameJson } from '@/lib/equal'
 import { absentGate } from '@/lib/absent'
 import { listCronJobs, triggerCronJob, type CronJob } from '@/lib/hermes/cron'
 import { addRecordNote, changeRecord, DraftChanged, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
@@ -424,7 +425,7 @@ export function startDashboardsSync(): () => void {
 
     const store = useDashboards.getState()
 
-    if (change.summary && JSON.stringify(change.summary) !== JSON.stringify(store.summary)) {
+    if (change.summary && !sameJson(change.summary, store.summary)) {
       useDashboards.setState({ available: true, summary: change.summary })
     }
 

@@ -6,7 +6,8 @@
 
 import { createStore, type StoreApi } from 'zustand/vanilla'
 
-import { JsonRpcGatewayError, type GatewayEvent } from '../../lib/hermes/gateway-client.ts'
+import { describeError } from '../../lib/hermes/errors.ts'
+import type { GatewayEvent } from '../../lib/hermes/gateway-client.ts'
 import { asHermesEvent, RpcCode, type HermesEvent, type ProfileRow, type SessionInfo, type SessionResumeResult } from '../../lib/hermes/protocol.ts'
 import { hasOlder } from '../../lib/hermes/history.ts'
 import { listSessionMessages, listSessionsPage, type StoredMessage } from '../../lib/hermes/rest.ts'
@@ -139,37 +140,7 @@ export function blankSession(profile: string): BotSession {
  * Hermes 0.22's refusals for a chat its gateway owns (`data.reason` on a 4090), in words. The gateway runs routines, kanban
  * results and other bots' messages into chats too, and while it holds one the dashboard cannot start a turn there.
  */
-const OWNER_REFUSALS: Record<string, string> = {
-  SESSION_OWNER_BUSY: 'Hermes is busy in this chat right now. Your message wasn’t sent; try again in a moment.',
-  SESSION_OWNER_UNCONFIRMED: 'Hermes couldn’t confirm your message was queued. Check the chat before sending it again.',
-  SESSION_NOT_OWNED: 'Hermes has unfinished work in this chat from before a restart, so it won’t take new messages here until that’s cleared on the server (`hermes sessions discard`).',
-}
-
-export function describeError(error: unknown): string {
-  if (error instanceof JsonRpcGatewayError) {
-    const reason = (error.data as { reason?: unknown } | undefined)?.reason
-
-    if (error.code === RpcCode.Refused && typeof reason === 'string' && OWNER_REFUSALS[reason]) {
-      return OWNER_REFUSALS[reason]
-    }
-
-    if (error.code === RpcCode.Refused) {
-      return 'This chat is open on another device. Close it there, or try again.'
-    }
-
-    if (error.code === RpcCode.TooLarge) {
-      return 'This chat is too large to open.'
-    }
-
-    return error.message || 'The server returned an error.'
-  }
-
-  if (error instanceof Error) {
-    return error.message === 'gateway not connected' ? 'Not connected to the server.' : error.message
-  }
-
-  return String(error)
-}
+export { describeError }
 
 /** What starts a turn: your message, or something that woke the bot (a finished process, another bot's message). */
 const startsTurn = (item: Item): boolean => item.kind === 'user' || item.kind === 'note' || item.kind === 'teammate'

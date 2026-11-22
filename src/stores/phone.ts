@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
 import { ASKED_DAYS, inMotion } from '@/features/phone/view'
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
 import {
   answerCall,
   approveErrand,

@@ -6,6 +6,7 @@ import { File } from 'expo-file-system'
 
 import { createSessions, type BotSession } from '@/features/sessions/store'
 import type { Job, Step } from '@/features/transcript/types'
+import { sameJson } from '@/lib/equal'
 import { supportsLiveHelpers, supportsLiveWork } from '@/lib/hermes/capabilities'
 import { listLightMessages } from '@/lib/hermes/history'
 import { listSessionMessages } from '@/lib/hermes/rest'
@@ -61,7 +62,7 @@ export function startLastChatSync(): () => void {
     const { reopenLast } = usePrefs.getState()
     const lastChats = Object.fromEntries(Object.entries(state.chosen).filter(([profile]) => reopenLast[profile]))
 
-    if (JSON.stringify(lastChats) !== JSON.stringify(usePrefs.getState().lastChats)) {
+    if (!sameJson(lastChats, usePrefs.getState().lastChats)) {
       usePrefs.setState({ lastChats })
     }
   })

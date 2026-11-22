@@ -8,7 +8,7 @@
 
 import { pluginHub, pluginState, type HubPlugin } from '../../lib/hermes/plugins.ts'
 import type { ServerConfig } from '../../lib/hermes/server.ts'
-import { describeError } from '../sessions/store.ts'
+import { describeError } from '../../lib/hermes/errors.ts'
 import type { PluginCheck } from './view.ts'
 
 /** What a plugin's own route said: how it is doing, whether something is still to set up on the server, and whether the older plugin answered. */

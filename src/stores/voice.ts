@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
 import { getBotVoice, setBotVoice, type BotVoice, type VoiceChange } from '@/lib/hermes/voice'
 import { useConnection } from '@/stores/connection'
 

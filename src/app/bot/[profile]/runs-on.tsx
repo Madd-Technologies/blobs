@@ -11,7 +11,7 @@ import { Screen } from '@/components/ui/Screen'
 import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
 import {
   checkLine,
   checkRunsOn,

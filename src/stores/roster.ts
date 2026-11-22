@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
 import { reuseRows } from '@/features/roster/derive'
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
 import { coalesce } from '@/lib/coalesce'
 import { startPoller } from '@/lib/poller'
 import type { ProfileRow } from '@/lib/hermes/protocol'

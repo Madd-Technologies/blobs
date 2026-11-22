@@ -2,7 +2,9 @@ import { useMemo } from 'react'
 import { create } from 'zustand'
 
 import { buildRoomViews, roomNeedsRead, type RoomData, type RoomView } from '@/features/rooms/view'
-import { describeError, type ClarifyAnswer, type RespondResult } from '@/features/sessions/store'
+import type { ClarifyAnswer, RespondResult } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
+import { sameJson } from '@/lib/equal'
 import type { ActiveSessionRow, HostedRoom, RoomLogPage, RoomMember, RoomPendingAction } from '@/lib/hermes/protocol'
 import {
   approveRoomAction,
@@ -186,10 +188,10 @@ async function syncRoom(room: HostedRoom, previous: RoomData | undefined, read?:
     events === previous.events &&
     sameReplying &&
     sessions === previous.sessions &&
-    JSON.stringify(status) === JSON.stringify(previous.status) &&
-    JSON.stringify(state.room) === JSON.stringify(previous.room) &&
-    JSON.stringify(activity) === JSON.stringify(previous.activity ?? null) &&
-    JSON.stringify(questions) === JSON.stringify(previous.questions ?? [])
+    sameJson(status, previous.status) &&
+    sameJson(state.room, previous.room) &&
+    sameJson(activity, previous.activity ?? null) &&
+    sameJson(questions, previous.questions ?? [])
 
   return unchanged
     ? previous

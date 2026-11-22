@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
 import type { BotMeta } from '@/lib/hermes/identity'
 import { approvalModeOf, browserHeadedOf, changeModel, configureProfile, createBot, describeProfile, disabledSkills, updateBotMeta, type ApprovalMode, type ModelChange, type NewBot } from '@/lib/hermes/profiles'
 import type { ModelOptions, ProfileDescription } from '@/lib/hermes/protocol'

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
 import { listToolsets, setToolset, type Toolset } from '@/lib/hermes/toolsets'
 import { useConnection } from '@/stores/connection'
 
