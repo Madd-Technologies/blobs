@@ -483,7 +483,7 @@ export default function BotChat() {
           {callHere ? (
             <CallBar profile={profile} botName={name} meta={view?.meta} call={callHere} waiting={!!transcript && pendingPrompts(transcript).length > 0} onOpen={openCall} />
           ) : (
-            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} onDraftChange={saveDraft} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} above={
+            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} autoFocus={(draft?.nonce ?? 0) > 0} onDraftChange={saveDraft} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} above={
                 replyTo || calling ? (
                   <>
                     {replyTo ? <ReplyStrip who={replyTo.who} text={replyTo.text} onCancel={() => setReplyTo(null)} /> : null}

@@ -280,7 +280,7 @@ export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'id
 
   if (!live) {
     return (
-      <View aria-hidden style={{ width: size, height: size }}>
+      <View aria-hidden pointerEvents="none" style={{ width: size, height: size }}>
         {image ? (
           <Image source={{ uri: image }} style={{ width: size, height: size, borderRadius: size * 0.22 }} />
         ) : blob ? (
@@ -306,7 +306,7 @@ export const BotFace = memo(function BotFace({ name, meta, size = 44, mood = 'id
       : { body: <ClassicBody face={face!} color={color} size={size} />, eyes: <ClassicEyes face={face!} color={color} mood={mood} size={size} />, eyeLine: classicEyeLine(face!) }
 
   return (
-    <View aria-hidden style={{ width: size, height: size }}>
+    <View aria-hidden pointerEvents="none" style={{ width: size, height: size }}>
       <LiveFace layers={layers} size={size} motion={motion} poke={poke} gaze={gaze} reduced={!!reduced} />
     </View>
   )

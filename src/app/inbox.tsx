@@ -15,7 +15,7 @@ import { Raised } from '@/components/ui/Raised'
 import { Screen } from '@/components/ui/Screen'
 import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { T } from '@/components/ui/T'
-import { formatTyped, untilLabel } from '@/features/dashboard/view'
+import { formatTyped, isPast, untilLabel } from '@/features/dashboard/view'
 import { deckSummary, filterDeck, leftLabel, orderDeck, startAt, triagePrompt, turn, type DeckCard } from '@/features/inbox/deck'
 import { useNow } from '@/lib/useNow'
 import { useBotMetas, useBotViews } from '@/stores/bots'
@@ -311,11 +311,18 @@ export default function Inbox() {
   const turnable = deck.length > 1
   const sideways = !!top && (isRecord || turnable)
   const upDown = turnable && !scrolls
+  const showBucketChips = (summary.blockedCount > 0 && summary.reviewCount > 0) || bucket !== 'all'
   const hasFilters = summary.totalCount > 0 || bucket !== 'all' || botFilter !== null
   const headerSubtitle =
     filtered.length !== visibleCards.length
       ? `${filtered.length} shown · ${visibleCards.length} left`
       : leftLabel(visibleCards.length)
+
+  const bulkProfiles = useMemo(
+    () => (bulkMuting ? [...new Set(bulkMuting.map(card => card.profile))] : []),
+    [bulkMuting],
+  )
+  const bulkBotName = bulkProfiles.length === 1 ? botName(bulkProfiles[0]!) : 'Your bots'
 
   return (
     <Screen edges={['top', 'bottom']}>
@@ -335,24 +342,27 @@ export default function Inbox() {
 
       {hasFilters ? (
         <View style={styles.filterWrap}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+          <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
             <FilterChip
               label={`All (${summary.totalCount})`}
-              active={bucket === 'all'}
-              onPress={() => setBucket('all')}
+              active={bucket === 'all' && botFilter === null}
+              onPress={() => {
+                setBucket('all')
+                setBotFilter(null)
+              }}
             />
-            {summary.blockedCount > 0 || bucket === 'blocked' ? (
+            {showBucketChips && (summary.blockedCount > 0 || bucket === 'blocked') ? (
               <FilterChip
                 label={`Blocked (${summary.blockedCount})`}
                 active={bucket === 'blocked'}
-                onPress={() => setBucket('blocked')}
+                onPress={() => setBucket(bucket === 'blocked' ? 'all' : 'blocked')}
               />
             ) : null}
-            {summary.reviewCount > 0 || bucket === 'review' ? (
+            {showBucketChips && (summary.reviewCount > 0 || bucket === 'review') ? (
               <FilterChip
                 label={`Review (${summary.reviewCount})`}
                 active={bucket === 'review'}
-                onPress={() => setBucket('review')}
+                onPress={() => setBucket(bucket === 'review' ? 'all' : 'review')}
               />
             ) : null}
             {summary.bots.length > 1 || botFilter !== null
@@ -385,21 +395,34 @@ export default function Inbox() {
           {boardCards.length > 0 || triageScope ? (
             <View style={styles.toolbar}>
               {boardCards.length > 0 ? (
-                <Press
-                  accessibilityRole="button"
-                  onPress={() => {
-                    if (selectedCards.length === boardCards.length) {
-                      setSelected({})
-                    } else {
-                      setSelected(Object.fromEntries(boardCards.map(card => [card.key, true as const])))
-                    }
-                  }}
-                  style={[styles.toolBtn, { backgroundColor: c.control }]}
-                >
-                  <T variant="label" color="text">
-                    {selectedCards.length === boardCards.length ? `Clear (${selectedCards.length})` : `Select all (${boardCards.length})`}
-                  </T>
-                </Press>
+                <View style={styles.toolbarLeft}>
+                  <Press
+                    accessibilityRole="button"
+                    onPress={() => {
+                      if (selectedCards.length === boardCards.length) {
+                        setSelected({})
+                      } else {
+                        setSelected(Object.fromEntries(boardCards.map(card => [card.key, true as const])))
+                      }
+                    }}
+                    style={[styles.toolBtn, { backgroundColor: c.control }]}
+                  >
+                    <T variant="label" color="text">
+                      {selectedCards.length === boardCards.length ? `Clear (${selectedCards.length})` : `Select all (${boardCards.length})`}
+                    </T>
+                  </Press>
+                  {selectedCards.length > 0 && selectedCards.length < boardCards.length ? (
+                    <Press
+                      accessibilityRole="button"
+                      onPress={() => setSelected({})}
+                      style={[styles.toolBtn, { backgroundColor: c.control }]}
+                    >
+                      <T variant="label" color="text2">
+                        Clear ({selectedCards.length})
+                      </T>
+                    </Press>
+                  ) : null}
+                </View>
               ) : (
                 <View style={styles.flex} />
               )}
@@ -431,88 +454,101 @@ export default function Inbox() {
 
               if (item.kind === 'board') {
                 const checked = !!selected[item.key]
-                const title = item.record.row.title ? formatTyped(item.record.row.title, item.nowS) : 'Untitled'
-                const sub = item.record.row.subtitle ? formatTyped(item.record.row.subtitle, item.nowS) : ''
-                const meta = item.record.row.meta ? formatTyped(item.record.row.meta, item.nowS) : ''
+                const row = item.record.row
+                const title = row.title ? formatTyped(row.title, item.nowS) : 'Untitled'
+                const sub = row.subtitle ? formatTyped(row.subtitle, item.nowS) : ''
+                const meta = row.meta ? formatTyped(row.meta, item.nowS) : ''
+                const urgentMeta =
+                  !!row.meta &&
+                  ((row.meta.type === 'date' && isPast(String(row.meta.value), item.nowS + 86_400)) ||
+                    (row.meta.type === 'datetime' && Number(row.meta.value) <= item.nowS + 86_400))
 
                 return (
-                  <View style={[styles.listRow, radiusStyle, { backgroundColor: c.sheet }]}>
-                    <Pressable
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked }}
-                      accessibilityLabel={`Select ${title}`}
-                      onPress={() => toggleSelection(item.key)}
-                      hitSlop={6}
-                      style={styles.checkHit}
-                    >
-                      <View
-                        style={[
-                          styles.checkCircle,
-                          checked
-                            ? { backgroundColor: c.primary, borderColor: c.primary }
-                            : { borderColor: c.text2 },
-                        ]}
+                  <View style={[radiusStyle, { backgroundColor: c.sheet }]}>
+                    {index > 0 ? <View style={[styles.listSep, { backgroundColor: c.separator }]} /> : null}
+                    <View style={styles.listRow}>
+                      <Pressable
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked }}
+                        accessibilityLabel={`Select ${title}`}
+                        onPress={() => toggleSelection(item.key)}
+                        hitSlop={6}
+                        style={styles.checkHit}
                       >
-                        {checked ? <Feather name="check" size={12} color={c.onPrimary} /> : null}
-                      </View>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${title}, ${botName(item.profile)}`}
-                      onPress={() => router.push({ pathname: '/bot/[profile]/record', params: { profile: item.profile, id: item.record.row.id } })}
-                      style={({ pressed }) => [styles.listMain, pressed && { opacity: 0.65 }]}
-                    >
-                      <BotFace name={item.profile} meta={metas[item.profile]} size={28} />
-                      <View style={styles.flex}>
-                        <View style={styles.listTop}>
-                          <T variant="rowTitle" numberOfLines={1} style={styles.flex}>
-                            {title}
-                          </T>
-                          <T variant="meta" color="text2">
-                            {meta || item.record.view_title}
+                        <View
+                          style={[
+                            styles.checkCircle,
+                            checked
+                              ? { backgroundColor: c.primary, borderColor: c.primary }
+                              : { borderColor: c.text2 },
+                          ]}
+                        >
+                          {checked ? <Feather name="check" size={12} color={c.onPrimary} /> : null}
+                        </View>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`${title}, ${botName(item.profile)}`}
+                        onPress={() => router.push({ pathname: '/bot/[profile]/record', params: { profile: item.profile, id: row.id } })}
+                        style={({ pressed }) => [styles.listMain, pressed && { opacity: 0.65 }]}
+                      >
+                        <BotFace name={item.profile} meta={metas[item.profile]} size={28} />
+                        <View style={styles.flex}>
+                          <View style={styles.listTop}>
+                            <T variant="rowTitle" numberOfLines={1} style={styles.flex}>
+                              {title}
+                            </T>
+                            {meta ? (
+                              <T variant="meta" color={!row.signal && urgentMeta ? 'needsYouText' : 'text2'}>
+                                {meta}
+                              </T>
+                            ) : null}
+                          </View>
+                          <T variant="secondary" color="text2" numberOfLines={1}>
+                            {sub ? `${botName(item.profile)} · ${sub}` : `${botName(item.profile)} · ${item.record.view_title}`}
                           </T>
                         </View>
-                        <T variant="secondary" color="text2" numberOfLines={1}>
-                          {sub ? `${botName(item.profile)} · ${sub}` : `${botName(item.profile)} · ${item.record.view_title}`}
-                        </T>
-                      </View>
-                    </Pressable>
+                      </Pressable>
+                    </View>
                   </View>
                 )
               }
 
               return (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${cardName(item, context)}: ${cardLine(item)}`}
-                  onPress={() => {
-                    modeTouched.current = true
-                    setSkipped(startAt(filtered, item.key))
-                    setMode('deck')
-                  }}
-                  style={({ pressed }) => [styles.listRow, styles.blockedListRow, radiusStyle, { backgroundColor: pressed ? c.tone : c.sheet }]}
-                >
-                  <AttentionDot size={8} />
-                  {item.kind === 'room' ? (
-                    <RoomFaces members={item.view.data.room.members.slice(0, 2)} metas={metas} variant="header" ring={c.sheet} />
-                  ) : (
-                    <BotFace name={item.profile} meta={metas[item.profile]} size={28} />
-                  )}
-                  <View style={styles.flex}>
-                    <View style={styles.listTop}>
-                      <T variant="rowTitle" numberOfLines={1} style={styles.flex}>
-                        {cardName(item, context)}
-                      </T>
-                      <T variant="meta" color="text2">
-                        {cardAge(item, context)}
+                <View style={[radiusStyle, { backgroundColor: c.sheet }]}>
+                  {index > 0 ? <View style={[styles.listSep, { backgroundColor: c.separator }]} /> : null}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${cardName(item, context)}: ${cardLine(item)}`}
+                    onPress={() => {
+                      modeTouched.current = true
+                      setSkipped(startAt(filtered, item.key))
+                      setMode('deck')
+                    }}
+                    style={({ pressed }) => [styles.listRow, styles.blockedListRow, pressed && { backgroundColor: c.tone }]}
+                  >
+                    <AttentionDot size={8} />
+                    {item.kind === 'room' ? (
+                      <RoomFaces members={item.view.data.room.members.slice(0, 2)} metas={metas} variant="header" ring={c.sheet} />
+                    ) : (
+                      <BotFace name={item.profile} meta={metas[item.profile]} size={28} />
+                    )}
+                    <View style={styles.flex}>
+                      <View style={styles.listTop}>
+                        <T variant="rowTitle" numberOfLines={1} style={styles.flex}>
+                          {cardName(item, context)}
+                        </T>
+                        <T variant="meta" color="text2">
+                          {cardAge(item, context)}
+                        </T>
+                      </View>
+                      <T variant="secondary" numberOfLines={1}>
+                        {cardLine(item)}
                       </T>
                     </View>
-                    <T variant="secondary" numberOfLines={1}>
-                      {cardLine(item)}
-                    </T>
-                  </View>
-                  <Feather name="chevron-right" size={16} color={c.text2} />
-                </Pressable>
+                    <Feather name="chevron-right" size={16} color={c.text2} />
+                  </Pressable>
+                </View>
               )
             }}
             ListEmptyComponent={
@@ -566,7 +602,7 @@ export default function Inbox() {
           <View style={styles.above} />
           {top ? (
             <>
-              <View style={[styles.deck, { paddingTop: behind * 38 }]}>
+              <View style={[styles.deck, { paddingTop: behind * 30 }]}>
                 {third ? <BehindCard card={third} context={context} depth={2} behind={behind} onPress={() => onTurn('next', 2)} /> : null}
                 {next ? <BehindCard card={next} context={context} depth={1} behind={behind} onPress={() => onTurn('next')} /> : null}
                 {/* Keyed by what is on top and how often the deck turned, so a card that comes round again arrives fresh. */}
@@ -648,7 +684,9 @@ export default function Inbox() {
                 : 'This record'
               : null
         }
-        botName={bulkMuting ? (triageScope ? botName(triageScope.profile) : 'your dashboard') : muting ? botName(muting.profile) : ''}
+        botName={bulkMuting ? bulkBotName : muting ? botName(muting.profile) : ''}
+        count={bulkMuting ? bulkMuting.length : 1}
+        pluralOwner={bulkMuting ? bulkProfiles.length > 1 : false}
         nowS={nowS}
         onClose={() => {
           setMuting(null)
@@ -708,14 +746,16 @@ function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => v
 
 const styles = StyleSheet.create({
   flex: { flex: 1, minWidth: 0 },
-  filterWrap: { paddingBottom: 8 },
+  filterWrap: { paddingTop: 10, paddingBottom: 10 },
   filterRow: { paddingHorizontal: 16, gap: 8, alignItems: 'center' },
   chip: { height: 34, borderRadius: radius.pill, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
   chipText: { fontFamily: fonts.medium },
   toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 16, paddingBottom: 10 },
+  toolbarLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   toolBtn: { height: 36, borderRadius: radius.pill, paddingHorizontal: 14, justifyContent: 'center' },
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
   listWithBar: { paddingBottom: 96 },
+  listSep: { height: 1, marginLeft: 80 },
   listRow: { flexDirection: 'row', alignItems: 'center', paddingRight: 16, paddingLeft: 10, paddingVertical: 12, gap: 8 },
   blockedListRow: { paddingLeft: 16, gap: 10 },
   listMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -726,13 +766,13 @@ const styles = StyleSheet.create({
   bulkDock: { position: 'absolute', left: 16, right: 16, bottom: 12 },
   bulkBar: { flexDirection: 'row', gap: 8, padding: 8 },
   scroll: { flexGrow: 1, paddingBottom: 24 },
-  above: { flex: 1, minHeight: 16 },
-  below: { flex: 1.4, minHeight: 16 },
+  above: { flex: 1, minHeight: 4 },
+  below: { flex: 1.2, minHeight: 12 },
   deck: { marginHorizontal: 16, zIndex: 1 },
-  hint: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, marginHorizontal: 28 },
+  hint: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginHorizontal: 28 },
   hintCenter: { justifyContent: 'center' },
   hintSide: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  deckTriage: { alignItems: 'center', marginTop: 18 },
+  deckTriage: { alignItems: 'center', marginTop: 16 },
   empty: { alignItems: 'center', gap: 6, paddingHorizontal: 32 },
   centered: { textAlign: 'center' },
   clearBtn: { marginTop: 8 },

@@ -35,6 +35,8 @@ interface Props {
   running: boolean
   /** Words already in the box when it opens (a draft handed over from another screen); the keyboard comes up with them. */
   initialText?: string
+  /** Focus automatically when mounted with a handed-off draft (leave false for passive saved drafts). */
+  autoFocus?: boolean
   /** Controlled mode: the screen owns the text (so it can add an @mention). Leave out and the box keeps its own. */
   value?: string
   onChangeText?: (text: string) => void
@@ -63,7 +65,7 @@ interface Props {
  * bot works. The mic records a voice message and puts what you said in the field, where you can fix it before sending; for a
  * bot that takes calls it is Call instead.
  */
-export function Composer({ botName, running, initialText, value, onChangeText, onDraftChange, files, onFilesChange, voiceProfile, onCall, commands, above, focusSignal, onSend, onStop }: Props) {
+export function Composer({ botName, running, initialText, autoFocus = !!initialText, value, onChangeText, onDraftChange, files, onFilesChange, voiceProfile, onCall, commands, above, focusSignal, onSend, onStop }: Props) {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
   // With the keyboard up it already covers the home-indicator / nav-bar area, so the inset would only leave a gap.
@@ -273,7 +275,7 @@ export function Composer({ botName, running, initialText, value, onChangeText, o
                   key={generation}
                   ref={input}
                   // After a send the new input takes over, so the keyboard stays up for the next message.
-                  autoFocus={generation > 0 || !!initialText}
+                  autoFocus={generation > 0 || (autoFocus && !!initialText)}
                   value={text}
                   onChangeText={changeText}
                   placeholder={attached.length ? 'Add a message' : `Message ${botName}`}

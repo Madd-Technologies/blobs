@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather'
-import { Pressable, StyleSheet, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native'
 
 import { GroupedList } from '@/components/ui/GroupedList'
 import { Sheet } from '@/components/ui/Sheet'
@@ -72,6 +72,8 @@ interface Props {
  */
 export function PanelStarterSheet({ visible, botName, onClose, onPick, onCustom }: Props) {
   const { c } = useTheme()
+  const { height } = useWindowDimensions()
+  const maxListHeight = Math.max(260, Math.round(height * 0.56))
 
   return (
     <Sheet visible={visible} onClose={onClose} label={`New panel for ${botName}`}>
@@ -82,46 +84,48 @@ export function PanelStarterSheet({ visible, botName, onClose, onPick, onCustom 
         Pick a template to send to {botName}, or write your own.
       </T>
 
-      <GroupedList>
-        {TEMPLATES.map(template => (
+      <ScrollView style={{ maxHeight: maxListHeight }} showsVerticalScrollIndicator={false} bounces={false}>
+        <GroupedList>
+          {TEMPLATES.map(template => (
+            <Pressable
+              key={template.key}
+              accessibilityRole="button"
+              accessibilityLabel={`${template.title}: ${template.subtitle}`}
+              onPress={() => onPick(dashboardSetupMessage(template.title, template.what, template.cadence))}
+              style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.tone }]}
+            >
+              <View style={[styles.iconBox, { backgroundColor: c.tone }]}>
+                <Feather name={template.icon} size={17} color={c.text} />
+              </View>
+              <View style={styles.words}>
+                <T variant="rowTitle">{template.title}</T>
+                <T variant="secondary" color="text2" numberOfLines={2}>
+                  {template.subtitle}
+                </T>
+              </View>
+              <Feather name="chevron-right" size={16} color={c.text2} />
+            </Pressable>
+          ))}
+
           <Pressable
-            key={template.key}
             accessibilityRole="button"
-            accessibilityLabel={`${template.title}: ${template.subtitle}`}
-            onPress={() => onPick(dashboardSetupMessage(template.title, template.what, template.cadence))}
+            accessibilityLabel="Custom panel"
+            onPress={onCustom}
             style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.tone }]}
           >
             <View style={[styles.iconBox, { backgroundColor: c.tone }]}>
-              <Feather name={template.icon} size={17} color={c.text} />
+              <Feather name="edit-3" size={17} color={c.text} />
             </View>
             <View style={styles.words}>
-              <T variant="rowTitle">{template.title}</T>
+              <T variant="rowTitle">Custom panel…</T>
               <T variant="secondary" color="text2" numberOfLines={2}>
-                {template.subtitle}
+                Describe any table, board, chart, or checklist in chat
               </T>
             </View>
             <Feather name="chevron-right" size={16} color={c.text2} />
           </Pressable>
-        ))}
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Custom panel"
-          onPress={onCustom}
-          style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.tone }]}
-        >
-          <View style={[styles.iconBox, { backgroundColor: c.tone }]}>
-            <Feather name="edit-3" size={17} color={c.text} />
-          </View>
-          <View style={styles.words}>
-            <T variant="rowTitle">Custom panel…</T>
-            <T variant="secondary" color="text2" numberOfLines={2}>
-              Describe any table, board, chart, or checklist in chat
-            </T>
-          </View>
-          <Feather name="chevron-right" size={16} color={c.text2} />
-        </Pressable>
-      </GroupedList>
+        </GroupedList>
+      </ScrollView>
     </Sheet>
   )
 }

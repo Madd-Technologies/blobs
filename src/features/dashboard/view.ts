@@ -326,6 +326,7 @@ export function mutePicks(nowS: number): { label: string; until: number; note: s
   const now = new Date(nowS * 1000)
   const at = (days: number, hour: number) => Math.round(new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, hour, 0).getTime() / 1000)
   const toMonday = ((8 - now.getDay()) % 7) || 7
+  const nextWeekDays = toMonday <= 1 ? toMonday + 7 : toMonday
   const hour = Math.round(nowS / 60) * 60 + 3600
   const picks = [{ label: 'In 1 hour', until: hour, note: untilLabel(hour, nowS) }]
 
@@ -335,7 +336,7 @@ export function mutePicks(nowS: number): { label: string; until: number; note: s
 
   picks.push(
     { label: 'Tomorrow morning', until: at(1, 9), note: `${DAYS[new Date(at(1, 9) * 1000).getDay()]} ${clock(new Date(at(1, 9) * 1000))}` },
-    { label: 'Next week', until: at(toMonday, 9), note: untilLabel(at(toMonday, 9), nowS) },
+    { label: 'Next week', until: at(nextWeekDays, 9), note: untilLabel(at(nextWeekDays, 9), nowS) },
     { label: 'Until I unmute', until: MUTE_FOREVER, note: '' },
   )
 
@@ -352,11 +353,12 @@ export function datePicks(nowS: number): { label: string; value: string }[] {
   const today = new Date(nowS * 1000)
   const day = (offset: number) => dateValue(new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset))
   const toMonday = ((8 - today.getDay()) % 7) || 7
+  const nextWeekDays = toMonday <= 1 ? toMonday + 7 : toMonday
 
   return [
     { label: 'Today', value: day(0) },
     { label: 'Tomorrow', value: day(1) },
-    { label: 'Next week', value: day(toMonday) },
+    { label: 'Next week', value: day(nextWeekDays) },
   ]
 }
 

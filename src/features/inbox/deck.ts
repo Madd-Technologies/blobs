@@ -186,6 +186,45 @@ export function deckSummary(cards: readonly DeckCard[], pendingBoardCount = 0): 
   return { blockedCount, reviewCount, totalCount: blockedCount + reviewCount, byBot, bots }
 }
 
+/**
+ * Picks up to `limit` preview cards for Home's Needs-you sheet, round-robin across distinct bots/rooms first so one
+ * bot's large queue doesn't hide other waiting bots behind "and N more".
+ */
+export function pickPreviewCards(cards: readonly DeckCard[], limit: number): DeckCard[] {
+  if (limit <= 0 || cards.length === 0) {
+    return []
+  }
+
+  const picked: DeckCard[] = []
+  const seenOwners = new Set<string>()
+  const deferred: DeckCard[] = []
+
+  for (const card of cards) {
+    const owner = deckProfile(card) ?? card.key
+
+    if (!seenOwners.has(owner)) {
+      seenOwners.add(owner)
+      picked.push(card)
+
+      if (picked.length === limit) {
+        return picked
+      }
+    } else {
+      deferred.push(card)
+    }
+  }
+
+  for (const card of deferred) {
+    picked.push(card)
+
+    if (picked.length === limit) {
+      break
+    }
+  }
+
+  return picked
+}
+
 /** Prompt sent to a bot's side chat when the user asks it to triage a crowded Needs-you queue. */
 export function triagePrompt(botName: string, count: number, viewTitle?: string): string {
   const noun = count === 1 ? 'item' : 'items'

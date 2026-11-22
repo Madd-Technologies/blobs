@@ -5,7 +5,7 @@ import { cardAge, cardLine, cardName, type DeckContext } from '@/components/inbo
 import { Pill } from '@/components/ui/Pill'
 import { Raised } from '@/components/ui/Raised'
 import { T } from '@/components/ui/T'
-import { deckSummary, filterDeck, type DeckCard } from '@/features/inbox/deck'
+import { deckSummary, filterDeck, pickPreviewCards, type DeckCard } from '@/features/inbox/deck'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
@@ -58,7 +58,7 @@ export function NeedsYouSheet({ count, cards, context, names, onReview, onReview
   const label = hasBlocked
     ? `${summary.blockedCount} ${summary.blockedCount === 1 ? 'thing waiting' : 'things waiting'} on you`
     : `${summary.reviewCount} ${summary.reviewCount === 1 ? 'item' : 'items'} to review`
-  const shown = (hasBlocked ? filterDeck(cards, { urgency: 'blocked' }) : cards).slice(0, SHOWN)
+  const shown = pickPreviewCards(hasBlocked ? filterDeck(cards, { urgency: 'blocked' }) : cards, SHOWN)
   const more = (hasBlocked ? summary.blockedCount : summary.reviewCount) - shown.length
   const reviewAction = () => (onReviewBucket ? onReviewBucket('review') : onReview())
 

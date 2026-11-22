@@ -14,6 +14,10 @@ interface Props {
   /** The record being muted (its title); null keeps the sheet closed. */
   title: string | null
   botName: string
+  /** Number of selected items when muting in bulk (defaults to 1). */
+  count?: number
+  /** True when items belong to multiple bots (e.g. "Your bots still see them."). */
+  pluralOwner?: boolean
   nowS: number
   onClose: () => void
   /** Mutes until this time (server seconds). */
@@ -21,15 +25,15 @@ interface Props {
 }
 
 /** "Mute until": quick timeframes, or a day and time from the system picker. */
-export function MuteSheet({ title, botName, nowS, onClose, onPick }: Props) {
+export function MuteSheet({ title, botName, count = 1, pluralOwner = false, nowS, onClose, onPick }: Props) {
   return (
     <Sheet visible={title !== null} onClose={onClose} label="Mute until">
-      {title !== null ? <MuteChoices key={title} title={title} botName={botName} nowS={nowS} onClose={onClose} onPick={onPick} /> : null}
+      {title !== null ? <MuteChoices key={title} title={title} botName={botName} count={count} pluralOwner={pluralOwner} nowS={nowS} onClose={onClose} onPick={onPick} /> : null}
     </Sheet>
   )
 }
 
-function MuteChoices({ title, botName, nowS, onPick }: Props & { title: string }) {
+function MuteChoices({ title, botName, count = 1, pluralOwner = false, nowS, onPick }: Props & { title: string }) {
   const { c, scheme } = useTheme()
   const [picking, setPicking] = useState<Date | null>(null)
   const picks = mutePicks(nowS)
@@ -106,7 +110,9 @@ function MuteChoices({ title, botName, nowS, onPick }: Props & { title: string }
       )}
 
       <T variant="label" color="text2" style={styles.note}>
-        No amber dot and out of Needs you until then; it waits at the bottom of its panel. {botName} still sees it.
+        {count > 1
+          ? `No amber dot and out of Needs you until then; they wait at the bottom of their panels. ${botName} still ${pluralOwner ? 'see' : 'sees'} them.`
+          : `No amber dot and out of Needs you until then; it waits at the bottom of its panel. ${botName} still sees it.`}
       </T>
     </View>
   )

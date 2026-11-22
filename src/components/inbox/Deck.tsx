@@ -49,6 +49,12 @@ export function cardAge(card: DeckCard, context: DeckContext): string {
     return phoneCardAge(card, context.nowS)
   }
 
+  if (card.kind === 'board') {
+    const meta = card.record.row.meta
+
+    return meta && (meta.type === 'date' || meta.type === 'datetime') ? formatTyped(meta, card.nowS) : ''
+  }
+
   const view = context.views.find(candidate => candidate.profile === card.profile)
 
   return view ? ageLabel(botLastActive(view.row), context.nowS) : ''
@@ -105,7 +111,7 @@ export function BehindCard({ card, context, depth, behind, onPress }: { card: De
       accessibilityLabel={`${cardName(card, context)}, ${depth === 1 ? 'next' : 'after that'}`}
       accessibilityHint="Brings it to the top"
       onPress={onPress}
-      style={[styles.behind, { top: (behind - depth) * 38, left: depth * 14, right: depth * 14, borderRadius: depth === 1 ? 24 : 22, backgroundColor: fill }]}
+      style={[styles.behind, { top: (behind - depth) * 30, left: depth * 14, right: depth * 14, borderRadius: depth === 1 ? 24 : 22, backgroundColor: fill }]}
     >
       {card.kind === 'room' ? <RoomFaces members={card.view.data.room.members.slice(0, 2)} metas={context.metas} variant="header" ring={fill} /> : <BotFace name={card.profile} meta={context.metas[card.profile]} size={18} />}
       <T variant="label" color={depth === 1 ? 'text' : 'text2'} style={styles.behindName}>
@@ -352,10 +358,12 @@ export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sidew
 
   pan = pan
     .onStart(() => {
+      'worklet'
       // Picked from the movement, not here: Android measures a pan from where it was recognised, so it starts at zero.
       axis.set(0)
     })
     .onUpdate(event => {
+      'worklet'
       if (axis.get() === 0) {
         axis.set(wayOf(event.translationX, event.translationY, 6))
       }
@@ -378,6 +386,7 @@ export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sidew
       }
     })
     .onEnd(event => {
+      'worklet'
       // Decided from the release itself, so a quick flick that gave no update in between still counts.
       const way = axis.get() || wayOf(event.translationX + event.velocityX / 20, event.translationY + event.velocityY / 20, 1)
       const across = way === 1

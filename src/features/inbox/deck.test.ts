@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildDeck, cardUrgency, deckSummary, filterDeck, triagePrompt, type DeckCard } from './deck.ts'
+import { buildDeck, cardUrgency, deckSummary, filterDeck, pickPreviewCards, triagePrompt, type DeckCard } from './deck.ts'
 
 const errand = (id: string, profile: string) => ({
   id,
@@ -152,5 +152,25 @@ describe('deck urgency, filtering, summary, and triage prompt', () => {
     })
 
     assert.deepEqual(cards.map(c => c.kind), ['entry', 'board', 'room'])
+  })
+
+  it('picks diverse preview cards across bots before repeating one bot', () => {
+    const cards: DeckCard[] = [
+      boardCard('alpha', '1'),
+      boardCard('alpha', '2'),
+      boardCard('alpha', '3'),
+      boardCard('beta', '4'),
+      boardCard('gamma', '5'),
+    ]
+
+    assert.deepEqual(
+      pickPreviewCards(cards, 3).map(c => c.key),
+      ['board:alpha:1', 'board:beta:4', 'board:gamma:5'],
+    )
+    assert.deepEqual(
+      pickPreviewCards(cards.slice(0, 4), 3).map(c => c.key),
+      ['board:alpha:1', 'board:beta:4', 'board:alpha:2'],
+    )
+    assert.deepEqual(pickPreviewCards(cards, 0), [])
   })
 })
