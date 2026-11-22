@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useStore } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 
-import { readAsStringAsync } from 'expo-file-system/legacy'
+import { File } from 'expo-file-system'
 
 import { createSessions, type BotSession } from '@/features/sessions/store'
 import type { Job, Step } from '@/features/transcript/types'
@@ -21,7 +21,7 @@ export const sessions = createSessions({
   getRosterRow: profile => useRoster.getState().rows.find(row => row.name === profile),
   onEvent: onGatewayEvent,
   requests,
-  readBase64: uri => readAsStringAsync(uri, { encoding: 'base64' }),
+  readBase64: uri => new File(uri).base64(),
   liveWork: () => supportsLiveWork(useConnection.getState().serverVersion),
   liveHelpers: () => supportsLiveHelpers(useConnection.getState().serverVersion),
   catchUp: liveId => gateway.catchUp(liveId),

@@ -27,8 +27,7 @@ const THEMES: { value: ThemePref; label: string }[] = [
 
 const STATUS = { unconfigured: 'Not connected', connecting: 'Connecting…', online: 'Connected', offline: 'Offline' } as const
 
-// The app's website (GitHub Pages: this address keeps working when the site moves to its own domain).
-const SITE = 'https://madd-technologies.github.io/blobs'
+const SITE = 'https://blobs.maddtechnologies.com'
 const PRIVACY_URL = `${SITE}/privacy.html`
 const SUPPORT_URL = 'https://github.com/Madd-Technologies/blobs/issues'
 const SOURCE_URL = 'https://github.com/Madd-Technologies/blobs'

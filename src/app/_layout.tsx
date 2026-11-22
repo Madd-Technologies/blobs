@@ -61,6 +61,8 @@ function RootStack() {
           <Stack.Screen name="licences" />
           <Stack.Screen name="phone/index" />
           <Stack.Screen name="phone/never-share" />
+          <Stack.Screen name="phone/answer" />
+          <Stack.Screen name="phone/join" />
           <Stack.Screen name="screens/index" />
           <Stack.Screen name="screens/[profile]" />
           {/* One screen per bot (and per room): opening a bot that is already open brings that screen up instead of a second copy
@@ -71,6 +73,7 @@ function RootStack() {
           <Stack.Screen name="bot/[profile]/dashboard" />
           <Stack.Screen name="bot/[profile]/view" />
           <Stack.Screen name="bot/[profile]/record" />
+          <Stack.Screen name="bot/[profile]/page" />
           <Stack.Screen name="bot/[profile]/chats" />
           <Stack.Screen name="bot/[profile]/details" />
           <Stack.Screen name="bot/[profile]/edit" />
@@ -80,6 +83,8 @@ function RootStack() {
           <Stack.Screen name="bot/[profile]/routines" />
           <Stack.Screen name="bot/[profile]/tools" />
           <Stack.Screen name="bot/[profile]/runs-on" />
+          <Stack.Screen name="bot/[profile]/keys" />
+          <Stack.Screen name="bot/[profile]/voice" />
           <Stack.Screen name="bot/[profile]/past" />
           <Stack.Screen name="bot/[profile]/errand" />
           <Stack.Screen name="bot/[profile]/errand-call" />
@@ -87,6 +92,9 @@ function RootStack() {
           <Stack.Screen name="room/[id]" dangerouslySingular />
           <Stack.Screen name="bot/new" />
           <Stack.Screen name="viewer" />
+        </Stack.Protected>
+        <Stack.Protected guard={__DEV__ && configured}>
+          <Stack.Screen name="dev/gallery" />
         </Stack.Protected>
         <Stack.Protected guard={!configured}>
           <Stack.Screen name="connect" options={{ animation: 'fade' }} />
