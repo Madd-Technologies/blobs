@@ -60,6 +60,9 @@ function RootStack() {
         <Stack.Protected guard={configured}>
           <Stack.Screen name="index" />
           <Stack.Screen name="inbox" />
+          <Stack.Screen name="briefing" />
+          <Stack.Screen name="fleet" />
+          <Stack.Screen name="telemetry" />
           <Stack.Screen name="settings" />
           <Stack.Screen name="server-add" />
           <Stack.Screen name="notifications" />

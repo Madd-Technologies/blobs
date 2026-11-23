@@ -7,6 +7,7 @@ import { startRestartSync } from '@/stores/restart'
 import { startRoomsSync } from '@/stores/rooms'
 import { startRosterSync, useRoster } from '@/stores/roster'
 import { useSeen } from '@/stores/seen'
+import { startStationSync } from '@/stores/station'
 import { startVisibleSync } from '@/stores/visible'
 import { sessions, startLastChatSync } from '@/stores/sessions'
 import { useConnection } from '@/stores/connection'
@@ -44,7 +45,7 @@ export function startSessionSync(): () => void {
 
   // Stagger secondary sync subsystems so initial roster + needs-you reads aren't crowded out on cold start.
   defer(350, [startDashboardsSync, startRoomsSync])
-  defer(850, [startPhoneSync, startPushSync, startPresenceSync, startRestartSync])
+  defer(850, [startPhoneSync, startPushSync, startPresenceSync, startRestartSync, startStationSync])
 
   let generation = useConnection.getState().generation
 

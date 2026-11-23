@@ -10,6 +10,9 @@ import { HitRow } from '@/components/bots/HitRow'
 import { InFlightStrip } from '@/components/bots/InFlightStrip'
 import { NeedsYouSheet } from '@/components/bots/NeedsYouSheet'
 import { RoomRow } from '@/components/rooms/RoomRow'
+import { BriefingCard } from '@/components/station/BriefingCard'
+import { CommandPalette } from '@/components/station/CommandPalette'
+import { FleetBanner } from '@/components/station/FleetBanner'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
@@ -37,6 +40,7 @@ import { saveBotMeta } from '@/stores/profiles'
 import { useRoomViews, useRooms } from '@/stores/rooms'
 import { useRoster } from '@/stores/roster'
 import { sessions } from '@/stores/sessions'
+import { useStation } from '@/stores/station'
 import { toast } from '@/stores/ui'
 import { useWatch } from '@/stores/watch'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -78,6 +82,7 @@ export default function Home() {
   const [query, setQuery] = useState('')
   const [pulling, setPulling] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [quickBot, setQuickBot] = useState<BotView | null>(null)
   const nowS = useNow(60)
   const hits = useMessageSearch(state => state.hits)
@@ -222,7 +227,7 @@ export default function Home() {
 
   async function onPull() {
     setPulling(true)
-    await refresh()
+    await Promise.all([refresh(), useStation.getState().refresh()])
     setPulling(false)
   }
 
@@ -308,6 +313,7 @@ export default function Home() {
             </T>
           </Press>
           <View style={styles.fill} />
+          <IconCircle icon="command" label="Command palette" onPress={() => setPaletteOpen(true)} />
           <IconCircle icon="search" label="Search" onPress={() => setSearching(true)} />
           <IconCircle icon="monitor" label="Bot screens" onPress={() => router.push('/screens')} />
           <IconCircle icon="plus" label={roomsReady ? 'New bot or room' : 'New bot'} onPress={() => (roomsReady ? setCreating(true) : router.push('/bot/new'))} />
@@ -339,6 +345,7 @@ export default function Home() {
                   </T>
                 </View>
               ) : null}
+              <FleetBanner />
               {/* What is waiting on you, first thing on Home: several at once, raised, with Review all. */}
               <NeedsYouSheet
                 count={deck.waiting}
@@ -350,6 +357,7 @@ export default function Home() {
                 onReviewBucket={bucket => router.push({ pathname: '/inbox', params: { bucket } })}
                 onOpen={card => router.push({ pathname: '/inbox', params: { start: card.key } })}
               />
+              <BriefingCard />
               {/* Active calls, working bots, replying rooms, and background helpers in motion right now. */}
               <InFlightStrip items={inFlight} metas={metas} onOpen={openInFlight} />
               {/* The pinned bots' dashboards, where the server has them; their chats are the first rows below. */}
@@ -385,6 +393,8 @@ export default function Home() {
         }
         contentContainerStyle={styles.content}
       />
+
+      <CommandPalette visible={paletteOpen} onClose={() => setPaletteOpen(false)} dashboardsReady={dashboardsReady} />
 
       <Sheet visible={creating} onClose={() => setCreating(false)} label="Create">
         <GroupedList>

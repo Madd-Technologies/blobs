@@ -57,6 +57,9 @@ export const PUSH_LEVELS: PushLevel[] = ['all', 'needs_you', 'off']
 export interface PushDevice {
   id: string
   name: string
+  platform?: 'webpush' | 'apns'
+  apns_env?: 'production' | 'sandbox'
+  token_prefix?: string
   /** Where its pushes are sent (the push server's host), for display. */
   host: string | null
   created: number | null
@@ -79,6 +82,7 @@ export interface PushStatus {
    * one. Absent from a plugin that predates it.
    */
   vapid?: string
+  features?: string[]
 }
 
 export interface TestResult {
@@ -127,6 +131,21 @@ export async function pushStatusFrom(config: ServerConfig, plugin: PushPlugin): 
 
 export async function addPushDevice(config: ServerConfig, device: { endpoint: string; p256dh: string; auth: string; name: string }): Promise<PushDevice> {
   return call<PushDevice>(config, '/devices', { method: 'POST', body: JSON.stringify(device) })
+}
+
+export async function addApnsDevice(
+  config: ServerConfig,
+  device: { apns_token: string; apns_env?: 'production' | 'sandbox'; name?: string },
+): Promise<PushDevice> {
+  return call<PushDevice>(config, '/devices', {
+    method: 'POST',
+    body: JSON.stringify({
+      platform: 'apns',
+      apns_token: device.apns_token,
+      apns_env: device.apns_env ?? 'production',
+      name: device.name ?? '',
+    }),
+  })
 }
 
 export async function removePushDevice(config: ServerConfig, id: string): Promise<unknown> {

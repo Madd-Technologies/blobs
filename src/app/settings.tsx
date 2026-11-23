@@ -2,7 +2,7 @@ import Feather from '@expo/vector-icons/Feather'
 import Constants from 'expo-constants'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
-import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 
 import { RestartRow } from '@/components/restart/RestartRow'
 import { ConfirmSheet } from '@/components/ui/ConfirmSheet'
@@ -20,6 +20,7 @@ import { useConnection } from '@/stores/connection'
 import { usePhone } from '@/stores/phone'
 import { usePrefs, type ThemePref } from '@/stores/prefs'
 import { useRestart } from '@/stores/restart'
+import { useStation } from '@/stores/station'
 import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
@@ -57,6 +58,9 @@ export default function Settings() {
   const showBotChatter = usePrefs(state => state.showBotChatter)
   const setShowBotChatter = usePrefs(state => state.setShowBotChatter)
   const phone = usePhone(state => state.available)
+  const stationAvailable = useStation(state => state.available)
+  const briefingCount = useStation(state => state.briefing?.counts.total ?? 0)
+  const fleetPaused = useStation(state => Boolean(state.fleet?.paused))
   const [pickTheme, setPickTheme] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const [menuServer, setMenuServer] = useState<SavedServerMeta | null>(null)
@@ -150,8 +154,16 @@ export default function Settings() {
           <Row label="Theme" value={THEMES.find(option => option.value === theme)?.label} onPress={() => setPickTheme(true)} />
           <Row label="Show thinking" right={<Switch value={showThinking} onValueChange={setShowThinking} label="Show thinking" />} />
           <Row label="Show messages between bots" right={<Switch value={showBotChatter} onValueChange={setShowBotChatter} label="Show messages between bots" />} />
-          {Platform.OS === 'android' ? <Row label="Notifications" onPress={() => router.push('/notifications')} /> : null}
+          <Row label="Notifications" onPress={() => router.push('/notifications')} />
         </GroupedList>
+
+        {status === 'online' || stationAvailable ? (
+          <GroupedList separators={false}>
+            <Row label="Morning briefing" value={briefingCount > 0 ? String(briefingCount) : undefined} onPress={() => router.push('/briefing')} />
+            <Row label="Fleet control" value={fleetPaused ? 'Paused' : undefined} onPress={() => router.push('/fleet')} />
+            <Row label="Usage & cost" onPress={() => router.push('/telemetry')} />
+          </GroupedList>
+        ) : null}
 
         <GroupedList separators={false}>
           <Row label="How Blobs works" onPress={() => router.push('/tour')} />

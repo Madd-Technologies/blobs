@@ -8,12 +8,14 @@ import { Screen } from '@/components/ui/Screen'
 import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { Sheet } from '@/components/ui/Sheet'
 import { Spinner } from '@/components/ui/Spinner'
+import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
 import { installMessage } from '@/features/plugins/catalog'
 import type { PushLevel } from '@/lib/hermes/push-api'
 import { useBotViews } from '@/stores/bots'
 import { useNow } from '@/lib/useNow'
 import { push, usePush } from '@/stores/push'
+import { useStation } from '@/stores/station'
 import { toast } from '@/stores/ui'
 
 const NTFY_URL = 'https://play.google.com/store/apps/details?id=io.heckel.ntfy'
@@ -49,19 +51,85 @@ export default function Notifications() {
 
   useEffect(() => {
     void push.refresh()
+    void useStation.getState().refreshQuiet()
   }, [])
 
   return (
     <Screen edges={['top', 'bottom']}>
       <ScreenHeader title="Notifications" />
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        {phase.kind === 'on' ? (
-          <On />
-        ) : (
-          <Setup />
-        )}
+        {phase.kind === 'on' ? <On /> : <Setup />}
+        <QuietHoursSection />
       </ScrollView>
     </Screen>
+  )
+}
+
+const QUIET_PRESETS = [
+  { start: '22:00', end: '07:00', label: '22:00 – 07:00' },
+  { start: '21:00', end: '07:00', label: '21:00 – 07:00' },
+  { start: '23:00', end: '08:00', label: '23:00 – 08:00' },
+  { start: '00:00', end: '08:00', label: '00:00 – 08:00' },
+]
+
+function QuietHoursSection() {
+  const quiet = useStation(state => state.quiet)
+  const updateQuiet = useStation(state => state.updateQuiet)
+  const silenceFor = useStation(state => state.silenceFor)
+  const nowS = useNow(60)
+  const [pickSchedule, setPickSchedule] = useState(false)
+
+  if (!quiet) {
+    return null
+  }
+
+  const silenced = (quiet.muted_until ?? 0) > nowS
+
+  async function save(patch: Parameters<typeof updateQuiet>[0]) {
+    const error = await updateQuiet(patch)
+    if (error) toast(error)
+  }
+
+  return (
+    <View style={styles.quietWrap}>
+      <T variant="meta" color="text2" style={styles.section}>
+        Quiet hours
+      </T>
+      <GroupedList>
+        <Row
+          label="Quiet schedule"
+          right={<Switch value={quiet.enabled} onValueChange={enabled => void save({ enabled })} label="Quiet schedule" />}
+        />
+        <Row label="Hours" value={`${quiet.start} – ${quiet.end}`} onPress={() => setPickSchedule(true)} />
+        <Row
+          label="Allow urgent approvals"
+          right={<Switch value={quiet.allow_urgent} onValueChange={allow_urgent => void save({ allow_urgent })} label="Allow urgent approvals" />}
+        />
+        <Row
+          label={silenced ? 'Clear temporary silence' : 'Silence for 1 hour'}
+          value={silenced && quiet.muted_until ? `Until ${new Date(quiet.muted_until * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : undefined}
+          chevron={false}
+          onPress={() => void (silenced ? silenceFor(0) : silenceFor(3600)).then(err => err && toast(err))}
+        />
+      </GroupedList>
+
+      <Sheet visible={pickSchedule} onClose={() => setPickSchedule(false)} label="Quiet hours schedule">
+        <GroupedList>
+          {QUIET_PRESETS.map(preset => (
+            <Row
+              key={preset.label}
+              label={preset.label}
+              chevron={false}
+              value={quiet.start === preset.start && quiet.end === preset.end ? 'Selected' : undefined}
+              onPress={() => {
+                setPickSchedule(false)
+                void save({ start: preset.start, end: preset.end, enabled: true })
+              }}
+            />
+          ))}
+        </GroupedList>
+      </Sheet>
+    </View>
   )
 }
 
@@ -242,5 +310,6 @@ const styles = StyleSheet.create({
   lead: { textAlign: 'center', paddingTop: 4 },
   note: { paddingHorizontal: 4, marginTop: -8 },
   section: { paddingHorizontal: 4, paddingTop: 8, marginBottom: -8 },
+  quietWrap: { marginTop: 24, gap: 16 },
   hints: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
 })
