@@ -13,7 +13,7 @@ import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
 import { T } from '@/components/ui/T'
 import { haptic } from '@/lib/haptics'
-import { useBoot } from '@/stores/boot'
+import { useBoot } from '@/stores/ui'
 import { useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
 

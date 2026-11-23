@@ -25,7 +25,7 @@ import type { BotMeta } from '@/lib/hermes/identity'
 import { approvalDraftOf } from '@/components/dashboard/useApprovals'
 import { answerApproval, answerQuestion, answerSecret, answerSudo } from '@/stores/actions'
 import { useDashboards } from '@/stores/dashboards'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { BotTint, useTheme } from '@/theme/ThemeProvider'
 import { fonts, motion, radius, tintLevel } from '@/theme/tokens'
 

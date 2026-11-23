@@ -2,7 +2,7 @@ import { actionFor, safeActionUrl } from '@/features/dashboard/view'
 import { serverTarget } from '@/features/viewer/kind'
 import { openLink } from '@/lib/openLink'
 import { openDocument, openFile } from '@/stores/documents'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 /**
  * Opens a value's link: a server file or plugin document in the viewer; a call, an email or a web page outside the app (a mail in

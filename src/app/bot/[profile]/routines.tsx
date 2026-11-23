@@ -32,7 +32,7 @@ import { useBotIdentity } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useDrafts } from '@/stores/drafts'
 import { removeRoutine, runKey, runRoutineNow, setRoutineOn, useRoutines } from '@/stores/routines'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 

@@ -17,7 +17,7 @@ import { enablePictures, onPastedPicture, type PastedPicture } from '@/lib/paste
 import { clipboardHasPicture, pastePicture, pickFiles, pickPhotos, takePhoto } from '@/lib/pickers'
 import { useKeyboardHeight } from '@/lib/useKeyboardHeight'
 import { useVoiceNote } from '@/lib/useVoiceNote'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

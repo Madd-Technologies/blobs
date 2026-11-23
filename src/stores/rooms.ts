@@ -3,31 +3,25 @@ import { useMemo } from 'react'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
-import { buildRoomViews, roomNeedsRead, type RoomData, type RoomView } from '@/features/rooms/view'
-import type { ClarifyAnswer, RespondResult } from '@/features/sessions/store'
+import type { RoomData, RoomView } from '@/features/rooms/view'
+import { buildRoomViews, roomNeedsRead } from '@/features/rooms/view'
 import { describeError } from '@/lib/hermes/errors'
 import { sameJson } from '@/lib/equal'
-import type { ActiveSessionRow, HostedRoom, RoomLogPage, RoomMember, RoomPendingAction } from '@/lib/hermes/protocol'
 import {
-  approveRoomAction,
-  createRoom,
   currentActivity,
-  disbandRoom,
   listRooms,
   mergeEvents,
   readLog,
-  renameRoom,
-  retryRoomTask,
   roomQuestionsFrom,
   roomSessionTitle,
   roomsAvailable,
   roomState,
-  sendRoomMessage,
-  stopRoom,
   waitingFromSessions,
   whoIsReplying,
   type RoomQuestion,
 } from '@/lib/hermes/rooms'
+import type { ActiveSessionRow, HostedRoom, RoomLogPage } from '@/lib/hermes/protocol'
+import { createRoomActions } from '@/stores/roomsActions'
 import { absentGate } from '@/lib/absent'
 import { parseRoomLive, parseRoomsChanged, ROOM_LIVE, ROOMS_CHANGED, type RoomLive } from '@/lib/hermes/livepush'
 import { getRoomActivity } from '@/lib/hermes/plugins'
@@ -497,147 +491,16 @@ export function useRoomData(id: string): RoomData | undefined {
   return useRooms(state => state.rooms[id])
 }
 
-// ── changes: each returns an error to show, or null when it worked ───────────────────────────────
-
-type Outcome = Promise<string | null>
-
-/** Makes a room of these bots and starts watching it. */
-export async function makeRoom(name: string, members: RoomMember[]): Promise<{ id: string } | { error: string }> {
-  try {
-    const room = await createRoom(gateway, name, members)
-    useRooms.setState(state => ({ rooms: { ...state.rooms, [room.room_id]: { room, events: [], cursor: 0, status: null } } }))
-    void useRooms.getState().refreshRoom(room.room_id)
-
-    return { id: room.room_id }
-  } catch (error) {
-    return { error: describeError(error) }
-  }
-}
-
-export async function sendToRoom(id: string, text: string): Outcome {
-  try {
-    const event = await sendRoomMessage(gateway, id, text)
-    const current = useRooms.getState().rooms[id]
-
-    if (current) {
-      useRooms.setState(state => ({ rooms: { ...state.rooms, [id]: { ...current, events: mergeEvents(current.events, [event]), cursor: Math.max(current.cursor, event.seq) } } }))
-    }
-
-    void useRooms.getState().refreshRoom(id)
-
-    return null
-  } catch (error) {
-    return describeError(error)
-  }
-}
-
-export async function stopRoomWork(id: string): Outcome {
-  try {
-    await stopRoom(gateway, id)
-    void useRooms.getState().refreshRoom(id)
-
-    return null
-  } catch (error) {
-    return describeError(error)
-  }
-}
-
-export async function answerRoomApproval(id: string, action: RoomPendingAction, choice: 'once' | 'deny'): Promise<RespondResult> {
-  try {
-    await approveRoomAction(gateway, id, action, choice)
-    void useRooms.getState().refreshRoom(id)
-
-    return 'answered'
-  } catch (error) {
-    void useRooms.getState().refreshRoom(id)
-
-    // Someone else answered it, or the turn ended, before this arrived.
-    return /no longer pending/i.test(describeError(error)) ? 'expired' : 'failed'
-  }
-}
-
-/** Answers a question a room member asked: as a response to its server request, or with `clarify.respond` if the bridge lost it. */
-export async function answerRoomQuestion(id: string, question: RoomQuestion, answers: ClarifyAnswer[]): Promise<RespondResult> {
-  if (!answers.length) {
-    return 'failed'
-  }
-
-  const sent = requests.answer(question.requestId, { kind: 'clarify', answers })
-  let result: RespondResult = 'answered'
-
-  if (sent === 'failed') {
-    return 'failed'
-  }
-
-  if (sent === 'unknown') {
-    try {
-      for (const { questionId, answer } of answers) {
-        const reply = await call(gateway, 'clarify.respond', { session_id: question.sessionId, request_id: question.requestId, answer, ...(questionId ? { question_id: questionId } : {}) })
-
-        if (reply.status === 'expired') {
-          result = 'expired'
-          break
-        }
-      }
-    } catch {
-      return 'failed'
-    }
-  }
-
-  answered.add(question.requestId)
-  void useRooms.getState().refreshRoom(id)
-
-  return result
-}
-
-/** `who` names the bot whose reply this runs again, for the message if the server refuses. */
-export async function retryRoomWork(id: string, taskId: string, who = 'The bot'): Outcome {
-  try {
-    await retryRoomTask(gateway, id, taskId)
-    void useRooms.getState().refreshRoom(id)
-
-    return null
-  } catch (error) {
-    void useRooms.getState().refreshRoom(id)
-    const message = describeError(error)
-
-    // The first attempt is still running on the server: it may yet finish by itself.
-    if (/still active/i.test(message)) {
-      return `${who} is still finishing that reply. Try again in a minute.`
-    }
-
-    // Someone else retried it, or it settled, before this arrived: nothing is left to do.
-    return /no retryable room task/i.test(message) ? null : message
-  }
-}
-
-export async function renameRoomTo(id: string, name: string): Outcome {
-  try {
-    const room = await renameRoom(gateway, id, name)
-    const current = useRooms.getState().rooms[id]
-
-    if (current) {
-      useRooms.setState(state => ({ rooms: { ...state.rooms, [id]: { ...current, room } } }))
-    }
-
-    return null
-  } catch (error) {
-    return describeError(error)
-  }
-}
-
-export async function removeRoom(id: string): Outcome {
-  try {
-    await disbandRoom(gateway, id)
-    disbanded.add(id)
+export const { makeRoom, sendToRoom, stopRoomWork, answerRoomApproval, answerRoomQuestion, retryRoomWork, renameRoomTo, removeRoom } = createRoomActions({
+  getRoom: id => useRooms.getState().rooms[id],
+  setRoom: (id, data) => useRooms.setState(state => ({ rooms: { ...state.rooms, [id]: data } })),
+  removeRoomLocal: id =>
     useRooms.setState(state => {
       const { [id]: _gone, ...rest } = state.rooms
 
       return { rooms: rest }
-    })
-
-    return null
-  } catch (error) {
-    return describeError(error)
-  }
-}
+    }),
+  refreshRoom: id => void useRooms.getState().refreshRoom(id),
+  markAnswered: requestId => answered.add(requestId),
+  markDisbanded: id => disbanded.add(id),
+})

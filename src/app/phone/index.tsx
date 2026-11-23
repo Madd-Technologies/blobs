@@ -17,7 +17,7 @@ import { addressLabel, formatNumber, hoursLabel, openerProblem, standardOpener }
 import type { SettingsChange } from '@/lib/hermes/phone'
 import { useBotViews } from '@/stores/bots'
 import { usePhone } from '@/stores/phone'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 type Editing = 'address' | 'name' | 'opener' | 'tests' | 'dnc' | 'hours' | 'cap' | 'max' | 'hold' | null

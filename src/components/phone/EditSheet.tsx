@@ -8,7 +8,7 @@ import { T } from '@/components/ui/T'
 import type { Errand } from '@/lib/hermes/phone'
 import { usePhone } from '@/stores/phone'
 import { sessions } from '@/stores/sessions'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

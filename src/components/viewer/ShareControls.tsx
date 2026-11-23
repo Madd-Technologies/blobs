@@ -12,7 +12,7 @@ import { deviceRows, folderLabel, progressLabel, sizeLabel, splitStale, type Dev
 import { useConnection } from '@/stores/connection'
 import type { ViewerDoc } from '@/stores/documents'
 import { canDownload, useDownloadFolder, useLastTarget, useShare, type ShareLine } from '@/stores/share'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 /** The server's short name for the sheet's title: a host name's first part, else "your server" for an address. */

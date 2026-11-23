@@ -13,7 +13,7 @@ import { pluginView } from '@/features/plugins/view'
 import { useConnection } from '@/stores/connection'
 import { useRestart } from '@/stores/restart'
 import { SERVER_PLUGINS, useServerPlugins, type ServerPlugin } from '@/stores/serverPlugins'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 

@@ -1,5 +1,3 @@
-import { create } from 'zustand'
-
 import { describeError } from '@/lib/hermes/errors'
 import type { BotMeta } from '@/lib/hermes/identity'
 import { approvalModeOf, browserHeadedOf, changeModel, configureProfile, createBot, describeProfile, disabledSkills, updateBotMeta, type ApprovalMode, type ModelChange, type NewBot } from '@/lib/hermes/profiles'
@@ -7,31 +5,17 @@ import type { ModelOptions, ProfileDescription } from '@/lib/hermes/protocol'
 import { deleteProfile, getBotConfig, updateBotConfig } from '@/lib/hermes/rest'
 import { call } from '@/lib/hermes/rpc'
 import { runsOnOf, sshOnServer, type RunsOn } from '@/lib/hermes/runsOn'
+import { createBotResourceStore } from '@/stores/botResource'
 import { gateway, useConnection } from '@/stores/connection'
-import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
 import { sessions } from '@/stores/sessions'
 
-interface DetailState {
-  /** What the server says each bot is made of, as last read. Kept per bot; absent until the first read finishes. */
-  byBot: Record<string, { detail: ProfileDescription | null; error: string | null } | undefined>
-  load: (profile: string) => Promise<void>
-}
-
 /** A bot's description, instructions, model and skills (`profiles.describe`), read when its details open. */
-export const useProfileDetail = create<DetailState>(set => ({
-  byBot: {},
-  load: async profile => {
-    try {
-      const detail = await describeProfile(gateway, profile)
-      set(state => ({ byBot: { ...state.byBot, [profile]: { detail, error: null } } }))
-    } catch (error) {
-      set(state => ({ byBot: { ...state.byBot, [profile]: { detail: state.byBot[profile]?.detail ?? null, error: describeError(error) } } }))
-    }
-  },
-}))
+export const useProfileDetail = createBotResourceStore<{ detail: ProfileDescription | null; error: string | null }>({
+  fetch: async profile => ({ detail: await describeProfile(gateway, profile), error: null }),
+  onError: (error, current) => ({ detail: current?.detail ?? null, error: describeError(error) }),
+})
 
-/** Every write below returns an error to show, or null when it worked, and leaves the roster fresh. */
 type Outcome = Promise<string | null>
 
 async function attempt(work: () => Promise<void>): Outcome {
@@ -45,7 +29,6 @@ async function attempt(work: () => Promise<void>): Outcome {
   }
 }
 
-/** Changes the look and settings the app keeps for a bot (name shown, shape, color, pinned, hidden). */
 export function saveBotMeta(profile: string, patch: Partial<Record<keyof BotMeta, unknown>>): Outcome {
   return attempt(async () => {
     const row = useRoster.getState().rows.find(entry => entry.name === profile)
@@ -98,26 +81,12 @@ export function removeBot(profile: string): Outcome {
 
 // ── model ────────────────────────────────────────────────────────────────────────────────────────
 
-interface ModelState {
-  /** The providers and models a bot can use, as last read; absent until the first read finishes. */
-  byBot: Record<string, { options: ModelOptions | null; error: string | null } | undefined>
-  load: (profile: string) => Promise<void>
-}
+export const useModelOptions = createBotResourceStore<{ options: ModelOptions | null; error: string | null }>({
+  // `explicit_only` hides providers that only have ambient credentials, as Desktop's picker does.
+  fetch: async profile => ({ options: await call(gateway, 'model.options', { profile, explicit_only: true }), error: null }),
+  onError: (error, current) => ({ options: current?.options ?? null, error: describeError(error) }),
+})
 
-export const useModelOptions = create<ModelState>(set => ({
-  byBot: {},
-  load: async profile => {
-    try {
-      // `explicit_only` hides providers that only have ambient credentials, as Desktop's picker does.
-      const options = await call(gateway, 'model.options', { profile, explicit_only: true })
-      set(state => ({ byBot: { ...state.byBot, [profile]: { options, error: null } } }))
-    } catch (error) {
-      set(state => ({ byBot: { ...state.byBot, [profile]: { options: state.byBot[profile]?.options ?? null, error: describeError(error) } } }))
-    }
-  },
-}))
-
-/** Picks a bot's model. A model the server flags comes back as `confirm`; call again with `confirmed`. */
 export async function saveModel(profile: string, model: string, provider: string, confirmed = false): Promise<ModelChange | { kind: 'error'; message: string }> {
   try {
     const result = await changeModel(gateway, profile, model, provider, confirmed)
@@ -134,7 +103,6 @@ export async function saveModel(profile: string, model: string, provider: string
 
 // ── skills ───────────────────────────────────────────────────────────────────────────────────────
 
-/** Saves which skills are on. The server takes the whole list of disabled ones. */
 export function saveSkills(profile: string, skills: { name: string; enabled: boolean }[]): Outcome {
   return attempt(async () => {
     const result = await configureProfile(gateway, { name: profile, disabled_skills: disabledSkills(skills) })
@@ -149,53 +117,13 @@ export function saveSkills(profile: string, skills: { name: string; enabled: boo
 
 // ── approvals ────────────────────────────────────────────────────────────────────────────────────
 
-interface ApprovalState {
-  byBot: Record<string, ApprovalMode | undefined>
-  load: (profile: string) => Promise<void>
-}
+export const useApprovals = createBotResourceStore<ApprovalMode>({
+  fetch: async (profile, config) => approvalModeOf(await getBotConfig(config, profile)),
+})
 
-/** How each bot asks before a risky command: read from its config when its details open. */
-export const useApprovals = create<ApprovalState>(set => ({
-  byBot: {},
-  load: async profile => {
-    const config = useConnection.getState().config
-
-    if (!config) {
-      return
-    }
-
-    try {
-      const mode = approvalModeOf(await getBotConfig(config, profile))
-      set(state => ({ byBot: { ...state.byBot, [profile]: mode } }))
-    } catch {
-      // Left unknown: the row shows nothing rather than a guess.
-    }
-  },
-}))
-
-interface BrowserModeState {
-  byBot: Record<string, boolean | undefined>
-  load: (profile: string) => Promise<void>
-}
-
-/** Whether each bot's browser tool runs in a visible window (`browser.headed`), read from its config. */
-export const useBrowserMode = create<BrowserModeState>(set => ({
-  byBot: {},
-  load: async profile => {
-    const config = useConnection.getState().config
-
-    if (!config) {
-      return
-    }
-
-    try {
-      const headed = browserHeadedOf(await getBotConfig(config, profile))
-      set(state => ({ byBot: { ...state.byBot, [profile]: headed } }))
-    } catch {
-      // Left unknown, which counts as headless: a browser step then offers no screen to open.
-    }
-  },
-}))
+export const useBrowserMode = createBotResourceStore<boolean>({
+  fetch: async (profile, config) => browserHeadedOf(await getBotConfig(config, profile)),
+})
 
 export function saveApprovalMode(profile: string, mode: ApprovalMode): Outcome {
   return attempt(async () => {
@@ -210,7 +138,6 @@ export function saveApprovalMode(profile: string, mode: ApprovalMode): Outcome {
   })
 }
 
-/** Reads a bot's config once for what its details show from it: how it asks first, and where it runs. */
 export async function loadBotSettings(profile: string): Promise<void> {
   const config = useConnection.getState().config
 
@@ -220,9 +147,12 @@ export async function loadBotSettings(profile: string): Promise<void> {
 
   try {
     const botConfig = await getBotConfig(config, profile)
-    useApprovals.setState(state => ({ byBot: { ...state.byBot, [profile]: approvalModeOf(botConfig) } }))
-    useRunsOn.setState(state => ({ byBot: { ...state.byBot, [profile]: runsOnOf(botConfig) } }))
-    await withServerTarget(profile)
+    useApprovals.getState().patch(profile, approvalModeOf(botConfig))
+    const runsOn = await enrichServerTarget(config, profile, runsOnOf(botConfig))
+
+    if (useConnection.getState().config?.baseUrl === config.baseUrl) {
+      useRunsOn.getState().patch(profile, runsOn)
+    }
   } catch {
     // Left unknown: the rows show nothing rather than a guess.
   }
@@ -230,48 +160,20 @@ export async function loadBotSettings(profile: string): Promise<void> {
 
 // ── runs on ──────────────────────────────────────────────────────────────────────────────────────
 
-interface RunsOnState {
-  byBot: Record<string, RunsOn | undefined>
-  load: (profile: string) => Promise<void>
-}
-
-/** Where each bot's commands run (`terminal` in its config): read when its details or Runs on open. */
-export const useRunsOn = create<RunsOnState>(set => ({
-  byBot: {},
-  load: async profile => {
-    const config = useConnection.getState().config
-
-    if (!config) {
-      return
-    }
-
-    try {
-      const runsOn = runsOnOf(await getBotConfig(config, profile))
-      set(state => ({ byBot: { ...state.byBot, [profile]: runsOn } }))
-      await withServerTarget(profile)
-    } catch {
-      // Left unknown.
-    }
-  },
-}))
-
-/** For SSH set up in the bot's `.env`, the address the server reports (one more read, only for those bots). */
-async function withServerTarget(profile: string): Promise<void> {
-  const config = useConnection.getState().config
-  const runsOn = useRunsOn.getState().byBot[profile]
-
-  if (!config || !runsOn?.fromServer) {
-    return
+async function enrichServerTarget(config: Parameters<typeof sshOnServer>[0], profile: string, runsOn: RunsOn): Promise<RunsOn> {
+  if (!runsOn.fromServer) {
+    return runsOn
   }
 
   const serverTarget = await sshOnServer(config, profile)
 
-  if (serverTarget) {
-    useRunsOn.setState(state => ({ byBot: { ...state.byBot, [profile]: state.byBot[profile] && { ...state.byBot[profile], serverTarget } } }))
-  }
+  return serverTarget ? { ...runsOn, serverTarget } : runsOn
 }
 
-/** Writes where a bot runs (a change from `runsOnChange`). New chats use it; see the Runs on screen for the open one. */
+export const useRunsOn = createBotResourceStore<RunsOn>({
+  fetch: async (profile, config) => enrichServerTarget(config, profile, runsOnOf(await getBotConfig(config, profile))),
+})
+
 export function saveRunsOn(profile: string, change: { terminal: Record<string, unknown> }): Outcome {
   return attempt(async () => {
     const config = useConnection.getState().config
@@ -287,7 +189,6 @@ export function saveRunsOn(profile: string, change: { terminal: Record<string, u
 
 // ── reload ───────────────────────────────────────────────────────────────────────────────────────
 
-/** Re-reads the server's `.env`: new keys work on the next call. Returns how many changed, or an error to show. */
 export async function reloadEnv(): Promise<{ updated: number } | { error: string }> {
   try {
     return { updated: (await call(gateway, 'reload.env', {})).updated }
@@ -295,11 +196,3 @@ export async function reloadEnv(): Promise<{ updated: number } | { error: string
     return { error: describeError(error) }
   }
 }
-
-registerServerReset(() => {
-  useProfileDetail.setState({ byBot: {} })
-  useModelOptions.setState({ byBot: {} })
-  useApprovals.setState({ byBot: {} })
-  useBrowserMode.setState({ byBot: {} })
-  useRunsOn.setState({ byBot: {} })
-})

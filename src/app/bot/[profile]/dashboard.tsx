@@ -24,7 +24,7 @@ import { useBotView, useFaceColor } from '@/stores/bots'
 import { startDashboardPoll, useBotBoard, useDashboards } from '@/stores/dashboards'
 import { useWatch } from '@/stores/watch'
 import { useDrafts } from '@/stores/drafts'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { BotTint, useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 

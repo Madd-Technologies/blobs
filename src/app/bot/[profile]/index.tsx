@@ -47,7 +47,7 @@ import { usePrefs } from '@/stores/prefs'
 import { useSeen } from '@/stores/seen'
 import { useOnScreen } from '@/stores/presence'
 import { sessions, useBotSession, useChosenChat } from '@/stores/sessions'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useVoice } from '@/stores/voice'
 import { BotTint } from '@/theme/ThemeProvider'
 

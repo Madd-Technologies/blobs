@@ -11,7 +11,7 @@ import { ageLabel } from '@/features/roster/derive'
 import { useNowMs } from '@/lib/useNow'
 import { usePhone } from '@/stores/phone'
 import { useDrafts } from '@/stores/drafts'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 import { AskBody, Countdown, useCanJoin, useJoinCall, useQuestionLeft } from './CallQuestion'

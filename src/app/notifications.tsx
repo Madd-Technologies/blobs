@@ -14,7 +14,7 @@ import type { PushLevel } from '@/lib/hermes/push-api'
 import { useBotViews } from '@/stores/bots'
 import { useNow } from '@/lib/useNow'
 import { push, usePush } from '@/stores/push'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 const NTFY_URL = 'https://play.google.com/store/apps/details?id=io.heckel.ntfy'
 

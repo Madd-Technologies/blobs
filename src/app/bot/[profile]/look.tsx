@@ -12,7 +12,7 @@ import { AVATAR_SHAPES, PROFILE_SWATCHES } from '@/lib/hermes/identity'
 import { mergeBotMeta } from '@/lib/hermes/profiles'
 import { useBotIdentity } from '@/stores/bots'
 import { saveBotMeta } from '@/stores/profiles'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 const randomSeed = () => Math.random().toString(36).slice(2, 8)

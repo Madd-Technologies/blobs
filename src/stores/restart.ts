@@ -7,7 +7,7 @@ import { cancelRestart, getRestartStatus, RestartRefused, requestRestart, restar
 import { useConnection } from '@/stores/connection'
 import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 /** How often the status is read while it matters: the sheet is open, a restart waits, or one is under way. */
 const POLL_MS = 3_000

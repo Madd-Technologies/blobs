@@ -20,7 +20,7 @@ import { useChatList } from '@/stores/chats'
 import { useConnection } from '@/stores/connection'
 import { useRoster } from '@/stores/roster'
 import { sessions, useBotSession, useChosenChat } from '@/stores/sessions'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 /** "just now", "5 min ago", "3 h ago", "2 d ago", then a date. */

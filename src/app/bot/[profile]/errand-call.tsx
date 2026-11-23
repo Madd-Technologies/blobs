@@ -17,7 +17,7 @@ import { useNow } from '@/lib/useNow'
 import { useBotIdentity } from '@/stores/bots'
 import { useListen } from '@/stores/listen'
 import { startPhonePoll, usePhone } from '@/stores/phone'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts } from '@/theme/tokens'
 

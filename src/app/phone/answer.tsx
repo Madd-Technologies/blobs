@@ -8,7 +8,7 @@ import type { CallReply } from '@/lib/hermes/phone'
 import { haptic } from '@/lib/haptics'
 import { useConnection } from '@/stores/connection'
 import { usePhone } from '@/stores/phone'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 /** How long a push button's answer waits for the app to find its server after a cold start. */
 const CONNECT_WAIT_MS = 10_000

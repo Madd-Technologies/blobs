@@ -1,66 +1,45 @@
-import { create } from 'zustand'
-
 import { describeError } from '@/lib/hermes/errors'
 import { listToolsets, setToolset, type Toolset } from '@/lib/hermes/toolsets'
+import { createBotResourceStore } from '@/stores/botResource'
 import { useConnection } from '@/stores/connection'
-import { registerServerReset } from '@/stores/reset'
 
-interface ToolsetsState {
-  /** Each bot's toolsets as last read from the server; absent until the first read finishes. */
-  byBot: Record<string, { rows: Toolset[]; error: string | null } | undefined>
-  load: (profile: string) => Promise<void>
-  /** Switches one, showing it at once; if the server refuses, it goes back and the reason is returned. */
+interface ToolsetEntry {
+  rows: Toolset[]
+  error: string | null
+}
+
+interface ToolsetActions {
   toggle: (profile: string, name: string, enabled: boolean) => Promise<string | null>
 }
 
-export const useToolsets = create<ToolsetsState>((set, get) => {
-  const patchRow = (profile: string, name: string, enabled: boolean) =>
-    set(state => {
-      const entry = state.byBot[profile]
+export const useToolsets = createBotResourceStore<ToolsetEntry, ToolsetActions>({
+  fetch: async (profile, config) => ({ rows: await listToolsets(config, profile), error: null }),
+  onError: (error, current) => ({ rows: current?.rows ?? [], error: describeError(error) }),
+  extra: (_set, get, patch) => {
+    const patchRow = (profile: string, name: string, enabled: boolean) =>
+      patch(profile, entry => (entry ? { ...entry, rows: entry.rows.map(row => (row.name === name ? { ...row, enabled } : row)) } : undefined))
 
-      return entry ? { byBot: { ...state.byBot, [profile]: { ...entry, rows: entry.rows.map(row => (row.name === name ? { ...row, enabled } : row)) } } } : state
-    })
+    return {
+      toggle: async (profile, name, enabled) => {
+        const config = useConnection.getState().config
+        const before = get().byBot[profile]?.rows.find(row => row.name === name)?.enabled
 
-  return {
-    byBot: {},
-    load: async profile => {
-      const config = useConnection.getState().config
+        if (!config || before === undefined) {
+          return 'Not connected to the server.'
+        }
 
-      if (!config) {
-        return
-      }
+        patchRow(profile, name, enabled)
 
-      try {
-        const rows = await listToolsets(config, profile)
+        try {
+          await setToolset(config, profile, name, enabled)
 
-        set(state => ({ byBot: { ...state.byBot, [profile]: { rows, error: null } } }))
-      } catch (error) {
-        set(state => ({ byBot: { ...state.byBot, [profile]: { rows: state.byBot[profile]?.rows ?? [], error: describeError(error) } } }))
-      }
-    },
-    toggle: async (profile, name, enabled) => {
-      const config = useConnection.getState().config
-      const before = get().byBot[profile]?.rows.find(row => row.name === name)?.enabled
+          return null
+        } catch (error) {
+          patchRow(profile, name, before)
 
-      if (!config || before === undefined) {
-        return 'Not connected to the server.'
-      }
-
-      patchRow(profile, name, enabled)
-
-      try {
-        await setToolset(config, profile, name, enabled)
-
-        return null
-      } catch (error) {
-        patchRow(profile, name, before)
-
-        return describeError(error)
-      }
-    },
-  }
-})
-
-registerServerReset(() => {
-  useToolsets.setState({ byBot: {} })
+          return describeError(error)
+        }
+      },
+    }
+  },
 })

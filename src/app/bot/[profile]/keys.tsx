@@ -19,7 +19,7 @@ import { useBotIdentity } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useKeys } from '@/stores/keys'
 import { reloadEnv } from '@/stores/profiles'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

@@ -6,7 +6,7 @@ import { IconCircle } from '@/components/ui/IconCircle'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { pictureKey, usePictures } from '@/stores/pictures'
-import { useViewer, type ViewTarget } from '@/stores/viewer'
+import { useViewer, type ViewTarget } from '@/stores/ui'
 
 const keyOf = (target: ViewTarget) => `${target.uri ?? ''}|${target.path ?? ''}|${target.profile ?? ''}`
 

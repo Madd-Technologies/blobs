@@ -1,210 +1,28 @@
-/**
- * Bot chat sessions: opening a bot's Bot Chat, loading its history, streaming a turn, answering
- * prompts. Framework-free (zustand/vanilla) with every dependency injected, so it is tested against a
- * scripted gateway and runs unchanged in the app. `src/stores/sessions.ts` wires the real one.
- */
-
 import { createStore, type StoreApi } from 'zustand/vanilla'
 
-import { describeError } from '../../lib/hermes/errors.ts'
-import type { GatewayEvent } from '../../lib/hermes/gateway-client.ts'
-import { asHermesEvent, RpcCode, type HermesEvent, type ProfileRow, type SessionInfo, type SessionResumeResult } from '../../lib/hermes/protocol.ts'
-import { hasOlder } from '../../lib/hermes/history.ts'
-import { listSessionMessages, listSessionsPage, type StoredMessage } from '../../lib/hermes/rest.ts'
-import { call, isRpcCode, type RpcClient, type RpcMethods } from '../../lib/hermes/rpc.ts'
-import type { RequestBridge } from '../../lib/hermes/server-requests.ts'
-import { HermesHttpError, type ServerConfig } from '../../lib/hermes/server.ts'
-import { historyWithOpenTurn, itemsFromHistory, settleStaleSteps, turnIsChatter, turnIsStored } from '../transcript/history.ts'
-import { routineDelivery } from '../transcript/injected.ts'
-import { withLists } from '../transcript/jobs.ts'
 import { chipOf, messageFor, refusal, uploadAttachment, type PendingFile, type Uploaded } from '../../lib/hermes/attachments.ts'
-import { answerPrompt, appendError, appendNote, appendOutput, appendUser, dropPendingUser, expirePrompt, failUser, finishOutput, initialTranscript, reduceEvent, revealLastReply, startOutput } from '../transcript/reduce.ts'
-import { skillInvocation } from '../transcript/userContent.ts'
-import { dispatchOf, parseSlash, REWRITES_CHAT, stripAnsi } from '../../lib/hermes/slash.ts'
-import type { Item, TranscriptState } from '../transcript/types.ts'
+import { describeError } from '../../lib/hermes/errors.ts'
+import { hasOlder } from '../../lib/hermes/history.ts'
+import { asHermesEvent, RpcCode, type HermesEvent, type SessionResumeResult } from '../../lib/hermes/protocol.ts'
+import { listSessionMessages, listSessionsPage, type StoredMessage } from '../../lib/hermes/rest.ts'
+import { call, isRpcCode } from '../../lib/hermes/rpc.ts'
+import { HermesHttpError, type ServerConfig } from '../../lib/hermes/server.ts'
+import { itemsFromHistory } from '../transcript/history.ts'
+import { withLists } from '../transcript/jobs.ts'
+import { appendNote, appendOutput, appendUser, dropPendingUser, failUser, initialTranscript, reduceEvent } from '../transcript/reduce.ts'
+import type { TranscriptState } from '../transcript/types.ts'
 import { INBOX_TITLE, NOT_CHATS } from './chats.ts'
-import { createEventQueue, realTimers, type EventQueue, type QueueTimers } from './queue.ts'
+import { createSlashRunner } from './commands.ts'
+import { blankSession, buildTranscript } from './hydrate.ts'
+import { createPromptResponder } from './prompts.ts'
+import { createEventQueue, realTimers, type EventQueue } from './queue.ts'
+import { CHATS_PAGE, PAGE_SIZE, summaryOf, type BotSession, type ChatSummary, type ClarifyAnswer, type RespondResult, type SessionsDeps, type SessionsState } from './types.ts'
 
-/** Rows fetched per page; the chat opens on the newest page and pages back from there. */
-export const PAGE_SIZE = 50
-/** Side chats read at a time on the Chats screen; more are read as you scroll. */
-const CHATS_PAGE = 30
-
-export interface BotSession {
-  profile: string
-  /** `opening` shows the loading state only the first time; a re-open keeps the old transcript on screen. */
-  phase: 'idle' | 'opening' | 'ready' | 'error'
-  error: string | null
-  /** The stored id (REST and `canonical_session.id`). */
-  storedId: string | null
-  /** The live id (every RPC). Changes when the session is resumed after being closed. */
-  liveId: string | null
-  transcript: TranscriptState
-  info: Partial<SessionInfo> | null
-  /** The newest-first pages loaded so far, kept so older pages can be merged in order. */
-  rows: StoredMessage[]
-  hasOlder: boolean
-  loadingOlder: boolean
-}
-
-export interface SessionsState {
-  bots: Record<string, BotSession>
-  /**
-   * The side chat each bot is showing, when it is not showing its main chat (Bot Chat): profile -> stored id. Leaving the bot
-   * returns it to its main chat, unless the person chose to come back to the last side chat (then the app keeps this).
-   */
-  chosen: Record<string, string>
-}
-
-/** A stored chat as the history list shows it. */
-export interface ChatSummary {
-  id: string
-  title: string
-  preview: string
-  /** Epoch seconds. */
-  startedAt: number
-  messageCount: number
-  /** Where it was started: `tui`, `cron`, a chat platform... */
-  source: string
-}
-
-/** A `session.list` row as the history list shows it. */
-function summaryOf(entry: RpcMethods['session.list']['result']['sessions'][number]): ChatSummary {
-  return {
-    id: entry.id,
-    title: entry.title ?? '',
-    preview: entry.preview ?? '',
-    startedAt: entry.started_at ?? 0,
-    messageCount: entry.message_count ?? 0,
-    source: entry.source ?? '',
-  }
-}
-
-export interface SessionsDeps {
-  client: RpcClient
-  getConfig: () => ServerConfig | null
-  getRosterRow: (profile: string) => ProfileRow | undefined
-  /** Subscribe to raw gateway events; returns the unsubscribe function. */
-  onEvent: (handler: (event: GatewayEvent) => void) => () => void
-  /**
-   * For a Hermes that asks prompts as requests (0.21.5+): answers them, and re-delivers the ones still
-   * open after a resume. Absent, every prompt is answered with its RPC (Hermes 0.21.0).
-   */
-  requests?: Pick<RequestBridge, 'answer' | 'ingest'>
-  listMessages?: typeof listSessionMessages
-  /** A page of a bot's stored chats (`GET /api/sessions`); injected in tests. */
-  listSessions?: typeof listSessionsPage
-  /** A picked file's bytes as base64 (the phone's file system). Needed only to send attachments. */
-  readBase64?: (uri: string) => Promise<string>
-  now?: () => number
-  timers?: QueueTimers
-  /** Waits between retries of a settling session. */
-  sleep?: (ms: number) => Promise<void>
-  /**
-   * The server reports work that outlives a step (Hermes 0.22+, `lib/hermes/capabilities.ts`): background commands and helpers
-   * are then followed. Absent or false, every step reads as it always has.
-   */
-  liveWork?: () => boolean
-  /**
-   * The server reports helpers' progress (Hermes 0.21.5+): helpers are then followed even where background commands are not.
-   */
-  liveHelpers?: () => boolean
-  /**
-   * Replays what a live session emitted that this client has not seen yet (Hermes's event ring, `session.events.since`), into
-   * `onEvent`. True when nothing can be missing; false when the ring no longer reaches back, or the client never followed the
-   * session: then the chat is read again. Absent, a chat that comes back is always read again.
-   */
-  catchUp?: (liveId: string) => Promise<boolean>
-  /** Starts following a live session's events from the server's latest one, so a later `catchUp` knows where it left off. */
-  follow?: (liveId: string) => Promise<void>
-}
-
-export type RespondResult = 'answered' | 'expired' | 'failed'
-
-/** One answer to one question of a clarify prompt. */
-export interface ClarifyAnswer {
-  /** The question's `qid`; omit for the single-question form. */
-  questionId?: string
-  answer: string
-}
+export { PAGE_SIZE, blankSession, buildTranscript, describeError }
+export type { BotSession, ChatSummary, ClarifyAnswer, RespondResult, SessionsDeps, SessionsState }
 
 /** Events that arrive in bulk and can wait for the next flush; everything else flushes at once. */
 const BATCHABLE = new Set<HermesEvent['type']>(['message.delta', 'thinking.delta', 'reasoning.delta', 'status.update', 'session.usage', 'agent.terminal.output', 'subagent.tool', 'subagent.progress'])
-
-export function blankSession(profile: string): BotSession {
-  return { profile, phase: 'idle', error: null, storedId: null, liveId: null, transcript: initialTranscript(), info: null, rows: [], hasOlder: false, loadingOlder: false }
-}
-
-/** A short, human sentence for an error from the gateway or the network. */
-/**
- * Hermes 0.22's refusals for a chat its gateway owns (`data.reason` on a 4090), in words. The gateway runs routines, kanban
- * results and other bots' messages into chats too, and while it holds one the dashboard cannot start a turn there.
- */
-export { describeError }
-
-/** What starts a turn: your message, or something that woke the bot (a finished process, another bot's message). */
-const startsTurn = (item: Item): boolean => item.kind === 'user' || item.kind === 'note' || item.kind === 'teammate'
-
-/** True when this reply text is already in the transcript after the latest user message. */
-function alreadyShown(items: Item[], partial: string): boolean {
-  const wanted = partial.trim()
-  const lastUser = items.map(startsTurn).lastIndexOf(true)
-
-  // A tool call in flight means the model is past this text.
-  if (items.at(-1)?.kind === 'activity') {
-    return true
-  }
-
-  return items.slice(lastUser + 1).some(item => item.kind === 'assistant' && item.text.trim().startsWith(wanted))
-}
-
-/** What `session.resume` and the stored rows say, as a transcript. */
-export function buildTranscript(rows: StoredMessage[], resume: Pick<SessionResumeResult, 'running' | 'inflight' | 'pending_approval' | 'pending_clarify'>): TranscriptState {
-  const read = historyWithOpenTurn(rows)
-  // The turn running now is the last stored one (and not a newer one whose first row is not stored yet).
-  const runningIsLast = resume.running && turnIsStored(rows, resume.inflight?.user)
-  // A routine's turn the rows end with is over unless it is the one running: its summary shows.
-  let items = read.routineFrom !== null && !runningIsLast ? revealLastReply(read.items, read.routineFrom) : read.items
-
-  if (!resume.running) {
-    items = settleStaleSteps(items)
-  }
-
-  let transcript = initialTranscript(items)
-
-  if (resume.running) {
-    transcript = { ...transcript, running: true, phase: 'thinking' }
-    const partial = resume.inflight?.assistant
-    // A turn another bot started: what the bot is writing now is for that bot. Nothing of it is shown, now or as it goes on.
-    // A routine's turn is the same until it ends, when its last reply (the summary for the person) shows.
-    const betweenBots = turnIsChatter(rows, resume.inflight?.user)
-
-    if (betweenBots) {
-      const routineFrom = runningIsLast ? read.routineFrom : routineDelivery(resume.inflight?.user ?? '') !== null ? items.length : null
-      transcript = { ...transcript, chatterFrom: items.length, routineFrom }
-    }
-
-    // The reply being typed is not stored yet: resume hands it back so the bubble carries on. But once
-    // the model has moved on to a tool call, that text is already in history (stored with the call), so
-    // adding it again would show the same reply twice.
-    if (!betweenBots && partial?.trim() && !alreadyShown(items, partial)) {
-      transcript = reduceEvent(transcript, { type: 'message.delta', payload: { text: partial } })
-    }
-  } else if (resume.inflight?.status === 'error' && resume.inflight.error && startsTurn(items.at(-1) as Item)) {
-    // `inflight` keeps the last failure even when idle, so only show it if that turn never got a reply.
-    transcript = reduceEvent(transcript, { type: 'error', payload: { message: resume.inflight.error } })
-  }
-
-  if (resume.pending_approval) {
-    transcript = reduceEvent(transcript, { type: 'approval.request', payload: resume.pending_approval })
-  }
-
-  if (resume.pending_clarify) {
-    transcript = reduceEvent(transcript, { type: 'clarify.request', payload: resume.pending_clarify })
-  }
-
-  return transcript
-}
 
 export function createSessions(deps: SessionsDeps) {
   const listMessages = deps.listMessages ?? listSessionMessages
@@ -241,8 +59,6 @@ export function createSessions(deps: SessionsDeps) {
     patch(profile, bot => ({ transcript: change(bot.transcript) }))
   }
 
-  // ── live events ────────────────────────────────────────────────────────────────────────────────
-
   function queueFor(profile: string): EventQueue<HermesEvent> {
     let queue = queues.get(profile)
 
@@ -270,13 +86,8 @@ export function createSessions(deps: SessionsDeps) {
     return queue
   }
 
-  /** Bots whose last message Hermes 0.22 handed to its gateway: their chat is read again once that turn completes. */
   const forwarded = new Set<string>()
 
-  /**
-   * Reads a chat's latest page again and redraws it from what the server stored: after a turn that ran in the gateway, whose
-   * steps never streamed here (Hermes 0.22 relays only its start and its final reply).
-   */
   async function reread(profile: string): Promise<void> {
     const config = deps.getConfig()
     const { storedId } = get(profile)
@@ -289,7 +100,6 @@ export function createSessions(deps: SessionsDeps) {
       const page = await listMessages(config, storedId, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true })
       const bot = get(profile)
 
-      // Another chat opened, or another turn started meanwhile: what is on screen is newer.
       if (bot.storedId !== storedId || bot.transcript.running) {
         return
       }
@@ -301,17 +111,12 @@ export function createSessions(deps: SessionsDeps) {
         transcript: { ...transcript, liveWork: bot.transcript.liveWork, liveHelpers: bot.transcript.liveHelpers, jobs: bot.transcript.jobs },
       })
     } catch {
-      // The reply already showed with the completion; the steps just stay unseen.
+      // Reply already showed with completion; steps stay unseen.
     }
   }
 
-  /**
-   * Chats being read whole (`readWhole`): their live session's events wait here until the page is drawn, then apply on top of
-   * it. Drawn the other way round, the page (older than what had streamed in while it was read) wiped those events.
-   */
   const held = new Map<string, HermesEvent[]>()
 
-  /** Routes a chat's live events by the live id the server returned (a new one when the session had been closed). */
   function rekey(profile: string, liveId: string) {
     const previous = get(profile).liveId
 
@@ -338,22 +143,15 @@ export function createSessions(deps: SessionsDeps) {
       queueFor(profile).push(event)
 
       if (event.type === 'message.complete' && forwarded.delete(profile)) {
-        // Give the gateway a moment to commit the turn's rows.
         scheduleTimer(() => void reread(profile), 600)
       }
 
-      // A background job's news (it finished, failed or sent a heartbeat): the list has its exit status and output.
       if (event.type === 'status.update' && event.payload.kind === 'process') {
         void refreshJobs(profile)
       }
     }
   })
 
-  /**
-   * What the server is still running for a bot's open chat: its background commands (Hermes 0.22+) and its helpers (0.21.5+),
-   * merged into the jobs its steps started. Run when the chat opens, when a job sends news, and every so often while one runs on
-   * screen.
-   */
   async function refreshJobs(profile: string): Promise<void> {
     const { liveId, transcript } = get(profile)
 
@@ -406,18 +204,14 @@ export function createSessions(deps: SessionsDeps) {
 
   async function createBotChat(profile: string): Promise<string> {
     const created = await call(deps.client, 'session.create', { profile, title: 'Bot Chat', hidden: true, follow_profile_config: true })
-    // The title is how Bot Chat is found again, and `session.create` does not always keep it.
     await call(deps.client, 'session.title', { session_id: created.session_id, title: 'Bot Chat' }).catch(() => undefined)
 
     return created.stored_session_id
   }
 
-  /** `session.resume`, retrying while the session is settling and recreating Bot Chat if it is gone. */
   async function resume(profile: string, storedId: string): Promise<{ resume: SessionResumeResult; storedId: string }> {
     for (let attempt = 0; ; attempt++) {
       try {
-        // `defer_history`: the server answers at once and restores the model's history in the background, as it does for
-        // Hermes Desktop, which also reads what it shows through REST pages. Without it a cold resume reads the whole chat first.
         return { resume: await call(deps.client, 'session.resume', { session_id: storedId, profile, omit_messages: true, defer_history: true }), storedId }
       } catch (error) {
         if (isRpcCode(error, RpcCode.Settling) && attempt < 3) {
@@ -427,7 +221,6 @@ export function createSessions(deps: SessionsDeps) {
 
         if (isRpcCode(error, RpcCode.SessionNotFound) && attempt === 0) {
           if (store.getState().chosen[profile] === storedId) {
-            // A chat that is gone (deleted elsewhere, or a new one nobody wrote in): fall back to the main chat.
             setChosen(profile, null)
             storedId = await findStoredId(profile)
           } else {
@@ -442,7 +235,6 @@ export function createSessions(deps: SessionsDeps) {
     }
   }
 
-  /** A chat's latest history page. A chat nobody has written in yet has no stored row: it reads as empty. */
   function readPage(config: ServerConfig, profile: string, id: string) {
     return listMessages(config, id, profile, { order: 'latest', limit: PAGE_SIZE, includeCompacted: true }).catch((error: unknown) => {
       if (error instanceof HermesHttpError && error.status === 404 && store.getState().chosen[profile] === id) {
@@ -453,12 +245,7 @@ export function createSessions(deps: SessionsDeps) {
     })
   }
 
-  /**
-   * Draws a chat from its history page and what `session.resume` said. The live session's events are held from now until the
-   * page is drawn, then applied on top of it, and a message sent meanwhile goes once this is done (see `send`), so nothing that
-   * happens while the page is read can be drawn over by it. `early` is the page when it was asked for before the resume.
-   */
-  async function readWhole(profile: string, config: ServerConfig, storedId: string, resumed: SessionResumeResult, early?: ReturnType<typeof readPage>) {
+  async function readWhole(profile: string, config: NonNullable<ReturnType<SessionsDeps['getConfig']>>, storedId: string, resumed: SessionResumeResult, early?: ReturnType<typeof readPage>) {
     held.set(profile, [])
     rekey(profile, resumed.session_id)
 
@@ -470,7 +257,6 @@ export function createSessions(deps: SessionsDeps) {
       const bot = get(profile)
       const liveWork = deps.liveWork?.() ?? false
       const liveHelpers = !liveWork && (deps.liveHelpers?.() ?? false)
-      // The same chat opened again keeps the jobs it was following (a helper count the lists cannot give back).
       const kept = bot.storedId === storedId ? bot.transcript.jobs : undefined
       let transcript: TranscriptState = {
         ...buildTranscript(page.messages, resumed),
@@ -479,7 +265,6 @@ export function createSessions(deps: SessionsDeps) {
         ...((liveWork || liveHelpers) && kept ? { jobs: kept } : {}),
       }
 
-      // Messages sent while it was read: not stored yet (each waits for this read before it goes), so they stay as they were.
       if (bot.storedId === storedId) {
         for (const item of bot.transcript.items) {
           if (item.kind === 'user' && item.pending) {
@@ -500,9 +285,7 @@ export function createSessions(deps: SessionsDeps) {
         transcript,
       })
 
-      // Prompts still waiting on a person (Hermes 0.21.5+): show them, and be able to answer them.
       deps.requests?.ingest(resumed.session_id, resumed.open_requests)
-      // From here on what it does arrives live, and a reconnect catches up from this point instead of reading it all again.
       void deps.follow?.(resumed.session_id)
 
       if (liveWork || liveHelpers) {
@@ -528,7 +311,6 @@ export function createSessions(deps: SessionsDeps) {
     }
 
     const shown = get(profile)
-    // A chat already on screen with its live session: coming back to it re-attaches it, it is not read again.
     const attached = shown.phase === 'ready' && !!shown.liveId && !!shown.storedId
 
     if (!attached && (!silent || shown.phase === 'idle')) {
@@ -543,9 +325,6 @@ export function createSessions(deps: SessionsDeps) {
       }
 
       if (attached && found === shown.storedId) {
-        // A reconnect, or opening the chat again: re-attach it, and take what it did meanwhile from the server's event ring.
-        // Only when the ring cannot cover the gap (the session was closed after 20 s away, the server restarted, the ring moved
-        // on) is the chat read whole again.
         const { resume: resumed, storedId } = await resume(profile, found)
 
         if (epoch !== resetEpoch) {
@@ -569,8 +348,6 @@ export function createSessions(deps: SessionsDeps) {
         return
       }
 
-      // The history needs only the stored id, so it is read while the server resumes the chat instead of after it. If the
-      // resume recreated the chat under a new id, that read is dropped and the new chat is read.
       const early = readPage(config, profile, found)
       early.catch(() => undefined)
       const { resume: resumed, storedId } = await resume(profile, found)
@@ -585,12 +362,10 @@ export function createSessions(deps: SessionsDeps) {
         return
       }
 
-      // A failed silent re-open keeps what was on screen; the first open shows the error.
       patch(profile, bot => ({ phase: bot.phase === 'ready' && silent ? 'ready' : 'error', error: describeError(error) }))
     }
   }
 
-  /** Opens (or re-opens) a bot's Bot Chat. Safe to call repeatedly: concurrent calls share one run. */
   function open(profile: string, options: { silent?: boolean } = {}): Promise<void> {
     const running = opening.get(profile)
 
@@ -620,13 +395,8 @@ export function createSessions(deps: SessionsDeps) {
     })
   }
 
-  /**
-   * What a bot's main chat showed when a side chat replaced it, so going back to it shows it at once instead of the side chat
-   * until the main one has loaded again.
-   */
   const mainShown = new Map<string, Pick<BotSession, 'storedId' | 'transcript' | 'rows' | 'hasOlder' | 'info'>>()
 
-  /** The bot is about to show a side chat: keep what its main chat shows, if that is what is on screen. */
   function keepMain(profile: string) {
     const bot = get(profile)
 
@@ -635,10 +405,6 @@ export function createSessions(deps: SessionsDeps) {
     }
   }
 
-  /**
-   * Leaves a side chat: the bot goes back to its main chat, which shows at once (as it was when the side chat replaced it) while
-   * it is opened again. Nothing is closed or deleted.
-   */
   function leaveSide(profile: string) {
     if (!store.getState().chosen[profile]) {
       return
@@ -646,7 +412,6 @@ export function createSessions(deps: SessionsDeps) {
 
     setChosen(profile, null)
 
-    // The side chat's events must not reach the main chat.
     const live = get(profile).liveId
 
     if (live) {
@@ -661,9 +426,7 @@ export function createSessions(deps: SessionsDeps) {
     patch(profile, main ? { ...main, phase: 'opening', error: null, liveId: null, loadingOlder: false } : { phase: 'idle', error: null, transcript: initialTranscript(), rows: [], hasOlder: false, loadingOlder: false, storedId: null, liveId: null, info: null })
   }
 
-  /** A bot's chat view changes to another chat: nothing of the old one may show while the new one loads. */
   async function switchTo(profile: string, storedId: string | null): Promise<void> {
-    // A re-open already under way would finish by putting the old chat back.
     await opening.get(profile)?.catch(() => undefined)
 
     if (storedId) {
@@ -672,7 +435,6 @@ export function createSessions(deps: SessionsDeps) {
 
     setChosen(profile, storedId)
 
-    // Let go of the old chat's live id first: a turn still running there must not write into the new chat.
     const previous = get(profile).liveId
 
     if (previous) {
@@ -686,15 +448,10 @@ export function createSessions(deps: SessionsDeps) {
     await open(profile)
   }
 
-  /** Opens another stored chat of this bot, or its main chat (Bot Chat) with `null`. */
   function openChat(profile: string, storedId: string | null): Promise<void> {
     return switchTo(profile, storedId)
   }
 
-  /**
-   * Shows the chat a link names (a notification's): the bot's main chat when the id is that one, else that side chat. A chat
-   * already on screen is only re-attached, so tapping a notification for the chat you are in does not reload it.
-   */
   async function openLinked(profile: string, storedId: string): Promise<void> {
     const main = await isMainChat(profile, storedId)
     const chosen = store.getState().chosen[profile]
@@ -706,7 +463,6 @@ export function createSessions(deps: SessionsDeps) {
     return switchTo(profile, main ? null : storedId)
   }
 
-  /** Whether this stored id is the bot's main chat (Bot Chat). Asks the server only when the roster has not loaded yet. */
   async function isMainChat(profile: string, storedId: string): Promise<boolean> {
     const canonical = deps.getRosterRow(profile)?.canonical_session
 
@@ -719,21 +475,15 @@ export function createSessions(deps: SessionsDeps) {
     return !!listed?.sessions.some(entry => entry.id === storedId || entry.resolved_id === storedId)
   }
 
-  /**
-   * Starts a fresh chat with this bot and shows it. The old chat is left as it is (a turn it is running carries on
-   * at the server); it stays in the history. Returns an error to show, or null.
-   */
   async function newChat(profile: string): Promise<string | null> {
     await opening.get(profile)?.catch(() => undefined)
     const bot = get(profile)
 
-    // A side chat nobody has written in yet is already a fresh one.
     if (store.getState().chosen[profile] && bot.phase === 'ready' && bot.transcript.items.length === 0 && !bot.hasOlder) {
       return null
     }
 
     try {
-      // Not hidden: unlike Bot Chat, an ordinary chat shows in the server's own session list too.
       const created = await call(deps.client, 'session.create', { profile })
       keepMain(profile)
       const previous = get(profile).liveId
@@ -764,7 +514,6 @@ export function createSessions(deps: SessionsDeps) {
     }
   }
 
-  /** A bot was deleted: drop everything held for it, including which chat it was on. */
   function forget(profile: string) {
     const live = get(profile).liveId
 
@@ -782,10 +531,6 @@ export function createSessions(deps: SessionsDeps) {
     })
   }
 
-  /**
-   * A page of the bot's stored chats, newest started first, without routines or kanban workers. `total` is how many there are in all and
-   * `next` the offset of the page after this one.
-   */
   async function listChats(profile: string, offset = 0): Promise<{ chats: ChatSummary[]; total: number; next: number }> {
     const config = deps.getConfig()
 
@@ -796,9 +541,6 @@ export function createSessions(deps: SessionsDeps) {
     const page = await (deps.listSessions ?? listSessionsPage)(config, { profile, limit: CHATS_PAGE, offset, excludeSources: [...NOT_CHATS] })
 
     return {
-      // The server adds every pinned chat the page missed after the page itself (Hermes 0.21.5 list_sessions_rich
-      // include_pinned). Those are left out: each comes on its own page, in date order, instead of jumping down the list
-      // as the pages before it arrive.
       chats: page.sessions
         .slice(0, CHATS_PAGE)
         .map(entry => summaryOf({ ...entry, title: entry.title ?? undefined, preview: entry.preview ?? undefined, started_at: entry.started_at ?? undefined, message_count: entry.message_count ?? undefined, source: entry.source ?? undefined })),
@@ -807,10 +549,6 @@ export function createSessions(deps: SessionsDeps) {
     }
   }
 
-  /**
-   * The bot's inbox (see `INBOX_TITLE`), or null when it has none. Found by its exact title, which the server looks up
-   * outside the paged list: a bot that runs routines all day would push it far down `listChats`.
-   */
   async function findInbox(profile: string): Promise<ChatSummary | null> {
     const { sessions } = await call(deps.client, 'session.list', { profile, title: INBOX_TITLE, include_hidden: true, limit: 1 })
     const entry = sessions[0]
@@ -818,7 +556,6 @@ export function createSessions(deps: SessionsDeps) {
     return entry ? { ...summaryOf(entry), id: entry.resolved_id || entry.id } : null
   }
 
-  /** Deletes a stored chat. The main chat cannot be deleted. Returns an error to show, or null. */
   async function deleteChat(profile: string, storedId: string): Promise<string | null> {
     const canonical = deps.getRosterRow(profile)?.canonical_session
 
@@ -830,7 +567,6 @@ export function createSessions(deps: SessionsDeps) {
       const bot = get(profile)
 
       if (bot.storedId === storedId) {
-        // The server refuses to delete a chat that is live here, and nothing should be left pointing at it.
         if (bot.liveId) {
           await call(deps.client, 'session.close', { session_id: bot.liveId }).catch(() => undefined)
         }
@@ -867,8 +603,6 @@ export function createSessions(deps: SessionsDeps) {
       const rows = [...page.messages, ...bot.rows]
 
       patch(profile, current => {
-        // The older page is merged by rebuilding the history part, so a tool call at the page boundary
-        // still finds its result. Live items after the history are kept as they are.
         const before = itemsFromHistory(current.rows).length
         const live = current.transcript.items.slice(before)
         const history = itemsFromHistory(rows)
@@ -887,13 +621,6 @@ export function createSessions(deps: SessionsDeps) {
 
   // ── sending and answering ──────────────────────────────────────────────────────────────────────
 
-  /**
-   * Sends your message, with any picked files uploaded first. Returns whether it went: when it did not (a file the
-   * server refused, a dropped connection), the bubble is replaced by the reason and the caller gives you your words
-   * and files back. `wire` is what the server receives when it differs from the bubble (a skill: the bubble says
-   * `/work fix the leak`, the server gets the skill and your words). `voiceContext` marks a task a voice call handed over,
-   * with the recent spoken turns for the model.
-   */
   async function send(profile: string, text: string, files: PendingFile[] = [], options: { wire?: string; voiceContext?: string } = {}): Promise<boolean> {
     const trimmed = text.trim()
 
@@ -927,7 +654,6 @@ export function createSessions(deps: SessionsDeps) {
       }
 
       patchTranscript(profile, transcript => appendUser(transcript, trimmed, now(), files.map(chipOf)))
-      // A chat being read again (a reconnect) takes the message once that is done, on the live session it ends on.
       await opening.get(profile)?.catch(() => undefined)
       const liveId = get(profile).liveId
 
@@ -954,8 +680,6 @@ export function createSessions(deps: SessionsDeps) {
 
         return true
       } catch (error) {
-        // A stale live id (the server restarted, or the session was closed): re-attach once and retry. Uploads queued on
-        // the old session are gone with it, so they are sent again.
         if (attempt === 0 && isRpcCode(error, RpcCode.StaleSession)) {
           patchTranscript(profile, dropPendingUser)
           await open(profile, { silent: true })
@@ -971,162 +695,12 @@ export function createSessions(deps: SessionsDeps) {
     return false
   }
 
-  /** The server's reply to a command it does not know (it is the same code as several other refusals, so the words decide). */
-  const UNKNOWN_COMMAND = /not a quick\/plugin\/(?:bundle\/)?skill command/i
+  const runCommand = createSlashRunner({ client: deps.client, get, open, send, patchTranscript })
 
-  /**
-   * Runs a slash command in this bot's chat, the way Hermes Desktop does. A built-in (`exec`) goes to the server's own runner
-   * (`slash.exec`), which answers with text, or hands over to `command.dispatch` for the few it cannot run itself; if the runner
-   * fails, `command.dispatch` is tried. A skill or one of the bot's own commands goes straight to `command.dispatch`, which
-   * answers with text to show, or with a message to send as a turn (a skill: the bubble says what you typed, the server gets
-   * the skill). A command that rewinds the chat (`/undo`, `/retry`, `/compress`) makes the chat be read again, so it shows what
-   * the server now has. `ok` is false when nothing happened and the words should come back to the box; `prefill` is words
-   * the server wants put back in the box (`/undo`).
-   */
-  async function runCommand(profile: string, name: string, arg: string, run: 'exec' | 'dispatch', typed: string, aliasDepth = 0): Promise<{ ok: boolean; prefill?: string }> {
-    if (!get(profile).liveId) {
-      await open(profile)
-    }
-
-    /** Reads the chat again after a command that changed what the server keeps of it. */
-    const resync = async () => {
-      if (REWRITES_CHAT.has(name)) {
-        await open(profile, { silent: true })
-      }
-    }
-
-    /** What to do with an answer; `fromRunner` says it came from the plain runner (its answer may be bare output). */
-    const apply = async (raw: unknown, fromRunner: boolean): Promise<{ ok: boolean; prefill?: string }> => {
-      const answer = dispatchOf(raw)
-
-      if (!answer) {
-        // The runner answers with plain output: { output, warning? }.
-        const plain = (raw ?? {}) as { output?: unknown; warning?: unknown }
-        const output = typeof plain.output === 'string' ? plain.output : ''
-        const warning = typeof plain.warning === 'string' && plain.warning ? `${plain.warning}\n` : ''
-
-        if (fromRunner) {
-          await resync()
-          patchTranscript(profile, transcript => appendOutput(transcript, typed, stripAnsi(`${warning}${output}`)))
-
-          return { ok: true }
-        }
-
-        patchTranscript(profile, transcript => appendError(transcript, `The server answered /${name} in a way this app does not understand.`))
-
-        return { ok: false }
-      }
-
-      if (answer.type === 'exec' || answer.type === 'plugin') {
-        await resync()
-        patchTranscript(profile, transcript => appendOutput(transcript, typed, stripAnsi(answer.output)))
-
-        return { ok: true }
-      }
-
-      if (answer.type === 'alias') {
-        const target = parseSlash(`/${answer.target.replace(/^\//, '')}${arg ? ` ${arg}` : ''}`)
-
-        // One hop: an alias that points at another alias is more likely a loop than a plan.
-        if (!target || aliasDepth > 0) {
-          patchTranscript(profile, transcript => appendError(transcript, `/${name} points at /${answer.target}, which can’t be run from here.`))
-
-          return { ok: false }
-        }
-
-        return runCommand(profile, target.name, target.arg, 'dispatch', typed, aliasDepth + 1)
-      }
-
-      await resync()
-
-      if (answer.notice) {
-        patchTranscript(profile, transcript => appendOutput(transcript, typed, stripAnsi(answer.notice as string)))
-      }
-
-      if (answer.type === 'prefill') {
-        return { ok: true, prefill: answer.message }
-      }
-
-      const message = answer.message.trim()
-
-      if (!message) {
-        patchTranscript(profile, transcript => appendError(transcript, `/${name} had nothing to send.`))
-
-        return { ok: false }
-      }
-
-      // The bubble shows what you typed, as Hermes Desktop does: the server's own projection, else the invocation read from
-      // the expanded skill, else (a short send such as /steer) the message itself.
-      const shown = answer.display || skillInvocation(message) || (answer.type === 'skill' ? typed : message)
-
-      return { ok: await send(profile, shown, [], { wire: message }) }
-    }
-
-    let runnerError: string | null = null
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const liveId = get(profile).liveId
-
-      if (!liveId) {
-        return { ok: false }
-      }
-
-      try {
-        if (run === 'exec' && runnerError === null) {
-          // The server's runner can take a while (the first built-in in a chat starts a worker process, which it gives 45 s):
-          // show that the command is running until it answers.
-          patchTranscript(profile, transcript => startOutput(transcript, typed))
-
-          let answered: unknown
-
-          try {
-            answered = await call(deps.client, 'slash.exec', { session_id: liveId, command: `/${name}${arg ? ` ${arg}` : ''}` })
-          } catch (error) {
-            patchTranscript(profile, finishOutput)
-
-            // A stale chat is dealt with below; any other failure of the runner leaves command.dispatch to try.
-            if (isRpcCode(error, RpcCode.StaleSession)) {
-              throw error
-            }
-
-            runnerError = describeError(error)
-          }
-
-          if (runnerError === null) {
-            patchTranscript(profile, finishOutput)
-
-            return await apply(answered, true)
-          }
-        }
-
-        return await apply(await call(deps.client, 'command.dispatch', { session_id: liveId, name, arg }), false)
-      } catch (error) {
-        if (attempt === 0 && isRpcCode(error, RpcCode.StaleSession)) {
-          runnerError = null
-          await open(profile, { silent: true })
-          continue
-        }
-
-        const reason = describeError(error)
-
-        // "Not a command command.dispatch knows" is only routing noise when the runner already said what went wrong.
-        const message = stripAnsi(UNKNOWN_COMMAND.test(reason) ? (runnerError ?? `There is no command called /${name}.`) : reason)
-
-        patchTranscript(profile, transcript => appendError(transcript, message))
-
-        return { ok: false }
-      }
-    }
-
-    return { ok: false }
-  }
-
-  /** Shows text in the chat as a command's output (for answers the app gives itself, such as /help). */
   function showOutput(profile: string, command: string, text: string, groups?: { title: string; names: string[] }[]) {
     patchTranscript(profile, transcript => appendOutput(transcript, command, text, groups))
   }
 
-  /** A quiet line the app adds for itself, between turns ("Call started 10:41"). */
   function showNote(profile: string, text: string) {
     patchTranscript(profile, transcript => appendNote(transcript, text))
   }
@@ -1139,150 +713,15 @@ export function createSessions(deps: SessionsDeps) {
     }
   }
 
-  async function respondApproval(profile: string, requestId: string, choice: 'once' | 'session' | 'always' | 'deny'): Promise<RespondResult> {
-    const liveId = get(profile).liveId
-
-    if (!liveId) {
-      return 'failed'
-    }
-
-    // A newer Hermes asked this as a request: the answer is the response to it.
-    const sent = deps.requests?.answer(requestId, { kind: 'approval', choice })
-
-    if (sent === 'sent') {
-      patchTranscript(profile, transcript => answerPrompt(transcript, requestId, { choice }))
-
-      return 'answered'
-    }
-
-    if (sent === 'failed') {
-      return 'failed'
-    }
-
-    try {
-      const { resolved } = await call(deps.client, 'approval.respond', { session_id: liveId, request_id: requestId, choice })
-
-      // resolved: 0 means it was already answered (another device) or timed out.
-      patchTranscript(profile, transcript => (resolved ? answerPrompt(transcript, requestId, { choice }) : expirePrompt(transcript, requestId)))
-
-      return resolved ? 'answered' : 'expired'
-    } catch {
-      return 'failed'
-    }
-  }
-
-  /**
-   * Sends one answer per question (by `qid`); the tool resumes once every question has one.
-   * A multi-select answer is a JSON array string.
-   */
-  async function respondClarify(profile: string, requestId: string, answers: ClarifyAnswer[]): Promise<RespondResult> {
-    const liveId = get(profile).liveId
-
-    if (!liveId || !answers.length) {
-      return 'failed'
-    }
-
-    const sent = deps.requests?.answer(requestId, { kind: 'clarify', answers })
-
-    if (sent === 'sent') {
-      patchTranscript(profile, transcript => answerPrompt(transcript, requestId, { text: answers.map(entry => entry.answer).join(' · ') }))
-
-      return 'answered'
-    }
-
-    if (sent === 'failed') {
-      return 'failed'
-    }
-
-    try {
-      for (const { questionId, answer } of answers) {
-        const result = await call(deps.client, 'clarify.respond', {
-          session_id: liveId,
-          request_id: requestId,
-          answer,
-          ...(questionId ? { question_id: questionId } : {}),
-        })
-
-        if (result.status === 'expired') {
-          patchTranscript(profile, transcript => expirePrompt(transcript, requestId))
-
-          return 'expired'
-        }
-      }
-
-      patchTranscript(profile, transcript => answerPrompt(transcript, requestId, { text: answers.map(entry => entry.answer).join(' · ') }))
-
-      return 'answered'
-    } catch {
-      return 'failed'
-    }
-  }
-
-  /** The value is sent and forgotten: it is never put in state, logs or storage. */
-  async function respondSecret(profile: string, requestId: string, value: string): Promise<RespondResult> {
-    const liveId = get(profile).liveId
-
-    if (!liveId) {
-      return 'failed'
-    }
-
-    const sent = deps.requests?.answer(requestId, { kind: 'value', value })
-
-    if (sent === 'sent') {
-      patchTranscript(profile, transcript => answerPrompt(transcript, requestId, {}))
-
-      return 'answered'
-    }
-
-    if (sent === 'failed') {
-      return 'failed'
-    }
-
-    try {
-      await call(deps.client, 'secret.respond', { session_id: liveId, request_id: requestId, value })
-      patchTranscript(profile, transcript => answerPrompt(transcript, requestId, {}))
-
-      return 'answered'
-    } catch {
-      return 'failed'
-    }
-  }
-
-  async function respondSudo(profile: string, requestId: string, password: string): Promise<RespondResult> {
-    const liveId = get(profile).liveId
-
-    if (!liveId) {
-      return 'failed'
-    }
-
-    const sent = deps.requests?.answer(requestId, { kind: 'value', value: password })
-
-    if (sent === 'sent') {
-      patchTranscript(profile, transcript => answerPrompt(transcript, requestId, {}))
-
-      return 'answered'
-    }
-
-    if (sent === 'failed') {
-      return 'failed'
-    }
-
-    try {
-      await call(deps.client, 'sudo.respond', { session_id: liveId, request_id: requestId, password })
-      patchTranscript(profile, transcript => answerPrompt(transcript, requestId, {}))
-
-      return 'answered'
-    } catch {
-      return 'failed'
-    }
-  }
+  const { respondApproval, respondClarify, respondSecret, respondSudo } = createPromptResponder({
+    client: deps.client,
+    requests: deps.requests,
+    get,
+    patchTranscript,
+  })
 
   // ── lifecycle ──────────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * After a reconnect: re-attach every chat we had open so events route to us and nothing is missed. A chat that failed to
-   * open is tried again too: it was most likely opened before the socket was up (the app restored straight into it).
-   */
   async function reattachAll(): Promise<void> {
     const profiles = Object.values(store.getState().bots)
       .filter(bot => bot.phase === 'ready' || bot.phase === 'error')
@@ -1291,7 +730,6 @@ export function createSessions(deps: SessionsDeps) {
     await Promise.all(profiles.map(profile => open(profile, { silent: true })))
   }
 
-  /** Live ids the app knows belong to each bot, for matching `session.active_list` rows. */
   function knownLiveIds(): Record<string, string[]> {
     const byBot: Record<string, string[]> = {}
 
@@ -1320,6 +758,7 @@ export function createSessions(deps: SessionsDeps) {
     opening.clear()
     forwarded.clear()
     held.clear()
+    mainShown.clear()
     store.setState({ bots: {}, chosen: {} })
   }
 

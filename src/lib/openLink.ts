@@ -3,7 +3,7 @@ import { Linking, Platform } from 'react-native'
 
 import { appRoute, type AppRoute } from '@/features/links/apps'
 import { openableLink } from '@/features/links/safe'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 interface AppLinks {
   open(packageName: string, url: string | null): Promise<boolean>

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = join(ROOT, 'src/features/licences/notices.json')
-const BUNDLED = ['@novnc/novnc', 'mermaid', 'pdfjs-dist']
+const BUNDLED = ['@novnc/novnc', 'mermaid', 'pdfjs-dist', 'mathjax-full']
 
 function tree(args) {
   const out = execFileSync('npm', ['ls', '--all', '--json', ...args], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] })

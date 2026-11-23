@@ -23,7 +23,7 @@ import { useDashboards } from '@/stores/dashboards'
 import { useDeck } from '@/stores/deck'
 import { useDrafts } from '@/stores/drafts'
 import { sessions } from '@/stores/sessions'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

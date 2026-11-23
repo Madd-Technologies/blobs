@@ -15,7 +15,7 @@ import type { CallMode } from '@/features/call/engine'
 import { useBotIdentity } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useVoice } from '@/stores/voice'
 
 const ACCOUNTS: VoiceAccount[] = ['sign-in', 'key']

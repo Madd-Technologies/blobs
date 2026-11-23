@@ -20,7 +20,7 @@ import { useConnection } from '@/stores/connection'
 import { usePhone } from '@/stores/phone'
 import { usePrefs, type ThemePref } from '@/stores/prefs'
 import { useRestart } from '@/stores/restart'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

@@ -7,7 +7,7 @@ import { Pill } from '@/components/ui/Pill'
 import { Sheet } from '@/components/ui/Sheet'
 import { T } from '@/components/ui/T'
 import { mutePicks } from '@/features/dashboard/view'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 interface Props {

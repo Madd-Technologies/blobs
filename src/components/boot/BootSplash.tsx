@@ -16,7 +16,7 @@ import Animated, {
 import { BotFace } from '@/components/bots/BotFace'
 import { CROWD, crowdSvg, type CrowdId } from '@/features/tour/crowd'
 import { haptic } from '@/lib/haptics'
-import { useBoot } from '@/stores/boot'
+import { useBoot } from '@/stores/ui'
 import { useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
 import { fonts, palettes } from '@/theme/tokens'

@@ -3,7 +3,7 @@ import { Pressable, StyleSheet } from 'react-native'
 import Animated, { FadeInDown, FadeOut } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { useToast } from '@/stores/toast'
+import { useToast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius, raisedStyle } from '@/theme/tokens'
 

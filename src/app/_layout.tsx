@@ -15,13 +15,14 @@ import { useEffect, useState } from 'react'
 import { Platform } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
-import { useBoot } from '@/stores/boot'
+import { useBoot } from '@/stores/ui'
 import { useConnection } from '@/stores/connection'
 import { prefsHydrated, usePrefs } from '@/stores/prefs'
 import { startSessionSync } from '@/stores/sync'
 import { BootSplash } from '@/components/boot/BootSplash'
 import { DiagramViewer } from '@/components/chat/DiagramViewer'
 import { ImageViewer } from '@/components/chat/ImageViewer'
+import { MathWorkerHost } from '@/components/chat/MathWorkerHost'
 import { RestartingScreen } from '@/components/restart/RestartingScreen'
 import { RestartSheet } from '@/components/restart/RestartSheet'
 import { ToastHost } from '@/components/ui/ToastHost'
@@ -110,6 +111,7 @@ function RootStack() {
       </Stack>
       <ImageViewer />
       <DiagramViewer />
+      <MathWorkerHost />
       <RestartingScreen />
       <RestartSheet />
       <ToastHost />

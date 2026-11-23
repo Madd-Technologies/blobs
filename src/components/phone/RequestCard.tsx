@@ -13,7 +13,7 @@ import { haptic } from '@/lib/haptics'
 import type { BotMeta } from '@/lib/hermes/identity'
 import type { Errand, PhoneSettings } from '@/lib/hermes/phone'
 import { usePhone } from '@/stores/phone'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

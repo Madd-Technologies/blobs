@@ -12,7 +12,7 @@ import { cancelTaildropSend, getTaildrop, getTaildropSend, sendTaildrop, type Ta
 import { useConnection } from '@/stores/connection'
 import type { ViewerDoc } from '@/stores/documents'
 import { registerServerReset } from '@/stores/reset'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 /** A share line under the viewer's title, while something is under way or went wrong. */
 export type ShareLine =

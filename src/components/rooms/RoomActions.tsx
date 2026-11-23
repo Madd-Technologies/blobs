@@ -6,7 +6,7 @@ import { T } from '@/components/ui/T'
 import type { HostedRoom, RoomPendingAction } from '@/lib/hermes/protocol'
 import { memberName, type RoomQuestion } from '@/lib/hermes/rooms'
 import { answerRoomApproval, answerRoomQuestion, retryRoomWork } from '@/stores/rooms'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 interface Props {
   room: HostedRoom

@@ -9,7 +9,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { diagramKind } from '@/lib/hermes/diagram'
 import { loadTextAsset } from '@/lib/webAsset'
-import { useDiagram } from '@/stores/diagram'
+import { useDiagram } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 /** The page that draws one diagram. `script` is Mermaid itself (about 5 MB): read from the asset bundle on first open. */

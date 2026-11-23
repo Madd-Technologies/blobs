@@ -11,7 +11,7 @@ import { T } from '@/components/ui/T'
 import { modelSections } from '@/lib/hermes/profiles'
 import { useConnection } from '@/stores/connection'
 import { saveModel, useModelOptions } from '@/stores/profiles'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

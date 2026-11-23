@@ -7,7 +7,7 @@ import { T } from '@/components/ui/T'
 import { isRemote, webHost } from '@/lib/hermes/media'
 import { shownHeight } from '@/lib/hermes/pictureCache'
 import { pictureKey, usePictures } from '@/stores/pictures'
-import { useViewer } from '@/stores/viewer'
+import { useViewer } from '@/stores/ui'
 import { useRowVisible } from './RowContext'
 import { useTheme } from '@/theme/ThemeProvider'
 
