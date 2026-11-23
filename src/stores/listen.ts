@@ -53,7 +53,7 @@ export const useListen = create<ListenState>((set, get) => ({
     }
 
     if (!canCall()) {
-      return 'Listening in needs the Android app.'
+      return 'Listening in needs a native build of Blobs.'
     }
 
     if (useCall.getState().call && useCall.getState().call?.phase !== 'ended') {

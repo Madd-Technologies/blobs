@@ -63,6 +63,7 @@ function RootStack() {
           <Stack.Screen name="briefing" />
           <Stack.Screen name="fleet" />
           <Stack.Screen name="telemetry" />
+          <Stack.Screen name="approve" options={{ animation: 'fade' }} />
           <Stack.Screen name="settings" />
           <Stack.Screen name="server-add" />
           <Stack.Screen name="notifications" />

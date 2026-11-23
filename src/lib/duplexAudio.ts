@@ -16,7 +16,7 @@ interface DuplexAudio {
   addListener(event: 'onError', listener: (error: { message: string }) => void): EventSubscription
 }
 
-/** The local call-audio module (modules/duplex-audio): Android builds only for now. Absent on iOS and in Expo Go. */
+/** The local call-audio module (modules/duplex-audio): iOS & Android native builds. Absent in Expo Go and web. */
 const native = requireOptionalNativeModule<DuplexAudio>('DuplexAudio')
 
 /** Whether this build can hold a call. */
@@ -29,7 +29,7 @@ export function callAudio(onLevel: (you: number, voice: number) => void, onError
   return {
     async start(onFrame) {
       if (!native) {
-        throw new Error('Calls need the Android app.')
+        throw new Error('Calls need a native build of Blobs.')
       }
 
       const permission = await requestRecordingPermissionsAsync()
