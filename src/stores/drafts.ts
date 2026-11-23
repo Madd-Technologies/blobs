@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+import { registerServerReset } from '@/stores/reset'
+
 interface Draft {
   text: string
   /** Changes with every explicit handoff, so a chat box that is already open takes it. */
@@ -50,3 +52,7 @@ export const useDrafts = create<DraftsState>(set => ({
       return { byBot: rest }
     }),
 }))
+
+registerServerReset(() => {
+  useDrafts.setState({ byBot: {} })
+})

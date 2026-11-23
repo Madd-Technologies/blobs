@@ -27,6 +27,7 @@ import {
 import { absentGate } from '@/lib/absent'
 import { startPoller } from '@/lib/poller'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 /** While a call is being made, the errands are read this often; otherwise every 30 s. */
 const LIVE_MS = 5_000
@@ -35,6 +36,7 @@ const IDLE_MS = 30_000
 const plugin = absentGate()
 
 interface PhoneState {
+  server: string | null
   /** Whether the server has hermes-phone: null until known. Without it nothing about calls is shown. */
   available: boolean | null
   status: PhoneStatus | null
@@ -44,8 +46,11 @@ interface PhoneState {
   rows: ErrandRow[]
   /** Each errand in full, by id. */
   errands: Record<string, Errand>
-  /** Finished errands whose "they asked you" you marked done (kept across launches). */
+  /** Finished errands whose "they asked you" you marked done for the active server. */
   dismissed: string[]
+  /** Per-server stored dismissed lists so switching servers preserves each server's history. */
+  dismissedByServer: Record<string, string[]>
+  syncServer: (baseUrl: string | null) => void
   refresh: () => Promise<void>
   loadErrand: (id: string) => Promise<string | null>
   loadSettings: () => Promise<string | null>
@@ -112,12 +117,40 @@ export const usePhone = create<PhoneState>()(
       }
 
       return {
+        server: null,
         available: null,
         status: null,
         settings: null,
         rows: [],
         errands: {},
         dismissed: [],
+        dismissedByServer: {},
+
+        syncServer: baseUrl => {
+          const state = get()
+
+          if (baseUrl && !state.server && Object.keys(state.dismissedByServer).length === 0 && state.dismissed.length > 0) {
+            set({ server: baseUrl, dismissedByServer: { [baseUrl]: state.dismissed } })
+
+            return
+          }
+
+          if (baseUrl === state.server) {
+            return
+          }
+
+          plugin.reset()
+          busy = false
+          set({
+            server: baseUrl,
+            available: null,
+            status: null,
+            settings: null,
+            rows: [],
+            errands: {},
+            dismissed: baseUrl ? (state.dismissedByServer[baseUrl] ?? []) : [],
+          })
+        },
 
         refresh: async () => {
           const current = config()
@@ -253,7 +286,17 @@ export const usePhone = create<PhoneState>()(
           }
         },
 
-        dismiss: id => set(state => ({ dismissed: state.dismissed.includes(id) ? state.dismissed : [...state.dismissed.slice(-199), id] })),
+        dismiss: id =>
+          set(state => {
+            const next = state.dismissed.includes(id) ? state.dismissed : [...state.dismissed.slice(-199), id]
+            const server = state.server ?? useConnection.getState().config?.baseUrl ?? null
+
+            return {
+              server,
+              dismissed: next,
+              ...(server ? { dismissedByServer: { ...state.dismissedByServer, [server]: next } } : {}),
+            }
+          }),
 
         reset: () => {
           plugin.reset()
@@ -261,9 +304,22 @@ export const usePhone = create<PhoneState>()(
         },
       }
     },
-    { name: 'blobs.phone', storage: createJSONStorage(() => AsyncStorage), partialize: state => ({ dismissed: state.dismissed }) },
+    {
+      name: 'blobs.phone',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: state => ({ server: state.server, dismissed: state.dismissed, dismissedByServer: state.dismissedByServer }),
+      onRehydrateStorage: () => state => {
+        const connection = useConnection.getState()
+
+        if (state && connection.hydrated) {
+          state.syncServer(connection.config?.baseUrl ?? null)
+        }
+      },
+    },
   ),
 )
+
+registerServerReset(baseUrl => usePhone.getState().syncServer(baseUrl))
 
 /**
  * Keeps phone errands current: every 5 s in the foreground while one is calling, every 30 s otherwise, and at once when the
@@ -283,11 +339,6 @@ export function startPhoneSync(): () => void {
   }
   const stopPoll = startPoller(tick, LIVE_MS, online)
   const stopConnection = useConnection.subscribe((state, previous) => {
-    // Another server: nothing of the last one's calls applies.
-    if (state.config?.baseUrl !== previous.config?.baseUrl) {
-      usePhone.getState().reset()
-    }
-
     if (state.status === 'online' && previous.status !== 'online') {
       last = Date.now()
       plugin.reset()

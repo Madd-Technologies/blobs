@@ -76,6 +76,7 @@ export function createWants() {
       }
     },
     isWanted: (key: string) => (counts.get(key) ?? 0) > 0,
+    clear: () => void counts.clear(),
   }
 }
 

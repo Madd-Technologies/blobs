@@ -11,6 +11,7 @@ import { RestartRefused } from '@/lib/hermes/restart'
 import { cancelTaildropSend, getTaildrop, getTaildropSend, sendTaildrop, type TaildropStatus, type TaildropTarget } from '@/lib/hermes/taildrop'
 import { useConnection } from '@/stores/connection'
 import type { ViewerDoc } from '@/stores/documents'
+import { registerServerReset } from '@/stores/reset'
 import { toast } from '@/stores/toast'
 
 /** A share line under the viewer's title, while something is under way or went wrong. */
@@ -383,4 +384,12 @@ export const useShare = create<ShareState>((set, get) => {
       setLine(key, { kind: 'idle' })
     },
   }
+})
+
+registerServerReset(() => {
+  for (const key of [...running.keys()]) {
+    useShare.getState().cancel(key)
+  }
+
+  useShare.setState({ taildrop: undefined, lines: {}, sheetFor: null, phoneSheetFor: null })
 })

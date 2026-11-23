@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { describeError } from '@/lib/hermes/errors'
 import { getBotVoice, setBotVoice, type BotVoice, type VoiceChange } from '@/lib/hermes/voice'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 interface VoiceEntry {
   /** The bot's call settings, or null when the server has no hermes-voice. */
@@ -73,4 +74,8 @@ export const useVoice = create<VoiceState>((set, get) => {
       }
     },
   }
+})
+
+registerServerReset(baseUrl => {
+  useVoice.setState({ server: baseUrl, byBot: {} })
 })

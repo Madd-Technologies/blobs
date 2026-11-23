@@ -8,6 +8,7 @@ import { deleteProfile, getBotConfig, updateBotConfig } from '@/lib/hermes/rest'
 import { call } from '@/lib/hermes/rpc'
 import { runsOnOf, sshOnServer, type RunsOn } from '@/lib/hermes/runsOn'
 import { gateway, useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
 import { sessions } from '@/stores/sessions'
 
@@ -294,3 +295,11 @@ export async function reloadEnv(): Promise<{ updated: number } | { error: string
     return { error: describeError(error) }
   }
 }
+
+registerServerReset(() => {
+  useProfileDetail.setState({ byBot: {} })
+  useModelOptions.setState({ byBot: {} })
+  useApprovals.setState({ byBot: {} })
+  useBrowserMode.setState({ byBot: {} })
+  useRunsOn.setState({ byBot: {} })
+})

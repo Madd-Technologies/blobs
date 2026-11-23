@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AppState } from 'react-native'
 import { create } from 'zustand'
 
@@ -5,10 +6,22 @@ import { JsonRpcGatewayClient, type ConnectionState, type GatewayEvent } from '@
 import { SignInError } from '@/lib/hermes/auth'
 import { createKeeper, refreshDelayMs } from '@/lib/hermes/keeper'
 import { advertiseServerRequests, createRequestBridge } from '@/lib/hermes/server-requests'
-import { gatewayWsUrl, HermesHttpError, probeServer, type ServerConfig } from '@/lib/hermes/server'
+import { gatewayWsUrl, HermesHttpError, normalizeBaseUrl, probeServer, type ServerConfig } from '@/lib/hermes/server'
+import {
+  EMPTY_SERVER_INDEX,
+  LEGACY_SERVER_KEY,
+  makeServerId,
+  parseServerIndex,
+  removeServerMeta,
+  renameServerMeta,
+  SERVER_INDEX_KEY,
+  serverKey,
+  upsertServerMeta,
+  type SavedServerMeta,
+  type ServerIndex,
+} from '@/lib/hermes/servers'
 import { secure } from '@/lib/secure'
-
-const CONFIG_KEY = 'hermesbot.server'
+import { runServerResets } from '@/stores/reset'
 
 /** One gateway client for the whole app; stores subscribe to its event stream. */
 export const gateway = new JsonRpcGatewayClient({
@@ -40,6 +53,8 @@ interface SignedOut {
 
 interface ConnectionStore {
   config: ServerConfig | null
+  servers: SavedServerMeta[]
+  activeServerId: string | null
   hydrated: boolean
   status: Status
   lastError: string | null
@@ -50,7 +65,11 @@ interface ConnectionStore {
   /** The Hermes version the server reported when it was last reached (`/api/status`); null when it did not say. */
   serverVersion: string | null
   hydrate: () => Promise<void>
-  saveConfig: (config: ServerConfig) => Promise<void>
+  saveConfig: (config: ServerConfig, label?: string) => Promise<void>
+  restoreSnapshot: (config: ServerConfig | null, serverId: string | null, servers: SavedServerMeta[]) => Promise<void>
+  switchServer: (id: string) => Promise<string | null>
+  removeServer: (id: string) => Promise<void>
+  renameServer: (id: string, label: string) => Promise<void>
   forget: () => Promise<void>
   renew: () => Promise<void>
   connect: () => Promise<void>
@@ -64,10 +83,6 @@ let attempt = 0
 /** A connection that stays up this long counts as healthy, and the next drop starts the backoff over. */
 const STABLE_AFTER_MS = 10_000
 
-/**
- * Resets the backoff only once a connection has proved stable. Resetting on every open meant a server that
- * accepts a socket and drops it straight away was redialled once a second, forever.
- */
 function startStableTimer() {
   if (stableTimer) {
     clearTimeout(stableTimer)
@@ -86,20 +101,65 @@ function stopStableTimer() {
   }
 }
 
+function clearTimers() {
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
+
+  stopStableTimer()
+  attempt = 0
+}
+
+async function persistIndex(index: ServerIndex): Promise<void> {
+  try {
+    await AsyncStorage.setItem(SERVER_INDEX_KEY, JSON.stringify(index))
+  } catch {
+    // Best-effort metadata persistence; credentials remain safe in SecureStore.
+  }
+}
+
+async function readStoredConfig(id: string): Promise<ServerConfig | null> {
+  try {
+    const raw = await secure.get(serverKey(id))
+
+    if (!raw) {
+      return null
+    }
+
+    const parsed = JSON.parse(raw) as Partial<ServerConfig>
+
+    if (!parsed || typeof parsed.baseUrl !== 'string' || !parsed.auth) {
+      return null
+    }
+
+    return { baseUrl: normalizeBaseUrl(parsed.baseUrl), auth: parsed.auth }
+  } catch {
+    await secure.remove(serverKey(id)).catch(() => undefined)
+
+    return null
+  }
+}
+
 const nowS = () => Date.now() / 1000
 
 /** Renews signed-in sessions' tokens one at a time (see `keeper.ts`). */
 const keeper = createKeeper({
   getConfig: () => useConnection.getState().config,
   nowS,
-  apply: async config => {
-    await secure.set(CONFIG_KEY, JSON.stringify(config))
-    useConnection.setState({ config })
+  apply: async nextConfig => {
+    const { activeServerId, config: current } = useConnection.getState()
+
+    if (!activeServerId || !current || current.baseUrl !== nextConfig.baseUrl) {
+      return
+    }
+
+    await secure.set(serverKey(activeServerId), JSON.stringify(nextConfig))
+    useConnection.setState({ config: nextConfig })
     scheduleRefresh()
   },
 })
 
-/** Runs `renew` after `ms`, replacing any renewal already waiting. */
 function renewIn(ms: number) {
   if (refreshTimer) {
     clearTimeout(refreshTimer)
@@ -111,7 +171,6 @@ function renewIn(ms: number) {
   }, ms)
 }
 
-/** Renews the tokens shortly before they run out, while the app is running. */
 function scheduleRefresh() {
   const { config } = useConnection.getState()
 
@@ -124,13 +183,14 @@ function scheduleRefresh() {
     return
   }
 
-  // setTimeout caps at about 24 days; a token lasts hours, but stay inside the cap anyway.
   renewIn(Math.min(refreshDelayMs(config.auth, nowS()), 2 ** 30))
 }
 
 function scheduleRetry(connect: () => Promise<void>) {
-  if (retryTimer) return
-  // Exponential backoff capped at 30 s; foregrounding the app retries immediately.
+  if (retryTimer) {
+    return
+  }
+
   const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5))
   attempt++
   retryTimer = setTimeout(() => {
@@ -139,7 +199,6 @@ function scheduleRetry(connect: () => Promise<void>) {
   }, delay)
 }
 
-/** A connect attempt (token, ticket, socket, hello) that has not finished in this long is abandoned and tried again. */
 const CONNECT_DEADLINE_MS = 30_000
 
 class ConnectTimeout extends Error {
@@ -151,6 +210,8 @@ class ConnectTimeout extends Error {
 
 export const useConnection = create<ConnectionStore>((set, get) => ({
   config: null,
+  servers: [],
+  activeServerId: null,
   hydrated: false,
   status: 'unconfigured',
   lastError: null,
@@ -159,50 +220,282 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
   serverVersion: null,
 
   hydrate: async () => {
-    let config: ServerConfig | null = null
+    let index = EMPTY_SERVER_INDEX
 
     try {
-      const raw = await secure.get(CONFIG_KEY)
-      config = raw ? (JSON.parse(raw) as ServerConfig) : null
+      index = parseServerIndex(await AsyncStorage.getItem(SERVER_INDEX_KEY))
     } catch {
-      // Android can lose the Keystore key (a new lock screen, a restore), and then the saved server can't be read. Start over at
-      // Connect rather than stay on the splash: the app only draws once this has finished.
-      await secure.remove(CONFIG_KEY).catch(() => undefined)
+      index = EMPTY_SERVER_INDEX
     }
 
-    // A saved server is about to be dialled (the root layout connects right after this), so say
-    // "connecting", not "offline": Home shows a can't-reach banner for the latter on every cold start.
-    set({ config, hydrated: true, status: config ? 'connecting' : 'unconfigured' })
+    // Migrate legacy single-server SecureStore key on first launch with multi-server index.
+    if (index.servers.length === 0) {
+      try {
+        const legacyRaw = await secure.get(LEGACY_SERVER_KEY)
+
+        if (legacyRaw) {
+          const parsed = JSON.parse(legacyRaw) as Partial<ServerConfig>
+
+          if (parsed && typeof parsed.baseUrl === 'string' && parsed.auth) {
+            const normalized: ServerConfig = { baseUrl: normalizeBaseUrl(parsed.baseUrl), auth: parsed.auth }
+            const id = makeServerId()
+            const migrated = upsertServerMeta(EMPTY_SERVER_INDEX, normalized, { id })
+            await secure.set(serverKey(id), JSON.stringify(normalized))
+            await persistIndex(migrated.index)
+            index = migrated.index
+          }
+
+          await secure.remove(LEGACY_SERVER_KEY).catch(() => undefined)
+        }
+      } catch {
+        await secure.remove(LEGACY_SERVER_KEY).catch(() => undefined)
+      }
+    }
+
+    let config: ServerConfig | null = null
+    let activeId = index.activeId
+
+    if (activeId) {
+      config = await readStoredConfig(activeId)
+
+      if (!config) {
+        index = removeServerMeta(index, activeId)
+        activeId = index.activeId
+
+        if (activeId) {
+          config = await readStoredConfig(activeId)
+
+          if (!config) {
+            index = removeServerMeta(index, activeId)
+            activeId = null
+          }
+        }
+
+        await persistIndex(index)
+      }
+    }
+
+    set({
+      config,
+      servers: index.servers,
+      activeServerId: config ? activeId : null,
+      hydrated: true,
+      status: config ? 'connecting' : 'unconfigured',
+    })
+    runServerResets(config?.baseUrl ?? null)
     scheduleRefresh()
   },
 
-  saveConfig: async config => {
-    await secure.set(CONFIG_KEY, JSON.stringify(config))
+  saveConfig: async (rawConfig, label) => {
+    const config: ServerConfig = { ...rawConfig, baseUrl: normalizeBaseUrl(rawConfig.baseUrl) }
+    const previousBaseUrl = get().config?.baseUrl ?? null
+    const currentIndex: ServerIndex = { activeId: get().activeServerId, servers: get().servers }
+    const { index, server } = upsertServerMeta(currentIndex, config, { label })
+
+    await secure.set(serverKey(server.id), JSON.stringify(config))
+    await persistIndex(index)
     gateway.close()
-    attempt = 0
-    set({ config, status: 'offline', lastError: null, signedOut: null })
+    clearTimers()
+
+    const switched = previousBaseUrl !== config.baseUrl
+
+    set({
+      config,
+      servers: index.servers,
+      activeServerId: server.id,
+      status: 'offline',
+      lastError: null,
+      signedOut: null,
+      ...(switched ? { serverVersion: null } : {}),
+    })
+
+    if (switched) {
+      runServerResets(config.baseUrl)
+    }
+
     scheduleRefresh()
     await get().connect()
   },
 
-  forget: async () => {
-    await secure.remove(CONFIG_KEY)
+  restoreSnapshot: async (config, serverId, servers) => {
+    const previousBaseUrl = get().config?.baseUrl ?? null
+    const index: ServerIndex = { activeId: serverId, servers }
+
+    if (config && serverId) {
+      await secure.set(serverKey(serverId), JSON.stringify(config))
+    }
+
+    await persistIndex(index)
     gateway.close()
-    set({ config: null, status: 'unconfigured', signedOut: null })
+    clearTimers()
+
+    const nextBaseUrl = config?.baseUrl ?? null
+    set({
+      config,
+      servers,
+      activeServerId: serverId,
+      status: config ? 'connecting' : 'unconfigured',
+      lastError: null,
+      signedOut: null,
+      serverVersion: previousBaseUrl === nextBaseUrl ? get().serverVersion : null,
+    })
+
+    if (previousBaseUrl !== nextBaseUrl) {
+      runServerResets(nextBaseUrl)
+    }
+
+    scheduleRefresh()
+
+    if (config) {
+      void get().connect()
+    }
+  },
+
+  switchServer: async id => {
+    const target = get().servers.find(server => server.id === id)
+
+    if (!target) {
+      return 'Server not found.'
+    }
+
+    const nextConfig = await readStoredConfig(id)
+
+    if (!nextConfig) {
+      await get().removeServer(id)
+
+      return 'Saved credentials for this server are missing. Add the server again.'
+    }
+
+    const previousBaseUrl = get().config?.baseUrl ?? null
+    const now = Date.now()
+    const nextServers = get().servers.map(server => (server.id === id ? { ...server, lastConnectedAt: now } : server))
+    const nextIndex: ServerIndex = { activeId: id, servers: nextServers }
+
+    await persistIndex(nextIndex)
+    gateway.close()
+    clearTimers()
+
+    set({
+      config: nextConfig,
+      servers: nextServers,
+      activeServerId: id,
+      status: 'connecting',
+      lastError: null,
+      signedOut: null,
+      serverVersion: null,
+    })
+
+    if (previousBaseUrl !== nextConfig.baseUrl) {
+      runServerResets(nextConfig.baseUrl)
+    }
+
+    scheduleRefresh()
+    void get().connect()
+
+    return null
+  },
+
+  removeServer: async id => {
+    await secure.remove(serverKey(id)).catch(() => undefined)
+    const currentIndex: ServerIndex = { activeId: get().activeServerId, servers: get().servers }
+    const nextIndex = removeServerMeta(currentIndex, id)
+    await persistIndex(nextIndex)
+
+    if (id !== get().activeServerId) {
+      set({ servers: nextIndex.servers })
+
+      return
+    }
+
+    gateway.close()
+    clearTimers()
+
+    if (nextIndex.activeId) {
+      const fallbackConfig = await readStoredConfig(nextIndex.activeId)
+
+      if (fallbackConfig) {
+        const previousBaseUrl = get().config?.baseUrl ?? null
+        set({
+          config: fallbackConfig,
+          servers: nextIndex.servers,
+          activeServerId: nextIndex.activeId,
+          status: 'connecting',
+          lastError: null,
+          signedOut: null,
+          serverVersion: null,
+        })
+
+        if (previousBaseUrl !== fallbackConfig.baseUrl) {
+          runServerResets(fallbackConfig.baseUrl)
+        }
+
+        scheduleRefresh()
+        void get().connect()
+
+        return
+      }
+
+      const cleaned = removeServerMeta(nextIndex, nextIndex.activeId)
+      await persistIndex(cleaned)
+      set({
+        config: null,
+        servers: cleaned.servers,
+        activeServerId: null,
+        status: 'unconfigured',
+        lastError: null,
+        signedOut: null,
+        serverVersion: null,
+      })
+      runServerResets(null)
+      scheduleRefresh()
+
+      return
+    }
+
+    set({
+      config: null,
+      servers: [],
+      activeServerId: null,
+      status: 'unconfigured',
+      lastError: null,
+      signedOut: null,
+      serverVersion: null,
+    })
+    runServerResets(null)
     scheduleRefresh()
   },
 
-  /** Renews the session's tokens if they are due (a no-op for a session token). */
+  renameServer: async (id, label) => {
+    const nextIndex = renameServerMeta({ activeId: get().activeServerId, servers: get().servers }, id, label)
+    await persistIndex(nextIndex)
+    set({ servers: nextIndex.servers })
+  },
+
+  forget: async () => {
+    const activeId = get().activeServerId
+
+    if (activeId) {
+      await get().removeServer(activeId)
+
+      return
+    }
+
+    await secure.remove(LEGACY_SERVER_KEY).catch(() => undefined)
+    gateway.close()
+    clearTimers()
+    set({ config: null, servers: [], activeServerId: null, status: 'unconfigured', lastError: null, signedOut: null, serverVersion: null })
+    runServerResets(null)
+    scheduleRefresh()
+  },
+
   renew: async () => {
     try {
       await keeper.fresh()
-      // Re-arm even when nothing was due (a timer can fire a hair early), so renewal never lapses.
       scheduleRefresh()
     } catch (error) {
       if (error instanceof SignInError && error.kind === 'expired') {
         await signOut(get)
       } else {
-        // The server is unreachable right now: try again soon rather than signing the user out.
         renewIn(30_000)
       }
     }
@@ -212,15 +505,14 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
     const { config } = get()
     if (!config) return
     if (gateway.connectionState === 'open' || gateway.connectionState === 'connecting') return
+    const targetUrl = config.baseUrl
     set({ status: 'connecting' })
-    // Some step that never answers would leave the app "Connecting…" for good: give the whole attempt a deadline.
     let watchdog: ReturnType<typeof setTimeout> | undefined
     const deadline = new Promise<never>((_, reject) => {
       watchdog = setTimeout(() => reject(new ConnectTimeout()), CONNECT_DEADLINE_MS)
     })
 
     try {
-      // Probe server version in parallel with opening the socket, and don't hold 'online' up if /api/status is slow.
       const probePromise = probeServer(config.baseUrl).then(
         probe => probe.version ?? null,
         () => null,
@@ -234,16 +526,17 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
         (async () => {
           await gateway.connect(await openUrl())
 
-          // Before any chat is opened: a newer server withdraws every prompt from a client that has not said
-          // it can answer them. An older server has no such call and keeps using events. The version says what
-          // else the server reports (`lib/hermes/capabilities.ts`), so it is known before chats open too.
           return Promise.all([advertiseServerRequests(gateway), Promise.race([probePromise, versionFallback]).finally(() => clearTimeout(versionTimer))])
         })(),
         deadline,
       ])
 
+      if (get().config?.baseUrl !== targetUrl) {
+        return
+      }
+
       void probePromise.then(resolved => {
-        if (resolved && get().config?.baseUrl === config.baseUrl && get().serverVersion !== resolved) {
+        if (resolved && get().config?.baseUrl === targetUrl && get().serverVersion !== resolved) {
           set({ serverVersion: resolved })
         }
       })
@@ -255,13 +548,16 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
       startStableTimer()
       set(s => ({ status: 'online', lastError: null, serverVersion: version, generation: s.generation + 1 }))
     } catch (error) {
+      if (get().config?.baseUrl !== targetUrl) {
+        return
+      }
+
       if (error instanceof SignInError && error.kind === 'expired') {
         await signOut(get)
 
         return
       }
 
-      // Drop whatever the stuck attempt left half open, so the retry starts clean.
       if (error instanceof ConnectTimeout) {
         gateway.close()
       }
@@ -278,10 +574,6 @@ export const useConnection = create<ConnectionStore>((set, get) => ({
   },
 }))
 
-/**
- * A fresh websocket URL. Renews the tokens first when they are about to expire; if the server turns the
- * ticket request down anyway (it restarted, or revoked the session), renews once more before giving up.
- */
 async function openUrl(): Promise<string> {
   const config = await keeper.fresh()
 
@@ -304,28 +596,38 @@ async function openUrl(): Promise<string> {
   }
 }
 
-/** The saved session can no longer be renewed: drop the credentials, keep the address, and say why. */
 async function signOut(get: () => ConnectionStore) {
-  const { config } = get()
+  const { config, activeServerId, servers } = get()
 
-  await secure.remove(CONFIG_KEY)
+  if (activeServerId) {
+    await secure.remove(serverKey(activeServerId)).catch(() => undefined)
+    const nextIndex = removeServerMeta({ activeId: activeServerId, servers }, activeServerId)
+    await persistIndex({ activeId: null, servers: nextIndex.servers })
+  } else {
+    await secure.remove(LEGACY_SERVER_KEY).catch(() => undefined)
+  }
+
   gateway.close()
-  useConnection.setState({
+  clearTimers()
+  useConnection.setState(state => ({
     config: null,
+    activeServerId: null,
+    servers: state.servers.filter(server => server.id !== activeServerId),
     status: 'unconfigured',
+    lastError: null,
+    serverVersion: null,
     signedOut: config
       ? { baseUrl: config.baseUrl, user: config.auth.kind === 'oauth' ? config.auth.user : undefined, reason: 'Your session has expired. Sign in again.' }
       : null,
-  })
+  }))
+  runServerResets(null)
   scheduleRefresh()
 }
 
-// Dev only: trace socket state changes. Never log the URL: it carries the session token.
 if (__DEV__) {
   gateway.onState(state => console.log(`[gateway] ${state}`))
 }
 
-// Socket drops → offline + backoff reconnect (the client itself replays missed events on reopen).
 gateway.onState((state: ConnectionState) => {
   const store = useConnection.getState()
   if ((state === 'closed' || state === 'error') && store.config) {
@@ -335,14 +637,13 @@ gateway.onState((state: ConnectionState) => {
   }
 })
 
-// Mobile OSes kill sockets in the background; reconnect the moment we're foregrounded.
 AppState.addEventListener('change', next => {
   if (next === 'active') {
     if (retryTimer) {
       clearTimeout(retryTimer)
       retryTimer = null
     }
-    // The socket may still look open after a long sleep, so renew the tokens before anything else.
+
     void useConnection
       .getState()
       .renew()

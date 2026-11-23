@@ -12,6 +12,7 @@ import { listLightMessages } from '@/lib/hermes/history'
 import { listSessionMessages } from '@/lib/hermes/rest'
 import { gateway, onGatewayEvent, requests, useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
+import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
 import { pushes } from '@/stores/watch'
 
@@ -31,6 +32,31 @@ export const sessions = createSessions({
   listMessages: (config, storedId, profile, query) => (pushes('history') ? listLightMessages(config, storedId, profile, query) : listSessionMessages(config, storedId, profile, query)),
 })
 
+let ignoringReset = false
+
+function restoreChosenFromPrefs() {
+  if (!usePrefs.persist.hasHydrated()) {
+    return
+  }
+
+  const { reopenLast, lastChats } = usePrefs.getState()
+  const kept = Object.fromEntries(Object.entries(lastChats).filter(([profile]) => reopenLast[profile]))
+
+  if (Object.keys(kept).length) {
+    sessions.store.setState(state => ({ chosen: { ...kept, ...state.chosen } }))
+  }
+}
+
+registerServerReset(nextBaseUrl => {
+  ignoringReset = true
+  sessions.reset()
+  ignoringReset = false
+
+  if (nextBaseUrl) {
+    queueMicrotask(restoreChosenFromPrefs)
+  }
+})
+
 // An earlier version kept which side chat a bot was on under this key; that now lives in the prefs (`lastChats`), and only for
 // bots set to open on their last side chat.
 void AsyncStorage.removeItem('hermesbot.chats').catch(() => undefined)
@@ -40,30 +66,21 @@ void AsyncStorage.removeItem('hermesbot.chats').catch(() => undefined)
  * bot opens next time, after a restart too. Off (the default), a bot always opens on its main chat.
  */
 export function startLastChatSync(): () => void {
-  const restore = () => {
-    const { reopenLast, lastChats } = usePrefs.getState()
-    const kept = Object.fromEntries(Object.entries(lastChats).filter(([profile]) => reopenLast[profile]))
-
-    if (Object.keys(kept).length) {
-      sessions.store.setState(state => ({ chosen: { ...kept, ...state.chosen } }))
-    }
-  }
-
   if (usePrefs.persist.hasHydrated()) {
-    restore()
+    restoreChosenFromPrefs()
   }
 
-  const stopHydration = usePrefs.persist.onFinishHydration(restore)
+  const stopHydration = usePrefs.persist.onFinishHydration(restoreChosenFromPrefs)
   const stopChosen = sessions.store.subscribe((state, previous) => {
-    if (state.chosen === previous.chosen) {
+    if (ignoringReset || state.chosen === previous.chosen) {
       return
     }
 
-    const { reopenLast } = usePrefs.getState()
+    const { reopenLast, lastChats: currentLastChats, setLastChats } = usePrefs.getState()
     const lastChats = Object.fromEntries(Object.entries(state.chosen).filter(([profile]) => reopenLast[profile]))
 
-    if (!sameJson(lastChats, usePrefs.getState().lastChats)) {
-      usePrefs.setState({ lastChats })
+    if (!sameJson(lastChats, currentLastChats)) {
+      setLastChats(lastChats)
     }
   })
 

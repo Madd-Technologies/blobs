@@ -9,6 +9,7 @@ import { callAudio } from '@/lib/duplexAudio'
 import { haptic } from '@/lib/haptics'
 import { onGatewayEvent, useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
+import { registerServerReset } from '@/stores/reset'
 import { sessions } from '@/stores/sessions'
 
 interface CallState {
@@ -198,3 +199,11 @@ export const useCall = create<CallState>((set, get) => ({
     }
   },
 }))
+
+registerServerReset(() => {
+  cleanup?.()
+  engine?.hangUp()
+  engine = null
+  audio = null
+  useCall.setState({ profile: null, call: null, since: null, level: 0, voiceLevel: 0, speaker: true, hold: 'idle' })
+})

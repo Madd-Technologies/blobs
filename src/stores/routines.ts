@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { describeError } from '@/lib/hermes/errors'
 import { deleteCronJob, listCronJobs, listCronRuns, pauseCronJob, resumeCronJob, runOutcome, triggerCronJob, type CronJob, type CronRun } from '@/lib/hermes/cron'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 interface BotRoutines {
   /** Null until the first read finishes. */
@@ -141,3 +142,7 @@ export async function runRoutineNow(profile: string, id: string): Promise<string
     })
   }
 }
+
+registerServerReset(() => {
+  useRoutines.setState({ byBot: {}, runs: {}, running: {} })
+})

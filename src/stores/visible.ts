@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { activityStamp, isCurrent, keepYours, lastVisible, type VisibleActivity } from '@/features/roster/visible'
 import { listSessionMessages } from '@/lib/hermes/rest'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
 
 interface VisibleState {
@@ -155,11 +156,6 @@ export function startVisibleSync(): () => void {
     }
   })
   const stopConnection = useConnection.subscribe((state, previous) => {
-    // Signing out forgets what this phone kept of the server's chats.
-    if (!state.config && previous.config) {
-      useVisible.setState({ server: null, byBot: {} })
-    }
-
     if (state.status === 'online' && previous.status !== 'online') {
       void run()
     }
@@ -173,3 +169,9 @@ export function startVisibleSync(): () => void {
     stopConnection()
   }
 }
+
+registerServerReset(baseUrl => {
+  if (useVisible.getState().server !== baseUrl) {
+    useVisible.setState({ server: baseUrl, byBot: {} })
+  }
+})

@@ -4,6 +4,7 @@ import type { CommandsCatalog } from '@/lib/hermes/protocol'
 import { call } from '@/lib/hermes/rpc'
 import { slashOptions, type SlashOption } from '@/lib/hermes/slash'
 import { gateway } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { sessions } from '@/stores/sessions'
 
 export interface BotCommands {
@@ -41,3 +42,7 @@ export const useCommands = create<CommandsState>(set => ({
     }
   },
 }))
+
+registerServerReset(() => {
+  useCommands.setState({ byBot: {} })
+})

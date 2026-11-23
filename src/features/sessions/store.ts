@@ -216,6 +216,16 @@ export function createSessions(deps: SessionsDeps) {
   const liveToProfile = new Map<string, string>()
   const queues = new Map<string, EventQueue<HermesEvent>>()
   const opening = new Map<string, Promise<void>>()
+  const pendingTimers = new Set<unknown>()
+  let resetEpoch = 0
+
+  function scheduleTimer(fn: () => void, ms: number) {
+    const handle = timers.set(() => {
+      pendingTimers.delete(handle)
+      fn()
+    }, ms)
+    pendingTimers.add(handle)
+  }
 
   const get = (profile: string): BotSession => store.getState().bots[profile] ?? blankSession(profile)
 
@@ -329,7 +339,7 @@ export function createSessions(deps: SessionsDeps) {
 
       if (event.type === 'message.complete' && forwarded.delete(profile)) {
         // Give the gateway a moment to commit the turn's rows.
-        timers.set(() => void reread(profile), 600)
+        scheduleTimer(() => void reread(profile), 600)
       }
 
       // A background job's news (it finished, failed or sent a heartbeat): the list has its exit status and output.
@@ -509,6 +519,7 @@ export function createSessions(deps: SessionsDeps) {
   }
 
   async function doOpen(profile: string, silent: boolean) {
+    const epoch = resetEpoch
     const config = deps.getConfig()
 
     if (!config) {
@@ -527,13 +538,25 @@ export function createSessions(deps: SessionsDeps) {
     try {
       const found = await findStoredId(profile)
 
+      if (epoch !== resetEpoch) {
+        return
+      }
+
       if (attached && found === shown.storedId) {
         // A reconnect, or opening the chat again: re-attach it, and take what it did meanwhile from the server's event ring.
         // Only when the ring cannot cover the gap (the session was closed after 20 s away, the server restarted, the ring moved
         // on) is the chat read whole again.
         const { resume: resumed, storedId } = await resume(profile, found)
 
+        if (epoch !== resetEpoch) {
+          return
+        }
+
         if (storedId === found && resumed.session_id === shown.liveId && (await deps.catchUp?.(resumed.session_id))) {
+          if (epoch !== resetEpoch) {
+            return
+          }
+
           patch(profile, { phase: 'ready', error: null, info: resumed.info ?? get(profile).info })
           deps.requests?.ingest(resumed.session_id, resumed.open_requests)
           void refreshJobs(profile)
@@ -551,8 +574,17 @@ export function createSessions(deps: SessionsDeps) {
       const early = readPage(config, profile, found)
       early.catch(() => undefined)
       const { resume: resumed, storedId } = await resume(profile, found)
+
+      if (epoch !== resetEpoch) {
+        return
+      }
+
       await readWhole(profile, config, storedId, resumed, storedId === found ? early : undefined)
     } catch (error) {
+      if (epoch !== resetEpoch) {
+        return
+      }
+
       // A failed silent re-open keeps what was on screen; the first open shows the error.
       patch(profile, bot => ({ phase: bot.phase === 'ready' && silent ? 'ready' : 'error', error: describeError(error) }))
     }
@@ -1270,17 +1302,33 @@ export function createSessions(deps: SessionsDeps) {
     return byBot
   }
 
-  function dispose() {
-    stopEvents()
+  function reset() {
+    resetEpoch++
+
+    for (const handle of pendingTimers) {
+      timers.clear(handle)
+    }
+
+    pendingTimers.clear()
 
     for (const queue of queues.values()) {
       queue.dispose()
     }
 
     queues.clear()
+    liveToProfile.clear()
+    opening.clear()
+    forwarded.clear()
+    held.clear()
+    store.setState({ bots: {}, chosen: {} })
   }
 
-  return { store, open, openChat, openLinked, newChat, leaveSide, forget, listChats, findInbox, deleteChat, loadOlder, send, runCommand, showOutput, showNote, stop, respondApproval, respondClarify, respondSecret, respondSudo, reattachAll, knownLiveIds, refreshJobs, dispose }
+  function dispose() {
+    stopEvents()
+    reset()
+  }
+
+  return { store, open, openChat, openLinked, newChat, leaveSide, forget, listChats, findInbox, deleteChat, loadOlder, send, runCommand, showOutput, showNote, stop, respondApproval, respondClarify, respondSecret, respondSudo, reattachAll, knownLiveIds, refreshJobs, reset, dispose }
 }
 
 export type Sessions = ReturnType<typeof createSessions>

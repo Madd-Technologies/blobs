@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import type { ChatSummary } from '@/features/sessions/store'
+import { registerServerReset } from '@/stores/reset'
 import { sessions } from '@/stores/sessions'
 
 interface BotChats {
@@ -78,3 +79,7 @@ export const useChatList = create<ChatListState>((set, get) => ({
       return { byBot: { ...state.byBot, [profile]: { ...known, listed: known.listed.filter(chat => chat.id !== id), total: Math.max(0, known.total - 1), next: Math.max(0, known.next - 1) } } }
     }),
 }))
+
+registerServerReset(() => {
+  useChatList.setState({ byBot: {} })
+})

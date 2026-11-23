@@ -5,6 +5,7 @@ import { backLine, busyRows, cameBack, clockLabel, underWay, type RestartChoice,
 import { displayName } from '@/lib/hermes/identity'
 import { cancelRestart, getRestartStatus, RestartRefused, requestRestart, restartGateway, type RestartStatus } from '@/lib/hermes/restart'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
 import { toast } from '@/stores/toast'
 
@@ -203,9 +204,7 @@ export function startRestartSync(): () => void {
   }
 
   const stopConnection = useConnection.subscribe((state, previous) => {
-    if (!state.config && previous.config) {
-      useRestart.setState({ status: undefined, phase: { kind: 'idle' }, sheet: { open: false, choice: null } })
-    } else if (state.status === 'online' && previous.status !== 'online') {
+    if (state.status === 'online' && previous.status !== 'online') {
       // Connected, or back from a restart: one read says which.
       void useRestart.getState().refresh()
     }
@@ -221,3 +220,7 @@ export function startRestartSync(): () => void {
     }
   }
 }
+
+registerServerReset(() => {
+  useRestart.setState({ status: undefined, phase: { kind: 'idle' }, sheet: { open: false, choice: null }, overlayHidden: false, sending: false, refused: null, retryUntil: 0, dismissedTimeout: null })
+})

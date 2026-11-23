@@ -17,6 +17,7 @@ import { HermesHttpError, restJson } from '@/lib/hermes/server'
 import { startPoller } from '@/lib/poller'
 import { useNow } from '@/lib/useNow'
 import { gateway, onGatewayEvent, useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
 import { useSeen } from '@/stores/seen'
 import { sessions } from '@/stores/sessions'
@@ -94,10 +95,7 @@ export function startInboxSync(): () => void {
   }
 
   const stopConnection = useConnection.subscribe((state, previous) => {
-    if (!state.config && previous.config) {
-      // Signed out: nothing of that server's is kept.
-      inbox.store.setState({ pushed: null, polled: {}, kanban: [] })
-    } else if (state.status === 'online' && previous.status !== 'online') {
+    if (state.status === 'online' && previous.status !== 'online') {
       void inbox.loadPushed()
     }
   })
@@ -236,3 +234,8 @@ interface OpenChatState {
 }
 
 export const useOpenChat = create<OpenChatState>(set => ({ profile: null, setOpen: profile => set({ profile }) }))
+
+registerServerReset(() => {
+  inbox.reset()
+  useOpenChat.setState({ profile: null })
+})

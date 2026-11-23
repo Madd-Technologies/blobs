@@ -11,6 +11,7 @@ import { pushStatusFrom, type PushStatus } from '@/lib/hermes/push-api'
 import { getVoiceStatus } from '@/lib/hermes/voice'
 import type { ServerConfig } from '@/lib/hermes/server'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 /** A Hermes plugin that backs part of the app, with the copy of it the app brings. */
 export interface ServerPlugin {
@@ -168,3 +169,7 @@ export const useServerPlugins = create<ServerPluginsState>()((set, get) => ({
     set({ byName, checking: false })
   },
 }))
+
+registerServerReset(() => {
+  useServerPlugins.setState({ byName: {}, checking: false })
+})

@@ -6,8 +6,15 @@ import { addPushDevice, getPushStatus, removePushDevice, sendPushTest, setPushLe
 import type { ServerConfig } from '@/lib/hermes/server'
 import { deviceName, loadNativePush } from '@/lib/unifiedPush'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 const MINE_KEY = 'hermesbot.push.device'
+
+function scopedMineKey(baseUrl?: string | null): string | null {
+  const target = baseUrl ?? useConnection.getState().config?.baseUrl
+
+  return target ? `${MINE_KEY}.${encodeURIComponent(target)}` : null
+}
 
 function withConfig<T>(run: (config: ServerConfig) => Promise<T>): Promise<T> {
   const config = useConnection.getState().config
@@ -26,8 +33,41 @@ export const push = createPushSetup({
     test: id => withConfig(config => sendPushTest(config, id)),
   },
   deviceName,
-  loadMine: () => AsyncStorage.getItem(MINE_KEY),
-  saveMine: id => (id ? AsyncStorage.setItem(MINE_KEY, id) : AsyncStorage.removeItem(MINE_KEY)),
+  loadMine: async () => {
+    const key = scopedMineKey()
+
+    if (!key) {
+      return null
+    }
+
+    const scoped = await AsyncStorage.getItem(key)
+
+    if (scoped) {
+      return scoped
+    }
+
+    const legacy = await AsyncStorage.getItem(MINE_KEY)
+
+    if (legacy) {
+      await AsyncStorage.setItem(key, legacy).catch(() => undefined)
+      await AsyncStorage.removeItem(MINE_KEY).catch(() => undefined)
+    }
+
+    return legacy
+  },
+  saveMine: async id => {
+    const key = scopedMineKey()
+
+    if (!key) {
+      return
+    }
+
+    if (id) {
+      await AsyncStorage.setItem(key, id)
+    } else {
+      await AsyncStorage.removeItem(key)
+    }
+  },
 })
 
 export function usePush<T>(selector: (state: PushState) => T): T {
@@ -62,3 +102,7 @@ export function startPushSync(): () => void {
     started = false
   }
 }
+
+registerServerReset(() => {
+  push.store.setState({ devices: [], settings: { default: 'all', bots: {} }, mine: null, vapid: null, test: null })
+})

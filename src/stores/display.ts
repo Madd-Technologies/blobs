@@ -5,6 +5,7 @@ import { createDisplay, type ScreenState } from '@/features/display/store'
 import { sha256Hex } from '@/lib/auth-native'
 import { gateway, onGatewayEvent, requests, useConnection } from '@/stores/connection'
 import { useBrowserMode } from '@/stores/profiles'
+import { registerServerReset } from '@/stores/reset'
 
 /** Every bot's Bot Screen, wired to the real gateway. */
 export const display = createDisplay({
@@ -46,3 +47,8 @@ export function useBrowserShows(profile: string): boolean {
 
   return headed || running
 }
+
+registerServerReset(() => {
+  browserAsked.clear()
+  display.reset()
+})

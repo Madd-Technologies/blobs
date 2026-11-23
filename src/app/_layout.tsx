@@ -60,6 +60,7 @@ function RootStack() {
           <Stack.Screen name="index" />
           <Stack.Screen name="inbox" />
           <Stack.Screen name="settings" />
+          <Stack.Screen name="server-add" />
           <Stack.Screen name="notifications" />
           <Stack.Screen name="plugins" />
           <Stack.Screen name="licences" />

@@ -6,6 +6,7 @@ import { driveFileId, openInGoogle, type DriveFile } from '@/features/viewer/dri
 import { fileName, viewerKind } from '@/features/viewer/kind'
 import { restJson } from '@/lib/hermes/server'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { toast } from '@/stores/toast'
 import { useViewer } from '@/stores/viewer'
 
@@ -92,3 +93,7 @@ async function openDriveFile(id: string, doc: ViewerDoc) {
 }
 
 export const openFile = (path: string, profile?: string, name: string = fileName(path)) => openDocument({ kind: 'file', path, name, profile })
+
+registerServerReset(() => {
+  useDocument.setState({ docs: {} })
+})

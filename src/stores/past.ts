@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { PAGE_SIZE } from '@/features/sessions/store'
 import { listSessionMessages, type StoredMessage } from '@/lib/hermes/rest'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 export interface PastChat {
   /** Oldest first, as the server returns them. */
@@ -64,3 +65,7 @@ export const usePast = create<PastState>((set, get) => ({
     }
   },
 }))
+
+registerServerReset(() => {
+  usePast.setState({ byId: {} })
+})

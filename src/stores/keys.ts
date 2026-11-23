@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 import { EnvError, listEnvKeys, type EnvKey } from '@/lib/hermes/env'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 interface KeysState {
   /**
@@ -32,3 +33,7 @@ export const useKeys = create<KeysState>(set => ({
     }
   },
 }))
+
+registerServerReset(() => {
+  useKeys.setState({ byBot: {} })
+})

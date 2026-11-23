@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { describeError } from '@/lib/hermes/errors'
 import { listToolsets, setToolset, type Toolset } from '@/lib/hermes/toolsets'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 interface ToolsetsState {
   /** Each bot's toolsets as last read from the server; absent until the first read finishes. */
@@ -58,4 +59,8 @@ export const useToolsets = create<ToolsetsState>((set, get) => {
       }
     },
   }
+})
+
+registerServerReset(() => {
+  useToolsets.setState({ byBot: {} })
 })

@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { fetchWholeRows, WHOLE_MAX } from '@/lib/hermes/history'
 import type { StoredMessage } from '@/lib/hermes/rest'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { sessions } from '@/stores/sessions'
 
 /**
@@ -79,10 +80,13 @@ async function flush(): Promise<void> {
 }
 
 // Another server's rows mean nothing on this one.
-useConnection.subscribe((state, previous) => {
-  if (state.config?.baseUrl !== previous.config?.baseUrl) {
-    asked.clear()
-    waiting.clear()
-    useWholeRows.setState({ rows: {} })
+registerServerReset(() => {
+  if (timer) {
+    clearTimeout(timer)
+    timer = null
   }
+
+  asked.clear()
+  waiting.clear()
+  useWholeRows.setState({ rows: {} })
 })

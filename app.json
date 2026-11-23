@@ -92,7 +92,13 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-asset",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Blobs uses the camera to scan Hermes server QR codes and take photos for your bots."
+        }
+      ]
     ],
     "scheme": "hermesbot",
     "experiments": {

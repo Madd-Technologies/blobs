@@ -11,6 +11,7 @@ import { addRecordNote, bulkRecords, changeRecord, DraftChanged, getBotDashboard
 import { DASHBOARD_CHANGED, parseDashboardChanged } from '@/lib/hermes/livepush'
 import { startPoller } from '@/lib/poller'
 import { onGatewayEvent, useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { sessions } from '@/stores/sessions'
 import { isShown, pushes } from '@/stores/watch'
 
@@ -507,3 +508,5 @@ export function startDashboardPoll(profile: string): () => void {
 export function useBotBoard(profile: string): BotBoard {
   return useDashboards(state => state.byBot[profile] ?? empty)
 }
+
+registerServerReset(() => useDashboards.getState().reset())

@@ -6,6 +6,7 @@ import { callAudio, canCall } from '@/lib/duplexAudio'
 import { listenTicket } from '@/lib/hermes/phone'
 import { useCall } from '@/stores/call'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 interface ListenState {
   /** The phone errand's call you are listening in on (or whose ending is still shown). */
@@ -117,3 +118,7 @@ export const useListen = create<ListenState>((set, get) => ({
     set({ errandId: null, callId: null, snap: null, level: 0, voiceLevel: 0 })
   },
 }))
+
+registerServerReset(() => {
+  useListen.getState().leave()
+})

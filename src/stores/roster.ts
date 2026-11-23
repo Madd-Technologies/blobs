@@ -9,6 +9,7 @@ import { startPoller } from '@/lib/poller'
 import type { ProfileRow } from '@/lib/hermes/protocol'
 import { call } from '@/lib/hermes/rpc'
 import { gateway, onGatewayEvent, useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 interface RosterState {
   server: string | null
@@ -140,3 +141,5 @@ export function startRosterSync(): () => void {
     changed.cancel()
   }
 }
+
+registerServerReset(baseUrl => useRoster.getState().syncServer(baseUrl))
