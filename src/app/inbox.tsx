@@ -6,7 +6,7 @@ import { FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { AttentionDot } from '@/components/bots/AttentionDot'
 import { BotFace } from '@/components/bots/BotFace'
 import { MuteSheet } from '@/components/dashboard/MuteSheet'
-import { BehindCard, SwipeCard, TopCard, cardAge, cardLine, cardName, type DeckContext } from '@/components/inbox/Deck'
+import { BehindCard, StackTopCard, SwipeCard, TopCard, cardAge, cardLine, cardName, type DeckContext } from '@/components/inbox/Deck'
 import { RoomFaces } from '@/components/rooms/RoomFaces'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
@@ -16,7 +16,19 @@ import { Screen } from '@/components/ui/Screen'
 import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { T } from '@/components/ui/T'
 import { formatTyped, isPast, untilLabel } from '@/features/dashboard/view'
-import { deckSummary, filterDeck, leftLabel, orderDeck, startAt, triagePrompt, turn, type DeckCard } from '@/features/inbox/deck'
+import {
+  collapseDeckStacks,
+  deckSummary,
+  filterDeck,
+  leftLabel,
+  orderDeck,
+  staleBoardIds,
+  startAt,
+  triagePrompt,
+  turnEntries,
+  type CardSource,
+  type DeckCard,
+} from '@/features/inbox/deck'
 import { useNow } from '@/lib/useNow'
 import { useBotMetas, useBotViews } from '@/stores/bots'
 import { useDashboards } from '@/stores/dashboards'
@@ -28,6 +40,13 @@ import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
 type BoardCard = Extract<DeckCard, { kind: 'board' }>
+
+const SOURCE_LABELS: { key: CardSource; label: string }[] = [
+  { key: 'bot', label: 'Bots' },
+  { key: 'dashboard', label: 'Dashboards' },
+  { key: 'phone', label: 'Phone' },
+  { key: 'room', label: 'Rooms' },
+]
 
 /**
  * Needs you: swipe cards one at a time in Deck mode, or switch to List mode to filter by urgency/bot,
@@ -47,6 +66,7 @@ export default function Inbox() {
 
   const [bucket, setBucket] = useState<'all' | 'blocked' | 'review'>(() => (paramBucket === 'blocked' || paramBucket === 'review' ? paramBucket : 'all'))
   const [botFilter, setBotFilter] = useState<string | null>(null)
+  const [sourceFilter, setSourceFilter] = useState<CardSource | null>(null)
   const modeTouched = useRef(Boolean(paramMode))
   const [mode, setMode] = useState<'deck' | 'list'>(() => paramMode ?? (paramBucket === 'review' && summary.reviewCount > 8 && !start ? 'list' : 'deck'))
 
@@ -70,11 +90,14 @@ export default function Inbox() {
   const context = useMemo<DeckContext>(() => ({ views, metas, nowS }), [views, metas, nowS])
 
   const visibleCards = useMemo(() => cards.filter(card => !gone.includes(card.key)), [cards, gone])
-  const filtered = useMemo(() => filterDeck(visibleCards, { urgency: bucket, profile: botFilter }), [visibleCards, bucket, botFilter])
+  const filtered = useMemo(() => filterDeck(visibleCards, { urgency: bucket, profile: botFilter, source: sourceFilter }), [visibleCards, bucket, botFilter, sourceFilter])
   const deck = useMemo(() => orderDeck(filtered, skipped), [filtered, skipped])
+  const deckEntries = useMemo(() => collapseDeckStacks(deck, 4), [deck])
 
   const boardCards = useMemo(() => deck.filter((card): card is BoardCard => card.kind === 'board'), [deck])
   const selectedCards = useMemo(() => boardCards.filter(card => selected[card.key]), [boardCards, selected])
+  const staleKeys = useMemo(() => new Set(staleBoardIds(boardCards, nowS, 7).map(item => item.key)), [boardCards, nowS])
+  const staleBoardCards = useMemo(() => boardCards.filter(card => staleKeys.has(card.key)), [boardCards, staleKeys])
 
   // Prefetch the next couple of dashboard records in Deck mode so flipping forward feels instant.
   useEffect(() => {
@@ -91,8 +114,8 @@ export default function Inbox() {
     }
   }, [mode, deck])
 
-  const [top, next, third] = deck
-  const behind = next ? (third ? 2 : 1) : 0
+  const [topEntry, nextEntry, thirdEntry] = deckEntries
+  const behind = nextEntry ? (thirdEntry ? 2 : 1) : 0
   const botName = (profile: string) => views.find(view => view.profile === profile)?.name ?? profile
 
   // Offer a 1-tap bot triage prompt when the visible review cards point cleanly to one bot with enough volume.
@@ -121,12 +144,14 @@ export default function Inbox() {
     return { profile, count: boardCards.length, viewTitle: viewTitles.length === 1 ? viewTitles[0] : undefined }
   }, [boardCards, botFilter])
 
-  async function askBotToTriage() {
-    if (!triageScope) {
+  async function askBotToTriage(override?: { profile: string; count: number; viewTitle?: string }) {
+    const scope = override ?? triageScope
+
+    if (!scope) {
       return
     }
 
-    const { profile, count, viewTitle } = triageScope
+    const { profile, count, viewTitle } = scope
     await sessions.newChat(profile)
     useDrafts.getState().set(profile, triagePrompt(botName(profile), count, viewTitle))
     router.push({ pathname: '/bot/[profile]', params: { profile } })
@@ -288,7 +313,7 @@ export default function Inbox() {
   }
 
   function onTurn(way: 'next' | 'previous', by = 1) {
-    setSkipped(turn(deck, way, by))
+    setSkipped(turnEntries(deckEntries, way, by))
     setTurns(count => count + 1)
   }
 
@@ -307,12 +332,14 @@ export default function Inbox() {
     setMode(current => (current === 'deck' ? 'list' : 'deck'))
   }
 
-  const isRecord = top?.kind === 'board'
-  const turnable = deck.length > 1
-  const sideways = !!top && (isRecord || turnable)
+  const isRecord = topEntry?.kind === 'board'
+  const turnable = deckEntries.length > 1
+  const sideways = !!topEntry && (isRecord || turnable)
   const upDown = turnable && !scrolls
+  const activeSources = SOURCE_LABELS.filter(item => summary.sources[item.key] > 0 || sourceFilter === item.key)
   const showBucketChips = (summary.blockedCount > 0 && summary.reviewCount > 0) || bucket !== 'all'
-  const hasFilters = summary.totalCount > 0 || bucket !== 'all' || botFilter !== null
+  const showSourceChips = activeSources.length > 1 || sourceFilter !== null
+  const hasFilters = summary.totalCount > 0 || bucket !== 'all' || botFilter !== null || sourceFilter !== null
   const headerSubtitle =
     filtered.length !== visibleCards.length
       ? `${filtered.length} shown · ${visibleCards.length} left`
@@ -345,10 +372,11 @@ export default function Inbox() {
           <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
             <FilterChip
               label={`All (${summary.totalCount})`}
-              active={bucket === 'all' && botFilter === null}
+              active={bucket === 'all' && botFilter === null && sourceFilter === null}
               onPress={() => {
                 setBucket('all')
                 setBotFilter(null)
+                setSourceFilter(null)
               }}
             />
             {showBucketChips && (summary.blockedCount > 0 || bucket === 'blocked') ? (
@@ -365,6 +393,16 @@ export default function Inbox() {
                 onPress={() => setBucket(bucket === 'review' ? 'all' : 'review')}
               />
             ) : null}
+            {showSourceChips
+              ? activeSources.map(item => (
+                  <FilterChip
+                    key={item.key}
+                    label={`${item.label} (${summary.sources[item.key]})`}
+                    active={sourceFilter === item.key}
+                    onPress={() => setSourceFilter(sourceFilter === item.key ? null : item.key)}
+                  />
+                ))
+              : null}
             {summary.bots.length > 1 || botFilter !== null
               ? summary.bots.map(bot => {
                   const active = botFilter === bot.profile
@@ -411,7 +449,7 @@ export default function Inbox() {
                       {selectedCards.length === boardCards.length ? `Clear (${selectedCards.length})` : `Select all (${boardCards.length})`}
                     </T>
                   </Press>
-                  {selectedCards.length > 0 && selectedCards.length < boardCards.length ? (
+                    {selectedCards.length > 0 && selectedCards.length < boardCards.length ? (
                     <Press
                       accessibilityRole="button"
                       onPress={() => setSelected({})}
@@ -419,6 +457,18 @@ export default function Inbox() {
                     >
                       <T variant="label" color="text2">
                         Clear ({selectedCards.length})
+                      </T>
+                    </Press>
+                  ) : null}
+                  {staleBoardCards.length > 0 ? (
+                    <Press
+                      accessibilityRole="button"
+                      accessibilityLabel={`Mark ${staleBoardCards.length} items older than 7 days done`}
+                      onPress={() => void runBulkDone(staleBoardCards)}
+                      style={[styles.toolBtn, { backgroundColor: c.control }]}
+                    >
+                      <T variant="label" color="text">
+                        Clear &gt;7d ({staleBoardCards.length})
                       </T>
                     </Press>
                   ) : null}
@@ -554,10 +604,11 @@ export default function Inbox() {
             ListEmptyComponent={
               <View style={styles.listEmpty}>
                 <EmptyState
-                  filtered={bucket !== 'all' || botFilter !== null}
+                  filtered={bucket !== 'all' || botFilter !== null || sourceFilter !== null}
                   onClear={() => {
                     setBucket('all')
                     setBotFilter(null)
+                    setSourceFilter(null)
                   }}
                 />
               </View>
@@ -600,21 +651,36 @@ export default function Inbox() {
           onContentSizeChange={(_, content) => setFrame(current => (current.content === content ? current : { ...current, content }))}
         >
           <View style={styles.above} />
-          {top ? (
+          {topEntry ? (
             <>
               <View style={[styles.deck, { paddingTop: behind * 30 }]}>
-                {third ? <BehindCard card={third} context={context} depth={2} behind={behind} onPress={() => onTurn('next', 2)} /> : null}
-                {next ? <BehindCard card={next} context={context} depth={1} behind={behind} onPress={() => onTurn('next')} /> : null}
+                {thirdEntry ? <BehindCard card={thirdEntry} context={context} depth={2} behind={behind} onPress={() => onTurn('next', 2)} /> : null}
+                {nextEntry ? <BehindCard card={nextEntry} context={context} depth={1} behind={behind} onPress={() => onTurn('next')} /> : null}
                 {/* Keyed by what is on top and how often the deck turned, so a card that comes round again arrives fresh. */}
                 <SwipeCard
-                  key={`${top.key}#${turns}`}
+                  key={`${topEntry.key}#${turns}`}
                   sideways={sideways}
                   upDown={upDown}
                   returnLeft={isRecord}
-                  onSwipe={direction => onSwipe(top, direction)}
+                  onSwipe={direction => (topEntry.kind === 'stack' ? onTurn('next') : onSwipe(topEntry, direction))}
                   onTurn={way => onTurn(way)}
                 >
-                  <TopCard card={top} context={context} />
+                  {topEntry.kind === 'stack' ? (
+                    <StackTopCard
+                      stack={topEntry}
+                      context={context}
+                      onInspect={() => {
+                        modeTouched.current = true
+                        setBotFilter(topEntry.profile)
+                        setMode('list')
+                      }}
+                      onDoneAll={() => void runBulkDone(topEntry.cards)}
+                      onSnoozeAll={() => setBulkMuting(topEntry.cards)}
+                      onTriage={() => void askBotToTriage({ profile: topEntry.profile, count: topEntry.cards.length, viewTitle: topEntry.viewTitle })}
+                    />
+                  ) : (
+                    <TopCard card={topEntry} context={context} />
+                  )}
                 </SwipeCard>
               </View>
               {sideways ? (
@@ -649,7 +715,7 @@ export default function Inbox() {
                   </View>
                 )
               ) : null}
-              {triageScope ? (
+              {triageScope && topEntry.kind !== 'stack' ? (
                 <View style={styles.deckTriage}>
                   <Pill
                     label={`Ask ${botName(triageScope.profile)} to triage`}
@@ -663,10 +729,11 @@ export default function Inbox() {
             </>
           ) : (
             <EmptyState
-              filtered={bucket !== 'all' || botFilter !== null}
+              filtered={bucket !== 'all' || botFilter !== null || sourceFilter !== null}
               onClear={() => {
                 setBucket('all')
                 setBotFilter(null)
+                setSourceFilter(null)
               }}
             />
           )}
@@ -750,8 +817,8 @@ const styles = StyleSheet.create({
   filterRow: { paddingHorizontal: 16, gap: 8, alignItems: 'center' },
   chip: { height: 34, borderRadius: radius.pill, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
   chipText: { fontFamily: fonts.medium },
-  toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 16, paddingBottom: 10 },
-  toolbarLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  toolbar: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 16, paddingBottom: 10 },
+  toolbarLeft: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   toolBtn: { height: 36, borderRadius: radius.pill, paddingHorizontal: 14, justifyContent: 'center' },
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
   listWithBar: { paddingBottom: 96 },

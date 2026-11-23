@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildDeck, cardUrgency, deckSummary, filterDeck, pickPreviewCards, triagePrompt, type DeckCard } from './deck.ts'
+import {
+  buildDeck,
+  cardSource,
+  cardUrgency,
+  collapseDeckStacks,
+  deckSummary,
+  filterDeck,
+  orderDeck,
+  pickPreviewCards,
+  staleBoardIds,
+  triagePrompt,
+  turnEntries,
+  type DeckCard,
+} from './deck.ts'
 
 const errand = (id: string, profile: string) => ({
   id,
@@ -172,5 +185,93 @@ describe('deck urgency, filtering, summary, and triage prompt', () => {
       ['board:alpha:1', 'board:beta:4', 'board:alpha:2'],
     )
     assert.deepEqual(pickPreviewCards(cards, 0), [])
+  })
+
+  it('classifies interrupt board views, source filters, stale items, and collapsed stacks', () => {
+    const nowS = 10_000_000
+    const interruptBoard: DeckCard = {
+      kind: 'board',
+      key: 'board:alpha:int',
+      profile: 'alpha',
+      nowS,
+      record: {
+        view: 'urgent-v',
+        view_title: 'Urgent',
+        inbox: 'interrupt',
+        stale: false,
+        updated_at: nowS - 100,
+        row: { id: 'int', title: { key: 'title', type: 'text', value: 'Interrupt' }, done: false, needs_you: true },
+      },
+    }
+    const staleOld: DeckCard = {
+      kind: 'board',
+      key: 'board:alpha:old',
+      profile: 'alpha',
+      nowS,
+      record: {
+        view: 'backlog',
+        view_title: 'Backlog',
+        inbox: 'review',
+        updated_at: nowS - 10 * 86_400,
+        row: { id: 'old', title: { key: 'title', type: 'text', value: 'Old' }, done: false, needs_you: true },
+      },
+    }
+    const flaggedStale: DeckCard = {
+      kind: 'board',
+      key: 'board:beta:flagged',
+      profile: 'beta',
+      nowS,
+      record: {
+        view: 'queue',
+        view_title: 'Queue',
+        stale: true,
+        updated_at: nowS - 60,
+        row: { id: 'flagged', title: { key: 'title', type: 'text', value: 'Flagged' }, done: false, needs_you: true },
+      },
+    }
+
+    assert.equal(cardUrgency(interruptBoard), 'blocked')
+    assert.equal(cardSource(interruptBoard), 'dashboard')
+    assert.equal(cardSource(entryCard('alpha', 'e1')), 'bot')
+    assert.equal(cardSource(roomCard('r1')), 'room')
+
+    const mixed: DeckCard[] = [entryCard('alpha', 'e1'), interruptBoard, staleOld, roomCard('r1')]
+    assert.deepEqual(filterDeck(mixed, { source: 'dashboard' }).map(c => c.key), ['board:alpha:int', 'board:alpha:old'])
+    assert.deepEqual(filterDeck(mixed, { source: 'bot' }).map(c => c.key), ['entry:alpha:e1'])
+
+    const summary = deckSummary(mixed, 2)
+    assert.deepEqual(summary.sources, { bot: 1, dashboard: 4, phone: 0, room: 1 })
+    assert.equal(summary.blockedCount, 3)
+
+    assert.deepEqual(
+      staleBoardIds([interruptBoard, staleOld, flaggedStale], nowS, 7).map(x => x.id),
+      ['old', 'flagged'],
+    )
+
+    // Stack collapse groups >= 4 non-interrupt board cards per view while keeping interrupt cards unstacked.
+    const noisyQueue: DeckCard[] = [
+      entryCard('alpha', 'e1'),
+      interruptBoard,
+      boardCard('alpha', '1'),
+      boardCard('alpha', '2'),
+      boardCard('alpha', '3'),
+      boardCard('alpha', '4'),
+      boardCard('beta', '5'),
+    ]
+    const collapsed = collapseDeckStacks(noisyQueue, 4)
+    assert.equal(collapsed.length, 4)
+    assert.equal(collapsed[0]?.kind, 'entry')
+    assert.equal(collapsed[1]?.kind, 'board')
+    assert.equal(collapsed[2]?.kind, 'stack')
+    assert.equal(collapsed[3]?.kind, 'board')
+    if (collapsed[2]?.kind === 'stack') {
+      assert.equal(collapsed[2].cards.length, 4)
+    }
+
+    // Turning past a stack keeps all cards of that stack together in orderDeck.
+    const nextSkipped = turnEntries(collapsed, 'next', 2)
+    const rotated = collapseDeckStacks(orderDeck(noisyQueue, nextSkipped), 4)
+    assert.equal(rotated[0]?.kind, 'stack')
+    assert.equal(rotated[1]?.kind, 'board')
   })
 })

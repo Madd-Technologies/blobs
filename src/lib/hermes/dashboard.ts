@@ -239,6 +239,12 @@ export interface NeedsYouRecord {
   view: string
   view_title: string
   row: ViewRow
+  inbox?: 'interrupt' | 'review'
+  body_snippet?: string
+  primary_action?: { id: string; label: string; tone?: string }
+  has_draft?: boolean
+  updated_at?: number
+  stale?: boolean
 }
 
 /** The server runs 0.1 (snapshot panels), which this app no longer draws. */

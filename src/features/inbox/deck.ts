@@ -52,23 +52,45 @@ export function orderDeck(cards: DeckCard[], skipped: readonly string[]): DeckCa
   return [...now, ...back]
 }
 
+export type BoardCard = Extract<DeckCard, { kind: 'board' }>
+
+/** A collapsed deck item grouping a noisy backlog view (`review` tier with >= threshold cards) into one batch card. */
+export interface StackCard {
+  kind: 'stack'
+  key: string
+  profile: string
+  view: string
+  viewTitle: string
+  cards: BoardCard[]
+}
+
+export type DeckEntry = DeckCard | StackCard
+
 /**
  * Turn the deck like a ring: `next` sends the top card to the back (`by` cards at once, for a card tapped behind the top
  * one), `previous` brings the bottom card back to the top. Returns the new skipped list for `orderDeck`: every card but the
  * new top, in their new order.
  */
 export function turn(deck: readonly DeckCard[], way: 'next' | 'previous', by = 1): string[] {
-  const keys = deck.map(card => card.key)
-  const count = keys.length
+  return turnEntries(deck, way, by)
+}
+
+/**
+ * Same ring rotation over collapsed `DeckEntry` items (returning underlying `DeckCard` keys to skip for `orderDeck`)
+ * so swiping past or rotating onto a `StackCard` keeps all of its grouped cards together.
+ */
+export function turnEntries(entries: readonly DeckEntry[], way: 'next' | 'previous', by = 1): string[] {
+  const count = entries.length
 
   if (count < 2) {
     return []
   }
 
   const shift = way === 'next' ? by % count : count - (by % count)
-  const order = [...keys.slice(shift), ...keys.slice(0, shift)]
+  const order = [...entries.slice(shift), ...entries.slice(0, shift)]
+  const rest = order.slice(1)
 
-  return order.slice(1)
+  return rest.flatMap(entry => (entry.kind === 'stack' ? entry.cards.map(card => card.key) : [entry.key]))
 }
 
 /** The profile a card belongs to, for its tint and face; a room has none of its own. */
@@ -92,10 +114,12 @@ export function startAt(cards: DeckCard[], key: string | undefined): string[] {
 }
 
 export type CardUrgency = 'blocked' | 'review'
+export type CardSource = 'bot' | 'dashboard' | 'phone' | 'room'
 
 export interface DeckFilter {
   urgency?: 'all' | CardUrgency
   profile?: string | null
+  source?: CardSource | 'all' | null
 }
 
 export interface BotDeckCounts {
@@ -111,15 +135,29 @@ export interface DeckSummary {
   totalCount: number
   byBot: Record<string, { total: number; blocked: number; review: number }>
   bots: BotDeckCounts[]
+  sources: Record<CardSource, number>
+}
+
+export function cardSource(card: DeckCard): CardSource {
+  switch (card.kind) {
+    case 'entry':
+      return 'bot'
+    case 'board':
+      return 'dashboard'
+    case 'phone':
+      return 'phone'
+    case 'room':
+      return 'room'
+  }
 }
 
 /**
- * Interactive decisions that block a live turn or call come first ('blocked'); queued dashboard cards and asked phone
- * follow-ups sit under 'review' so triage stays calm even at 60+ items.
+ * Interactive decisions that block a live turn or call (plus dashboard views configured as `inbox: 'interrupt'`) come
+ * first ('blocked'); queued dashboard cards and asked phone follow-ups sit under 'review' so triage stays calm.
  */
 export function cardUrgency(card: DeckCard): CardUrgency {
   if (card.kind === 'board') {
-    return 'review'
+    return card.record.inbox === 'interrupt' ? 'blocked' : 'review'
   }
 
   if (card.kind === 'phone') {
@@ -132,8 +170,9 @@ export function cardUrgency(card: DeckCard): CardUrgency {
 export function filterDeck(cards: readonly DeckCard[], filter: DeckFilter): DeckCard[] {
   const urgency = filter.urgency && filter.urgency !== 'all' ? filter.urgency : null
   const profile = filter.profile ?? null
+  const source = filter.source && filter.source !== 'all' ? filter.source : null
 
-  if (!urgency && !profile) {
+  if (!urgency && !profile && !source) {
     return [...cards]
   }
 
@@ -146,6 +185,10 @@ export function filterDeck(cards: readonly DeckCard[], filter: DeckFilter): Deck
       return false
     }
 
+    if (source && cardSource(card) !== source) {
+      return false
+    }
+
     return true
   })
 }
@@ -154,9 +197,11 @@ export function deckSummary(cards: readonly DeckCard[], pendingBoardCount = 0): 
   let blockedCount = 0
   let reviewCount = 0
   const byBot: Record<string, { total: number; blocked: number; review: number }> = {}
+  const sources: Record<CardSource, number> = { bot: 0, dashboard: 0, phone: 0, room: 0 }
 
   for (const card of cards) {
     const urgency = cardUrgency(card)
+    sources[cardSource(card)]++
 
     if (urgency === 'blocked') {
       blockedCount++
@@ -178,12 +223,95 @@ export function deckSummary(cards: readonly DeckCard[], pendingBoardCount = 0): 
     }
   }
 
-  reviewCount += Math.max(0, pendingBoardCount)
+  const unloadedBoard = Math.max(0, pendingBoardCount)
+  reviewCount += unloadedBoard
+  sources.dashboard += unloadedBoard
   const bots: BotDeckCounts[] = Object.entries(byBot)
     .map(([profile, counts]) => ({ profile, ...counts }))
     .sort((a, b) => b.blocked - a.blocked || b.total - a.total || a.profile.localeCompare(b.profile))
 
-  return { blockedCount, reviewCount, totalCount: blockedCount + reviewCount, byBot, bots }
+  return { blockedCount, reviewCount, totalCount: blockedCount + reviewCount, byBot, bots, sources }
+}
+
+/** Board cards flagged as stale by the server or un-updated for at least `days` days. */
+export function staleBoardIds(cards: readonly DeckCard[], nowS: number, days = 7): { key: string; profile: string; id: string }[] {
+  const cutoff = Math.max(1, days) * 86_400
+  const stale: { key: string; profile: string; id: string }[] = []
+
+  for (const card of cards) {
+    if (card.kind !== 'board') {
+      continue
+    }
+
+    const updated = card.record.updated_at
+
+    if (card.record.stale === true || (typeof updated === 'number' && updated > 0 && nowS - updated >= cutoff)) {
+      stale.push({ key: card.key, profile: card.profile, id: card.record.row.id })
+    }
+  }
+
+  return stale
+}
+
+/**
+ * Collapses noisy non-interrupt dashboard views (at least `threshold` cards from the same `${profile}/${view}`)
+ * into one `StackCard` at the position of the first card in that group, keeping urgent/small items on top.
+ */
+export function collapseDeckStacks(cards: readonly DeckCard[], threshold = 4): DeckEntry[] {
+  if (threshold <= 1 || cards.length === 0) {
+    return [...cards]
+  }
+
+  const groups = new Map<string, BoardCard[]>()
+
+  for (const card of cards) {
+    if (card.kind !== 'board' || cardUrgency(card) === 'blocked') {
+      continue
+    }
+
+    const groupKey = `${card.profile}/${card.record.view}`
+    const bucket = groups.get(groupKey)
+
+    if (bucket) {
+      bucket.push(card)
+    } else {
+      groups.set(groupKey, [card])
+    }
+  }
+
+  const emitted = new Set<string>()
+  const entries: DeckEntry[] = []
+
+  for (const card of cards) {
+    if (card.kind !== 'board' || cardUrgency(card) === 'blocked') {
+      entries.push(card)
+      continue
+    }
+
+    const groupKey = `${card.profile}/${card.record.view}`
+    const bucket = groups.get(groupKey)
+
+    if (!bucket || bucket.length < threshold) {
+      entries.push(card)
+      continue
+    }
+
+    if (emitted.has(groupKey)) {
+      continue
+    }
+
+    emitted.add(groupKey)
+    entries.push({
+      kind: 'stack',
+      key: `stack:${groupKey}`,
+      profile: card.profile,
+      view: card.record.view,
+      viewTitle: card.record.view_title || 'Dashboard queue',
+      cards: bucket,
+    })
+  }
+
+  return entries
 }
 
 /**
