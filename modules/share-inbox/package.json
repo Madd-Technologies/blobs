@@ -1,0 +1,6 @@
+{
+  "name": "share-inbox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Receives OS Share Sheet text, URLs, and files from the iOS Share Extension App Group and Android ACTION_SEND intents."
+}

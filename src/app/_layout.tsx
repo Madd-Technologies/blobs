@@ -7,14 +7,16 @@ import { GeistMono_400Regular } from '@expo-google-fonts/geist-mono/400Regular'
 import { GeistMono_500Medium } from '@expo-google-fonts/geist-mono/500Medium'
 import { useFonts } from 'expo-font'
 import * as ScreenOrientation from 'expo-screen-orientation'
-import { Stack } from 'expo-router'
+import { Stack, useRouter } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import * as SystemUI from 'expo-system-ui'
 import { useEffect, useState } from 'react'
-import { Platform } from 'react-native'
+import { Linking, Platform } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
+import { loadApnsPush } from '@/lib/apnsPush'
+import { onSharedInbox } from '@/lib/shareInbox'
 import { useBoot } from '@/stores/ui'
 import { useConnection } from '@/stores/connection'
 import { prefsHydrated, usePrefs } from '@/stores/prefs'
@@ -38,11 +40,27 @@ export const unstable_settings = { anchor: 'index' }
 
 function RootStack() {
   const { c, scheme } = useTheme()
+  const router = useRouter()
   const configured = useConnection(s => s.config !== null)
 
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(c.canvas)
   }, [c.canvas])
+
+  useEffect(() => {
+    if (!configured) {
+      return
+    }
+
+    const pendingUrl = loadApnsPush()?.consumePendingAction()
+    if (pendingUrl) {
+      void Linking.openURL(pendingUrl).catch(() => {})
+    }
+
+    return onSharedInbox(() => {
+      router.push('/share')
+    })
+  }, [configured, router])
 
   return (
     <>
@@ -64,6 +82,7 @@ function RootStack() {
           <Stack.Screen name="fleet" />
           <Stack.Screen name="telemetry" />
           <Stack.Screen name="approve" options={{ animation: 'fade' }} />
+          <Stack.Screen name="share" options={{ animation: 'fade' }} />
           <Stack.Screen name="settings" />
           <Stack.Screen name="server-add" />
           <Stack.Screen name="notifications" />

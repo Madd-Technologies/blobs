@@ -98,7 +98,8 @@
         {
           "cameraPermission": "Blobs uses the camera to scan Hermes server QR codes and take photos for your bots."
         }
-      ]
+      ],
+      "./plugins/withBaseStationExtensions"
     ],
     "scheme": "hermesbot",
     "experiments": {
