@@ -199,7 +199,12 @@ export function createInbox(deps: InboxDeps) {
     return resolved > 0
   }
 
-  return { store, refresh, respondApproval, loadPushed, applyPushed, dropPushed, answerKanban }
+  function reset() {
+    refreshing = null
+    store.setState({ active: [], polled: {}, background: [], pushed: null, kanban: [], loadedAt: null, error: null })
+  }
+
+  return { store, refresh, respondApproval, loadPushed, applyPushed, dropPushed, answerKanban, reset }
 }
 
 export type Inbox = ReturnType<typeof createInbox>

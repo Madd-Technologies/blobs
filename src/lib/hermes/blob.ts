@@ -82,15 +82,57 @@ export function blobShapeString(seedPart: string, kind: BlobKind | ''): string {
   return seedPart ? `blobatar:${seedPart}` : 'blobatar'
 }
 
+const SVG_CACHE_MAX = 200
+const svgCache = new Map<string, string | null>()
+const splitCache = new Map<string, BlobParts | null>()
+
+function lruGet<K, V>(cache: Map<K, V>, key: K): V | undefined {
+  if (!cache.has(key)) {
+    return undefined
+  }
+
+  const value = cache.get(key) as V
+  cache.delete(key)
+  cache.set(key, value)
+
+  return value
+}
+
+function lruSet<K, V>(cache: Map<K, V>, key: K, value: V) {
+  if (cache.has(key)) {
+    cache.delete(key)
+  } else if (cache.size >= SVG_CACHE_MAX) {
+    const oldest = cache.keys().next().value
+
+    if (oldest !== undefined) {
+      cache.delete(oldest)
+    }
+  }
+
+  cache.set(key, value)
+}
+
 /** SVG markup for a blob face (its own palette and eyes included), or null if rendering fails. */
 export function blobSvg(shape: string | null | undefined, name: string, size: number): string | null {
+  const key = `${shape ?? ''}|${name}|${size}`
+  const hit = lruGet(svgCache, key)
+
+  if (hit !== undefined) {
+    return hit
+  }
+
   const { seed, kind } = parseBlobShape(shape, name)
+  let result: string | null = null
 
   try {
-    return blobatar(seed, kind ? { size, traits: { shape: BLOB_KIND_TRAIT[kind] } } : { size })
+    result = blobatar(seed, kind ? { size, traits: { shape: BLOB_KIND_TRAIT[kind] } } : { size })
   } catch {
-    return null
+    result = null
   }
+
+  lruSet(svgCache, key, result)
+
+  return result
 }
 
 export interface BlobParts {
@@ -107,30 +149,43 @@ export interface BlobParts {
  * `<svg>` holding two groups, the body and then the eyes; anything else (a future library shape) gives null and is drawn whole.
  */
 export function splitBlob(xml: string): BlobParts | null {
-  const open = /^<svg[^>]*>/.exec(xml)?.[0]
-  const viewBox = /viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"/.exec(open ?? '')
-  const groups = xml.match(/<g\b[^>]*>[\s\S]*?<\/g>/g)
+  const hit = lruGet(splitCache, xml)
 
-  if (!open || !viewBox || groups?.length !== 2) {
-    return null
+  if (hit !== undefined) {
+    return hit
   }
 
-  const [bodyGroup, eyeGroup] = groups as [string, string]
-  // Every number pair in the eye paths is a point (and round eyes give their centre): their vertical extent gives the eye line.
-  const number = /-?\d*\.?\d+/g
-  const pathYs = [...eyeGroup.matchAll(/\bd="([^"]*)"/g)].flatMap(match => (match[1]?.match(number) ?? []).map(Number).filter((_, index) => index % 2 === 1))
-  const centreYs = [...eyeGroup.matchAll(/\bcy="([^"]*)"/g)].map(match => Number(match[1]))
-  const ys = [...pathYs, ...centreYs].filter(Number.isFinite)
+  const compute = (): BlobParts | null => {
+    const open = /^<svg[^>]*>/.exec(xml)?.[0]
+    const viewBox = /viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"/.exec(open ?? '')
+    const groups = xml.match(/<g\b[^>]*>[\s\S]*?<\/g>/g)
 
-  if (!ys.length) {
-    return null
+    if (!open || !viewBox || groups?.length !== 2) {
+      return null
+    }
+
+    const [bodyGroup, eyeGroup] = groups as [string, string]
+    // Every number pair in the eye paths is a point (and round eyes give their centre): their vertical extent gives the eye line.
+    const number = /-?\d*\.?\d+/g
+    const pathYs = [...eyeGroup.matchAll(/\bd="([^"]*)"/g)].flatMap(match => (match[1]?.match(number) ?? []).map(Number).filter((_, index) => index % 2 === 1))
+    const centreYs = [...eyeGroup.matchAll(/\bcy="([^"]*)"/g)].map(match => Number(match[1]))
+    const ys = [...pathYs, ...centreYs].filter(Number.isFinite)
+
+    if (!ys.length) {
+      return null
+    }
+
+    const height = Number(viewBox[2])
+
+    return {
+      body: `${open}${bodyGroup}</svg>`,
+      eyes: `${open}${eyeGroup}</svg>`,
+      eyeLine: (Math.min(...ys) + Math.max(...ys)) / 2 / height,
+    }
   }
 
-  const height = Number(viewBox[2])
+  const result = compute()
+  lruSet(splitCache, xml, result)
 
-  return {
-    body: `${open}${bodyGroup}</svg>`,
-    eyes: `${open}${eyeGroup}</svg>`,
-    eyeLine: (Math.min(...ys) + Math.max(...ys)) / 2 / height,
-  }
+  return result
 }

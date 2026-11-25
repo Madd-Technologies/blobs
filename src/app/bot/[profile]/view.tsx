@@ -12,11 +12,11 @@ import { T } from '@/components/ui/T'
 import { askAboutPanel } from '@/features/dashboard/view'
 import type { View as DashboardView } from '@/lib/hermes/dashboard'
 import { useNow } from '@/lib/useNow'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { startDashboardPoll, useBotBoard, useDashboards } from '@/stores/dashboards'
 import { useWatch } from '@/stores/watch'
 import { useDrafts } from '@/stores/drafts'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 
@@ -25,7 +25,7 @@ export default function PanelFullView() {
   const { profile, id } = useLocalSearchParams<{ profile: string; id: string }>()
   const router = useRouter()
   const { c } = useTheme()
-  const bot = useBotView(profile)
+  const bot = useBotIdentity(profile)
   const board = useBotBoard(profile)
   const [pulling, setPulling] = useState(false)
   const [menu, setMenu] = useState<DashboardView | null>(null)
@@ -43,7 +43,7 @@ export default function PanelFullView() {
 
   async function onPull() {
     setPulling(true)
-    await useDashboards.getState().load(profile)
+    await useDashboards.getState().load(profile, { fresh: true })
     setPulling(false)
   }
 

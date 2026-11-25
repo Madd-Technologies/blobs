@@ -7,6 +7,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 
 import { getPushFeatures, NO_PUSH, putWatch, type PushFeatures, type WatchSet } from '@/lib/hermes/livepush'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 interface LivePushState {
   /** This install's id for the server's watch list (random, kept), so its next update replaces the last one. */
@@ -128,11 +129,6 @@ export function startWatchSync(): () => void {
   }
 
   const stopConnection = useConnection.subscribe((state, previous) => {
-    if (state.config?.baseUrl !== previous.config?.baseUrl) {
-      useLivePush.setState({ features: NO_PUSH })
-      lastSent = ''
-    }
-
     if (state.status === 'online' && previous.status !== 'online') {
       void learn()
     }
@@ -164,3 +160,13 @@ export function startWatchSync(): () => void {
     appState.remove()
   }
 }
+
+registerServerReset(() => {
+  if (pending) {
+    clearTimeout(pending)
+    pending = null
+  }
+
+  lastSent = ''
+  useLivePush.setState({ features: NO_PUSH })
+})

@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { createPresence } from '@/features/push/presence'
 import { setPushPresence } from '@/lib/hermes/push-api'
 import { useConnection } from '@/stores/connection'
+import { useExpoPush } from '@/stores/expoPush'
 import { push } from '@/stores/push'
 
 /** The session ids of the chat or room on screen right now. */
@@ -31,7 +32,7 @@ export function startPresenceSync(): () => void {
     },
   })
   const read = () => ({
-    device: push.store.getState().mine,
+    device: useExpoPush.getState().deviceId ?? push.store.getState().mine,
     online: useConnection.getState().status === 'online',
     foreground: AppState.currentState === 'active',
     sessions: useOnScreenStore.getState().sessions,
@@ -39,6 +40,7 @@ export function startPresenceSync(): () => void {
 
   presence.update(read())
   const stops = [
+    useExpoPush.subscribe(() => presence.update(read())),
     push.store.subscribe(() => presence.update(read())),
     useConnection.subscribe(() => presence.update(read())),
     useOnScreenStore.subscribe(() => presence.update(read())),

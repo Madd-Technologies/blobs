@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Modal, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 
+import mermaidAsset from '../../../assets/web/mermaid.min.txt'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { diagramKind } from '@/lib/hermes/diagram'
-import { useDiagram } from '@/stores/diagram'
+import { loadTextAsset } from '@/lib/webAsset'
+import { useDiagram } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
-/** The page that draws one diagram. `script` is Mermaid itself (about 5 MB): it is only read when a diagram is opened. */
+/** The page that draws one diagram. `script` is Mermaid itself (about 5 MB): read from the asset bundle on first open. */
 function pageFor(source: string, script: string, scheme: 'dark' | 'light', background: string, foreground: string): string {
   // The source goes in as a JSON string, so nothing in it can end the script tag or the string.
   const json = JSON.stringify(source).replace(/</g, '\\u003c')
@@ -41,26 +43,56 @@ function Page({ source }: { source: string }) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const close = useDiagram(state => state.close)
+  const [script, setScript] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [drawn, setDrawn] = useState(false)
-  // Mermaid is read here and not at the top of the file: the app does not carry its 5 MB into memory until a diagram is opened.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const html = useMemo(() => pageFor(source, (require('./mermaidHtml') as typeof import('./mermaidHtml')).MERMAID_JS, scheme, c.canvas, c.text), [source, scheme, c.canvas, c.text])
+
+  useEffect(() => {
+    let live = true
+
+    void loadTextAsset(mermaidAsset).then(
+      text => {
+        if (live) {
+          setScript(text)
+        }
+      },
+      error => {
+        if (live) {
+          setLoadError(error instanceof Error ? error.message : 'Could not load diagram renderer.')
+        }
+      },
+    )
+
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const html = useMemo(() => (script ? pageFor(source, script, scheme, c.canvas, c.text) : null), [source, script, scheme, c.canvas, c.text])
 
   return (
     <View style={[styles.screen, { backgroundColor: c.canvas }]}>
-      <WebView
-        source={{ html, baseUrl: 'about:blank' }}
-        originWhitelist={['about:*']}
-        // Nothing on the page links anywhere: a diagram that tries to leave is not followed.
-        onShouldStartLoadWithRequest={request => request.url.startsWith('about:')}
-        onMessage={() => setDrawn(true)}
-        style={[styles.web, { backgroundColor: c.canvas, marginTop: insets.top + 60 }]}
-        containerStyle={{ backgroundColor: c.canvas }}
-        scrollEnabled
-        bounces={false}
-        accessibilityLabel={`${diagramKind(source)}`}
-      />
-      {!drawn ? (
+      {html ? (
+        <WebView
+          source={{ html, baseUrl: 'about:blank' }}
+          originWhitelist={['about:*']}
+          // Nothing on the page links anywhere: a diagram that tries to leave is not followed.
+          onShouldStartLoadWithRequest={request => request.url.startsWith('about:')}
+          onMessage={() => setDrawn(true)}
+          style={[styles.web, { backgroundColor: c.canvas, marginTop: insets.top + 60 }]}
+          containerStyle={{ backgroundColor: c.canvas }}
+          scrollEnabled
+          bounces={false}
+          accessibilityLabel={`${diagramKind(source)}`}
+        />
+      ) : null}
+      {loadError ? (
+        <View style={styles.loading}>
+          <T variant="secondary" color="text2">
+            {loadError}
+          </T>
+        </View>
+      ) : !drawn ? (
         <View style={styles.loading} pointerEvents="none">
           <Spinner size={18} />
         </View>

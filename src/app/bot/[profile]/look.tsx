@@ -10,9 +10,9 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { T } from '@/components/ui/T'
 import { AVATAR_SHAPES, PROFILE_SWATCHES } from '@/lib/hermes/identity'
 import { mergeBotMeta } from '@/lib/hermes/profiles'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { saveBotMeta } from '@/stores/profiles'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 const randomSeed = () => Math.random().toString(36).slice(2, 8)
@@ -21,10 +21,10 @@ const randomSeed = () => Math.random().toString(36).slice(2, 8)
 export default function BotLook() {
   const { profile } = useLocalSearchParams<{ profile: string }>()
   const { c } = useTheme()
-  const view = useBotView(profile)
+  const bot = useBotIdentity(profile)
   // What was just picked, until the roster catches up with it.
   const [picked, setPicked] = useState<Record<string, unknown>>({})
-  const meta = mergeBotMeta(view?.meta, picked)
+  const meta = mergeBotMeta(bot?.meta, picked)
   const swatches = PROFILE_SWATCHES
 
   async function choose(patch: Record<string, unknown>) {

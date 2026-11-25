@@ -136,6 +136,27 @@ describe('the record screen', () => {
     const fields: Field[] = []
     assert.equal(historyLine({ at: now, by_kind: 'person', by: 'you', field: '_muted', old: null, new: at(2026, 10, 19, 9) }, fields, name => name).text, 'You muted it until Mon 9:00 AM')
     assert.equal(historyLine({ at: now, by_kind: 'person', by: 'you', field: '_muted', old: 1, new: null }, fields, name => name).text, 'You unmuted it')
+
+    // Sunday 10:00: "Next week" skips Monday tomorrow so it never collides with "Tomorrow morning".
+    const sunday = at(2026, 10, 18, 10)
+    assert.deepEqual(
+      mutePicks(sunday).map(pick => [pick.label, pick.note]),
+      [
+        ['In 1 hour', '11:00 AM'],
+        ['This evening', '6:00 PM'],
+        ['Tomorrow morning', 'Mon 9:00 AM'],
+        ['Next week', 'Oct 26, 9:00 AM'],
+        ['Until I unmute', ''],
+      ],
+    )
+    assert.deepEqual(
+      datePicks(sunday).map(pick => [pick.label, pick.value]),
+      [
+        ['Today', '2026-10-18'],
+        ['Tomorrow', '2026-10-19'],
+        ['Next week', '2026-10-26'],
+      ],
+    )
   })
 
   it('reads dates in full, as the design does', () => {

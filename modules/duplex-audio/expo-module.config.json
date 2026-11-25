@@ -1,5 +1,8 @@
 {
-  "platforms": ["android"],
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["DuplexAudioModule"]
+  },
   "android": {
     "modules": ["expo.modules.duplexaudio.DuplexAudioModule"]
   }

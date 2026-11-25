@@ -2,7 +2,8 @@ import { requireOptionalNativeModule } from 'expo'
 import { Linking, Platform } from 'react-native'
 
 import { appRoute, type AppRoute } from '@/features/links/apps'
-import { toast } from '@/stores/toast'
+import { openableLink } from '@/features/links/safe'
+import { toast } from '@/stores/ui'
 
 interface AppLinks {
   open(packageName: string, url: string | null): Promise<boolean>
@@ -17,13 +18,21 @@ const native = requireOptionalNativeModule<AppLinks>('AppLinks')
  * else, or an app that is not there, opens as the system decides (the browser, the dialer, the mail app).
  */
 export async function openLink(href: string): Promise<void> {
-  const route = appRoute(href)
+  // Only web pages, mails, calls and texts: never this app's own routes or another app's scheme (`features/links/safe.ts`).
+  const link = openableLink(href)
+
+  if (!link) {
+    toast('That link can’t be opened from here.')
+    return
+  }
+
+  const route = appRoute(link)
 
   if (route && (await openInApp(route))) {
     return
   }
 
-  await Linking.openURL(href.trim()).catch(() => toast('That link can’t be opened from here.'))
+  await Linking.openURL(link).catch(() => toast('That link can’t be opened from here.'))
 }
 
 async function openInApp(route: AppRoute): Promise<boolean> {

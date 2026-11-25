@@ -14,7 +14,7 @@ import { RUNS_ON_CHOICES, runsOnChange, runsOnLabel, runsOnOf, type RunsOnKind }
 import { useConnection } from '@/stores/connection'
 import { makeBot, saveRunsOn, useRunsOn } from '@/stores/profiles'
 import { useRoster } from '@/stores/roster'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

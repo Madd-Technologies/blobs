@@ -12,10 +12,10 @@ import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { groupRows, moreLabel, pageCaption } from '@/features/dashboard/page'
 import { formatTyped } from '@/features/dashboard/view'
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
 import { getViewPage, type PageRow, type Typed, type ViewPage, type ViewRow } from '@/lib/hermes/dashboard'
 import { useNow } from '@/lib/useNow'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useDashboards } from '@/stores/dashboards'
 import { useDrafts } from '@/stores/drafts'
@@ -46,7 +46,7 @@ export default function PanelPage() {
   const { profile, view, bucket, metric } = useLocalSearchParams<{ profile: string; view: string; bucket?: string; metric?: string }>()
   const router = useRouter()
   const { c } = useTheme()
-  const bot = useBotView(profile)
+  const bot = useBotIdentity(profile)
   const name = bot?.name ?? profile
   const [page, setPage] = useState<ViewPage | null>(null)
   const [rows, setRows] = useState<PageRow[]>([])

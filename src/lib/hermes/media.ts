@@ -137,6 +137,13 @@ export function imageOfResult(result: unknown): string | undefined {
 /** Whether a picture's source is an address on the web rather than a file on the server. */
 export const isRemote = (source: string): boolean => /^https?:\/\//i.test(source)
 
+/** The host of a web address, as shown before a picture from it loads ("example.com"); null for anything else. */
+export function webHost(source: string): string | null {
+  const host = /^https?:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i.exec(source.trim())?.[1]
+
+  return host ? host.toLowerCase() : null
+}
+
 /** Whether a path is a picture the app can show (the server reads others as files, which are not shown here). */
 export const isPicture = (path: string): boolean => /\.(png|jpe?g|gif|webp|bmp)$/i.test(path)
 

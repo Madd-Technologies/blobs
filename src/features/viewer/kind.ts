@@ -133,7 +133,7 @@ export function serverTarget(href: string): ServerTarget | null {
   const link = href.trim()
 
   if (/^\/api\/plugins\/[A-Za-z0-9_-]+\/\S+$/.test(link)) {
-    return { kind: 'route', href: link }
+    return pluginRoute(link) ? { kind: 'route', href: link } : null
   }
 
   const path = link.startsWith('file://') ? decodeURIComponent(link.slice('file://'.length)) : link
@@ -150,12 +150,22 @@ export function routeLinks(text: string): { label: string; href: string }[] {
   for (const match of text.matchAll(ROUTE_LINK)) {
     const [, label, href] = match as unknown as [string, string, string]
 
-    if (!found.some(link => link.href === href) && found.length < MAX_DOCUMENTS) {
+    if (pluginRoute(href) && !found.some(link => link.href === href) && found.length < MAX_DOCUMENTS) {
       found.push({ label: label.trim(), href })
     }
   }
 
   return found
+}
+
+/**
+ * Whether a plugin link stays inside its plugin: the viewer reads it with your sign-in, so a `..` segment (plain or encoded) or a
+ * backslash, which a client or server may resolve to `/api/config` or another route, is refused.
+ */
+export function pluginRoute(href: string): boolean {
+  const path = href.split(/[?#]/)[0] ?? ''
+
+  return path.startsWith('/api/plugins/') && !/\\|%5c|%2f|(^|\/)(\.|%2e){1,2}(\/|$)/i.test(path)
 }
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

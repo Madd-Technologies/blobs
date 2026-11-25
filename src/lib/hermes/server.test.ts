@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 
 import { JsonRpcGatewayClient } from './gateway-client.ts'
-import { gatewayWsUrl, HermesHttpError, normalizeBaseUrl, probeServer, restHeaders, type ServerConfig } from './server.ts'
+import { gatewayWsUrl, HermesHttpError, normalizeBaseUrl, plainOverInternet, probeServer, restHeaders, type ServerConfig } from './server.ts'
 
 const tokenConfig: ServerConfig = {
   baseUrl: 'http://127.0.0.1:9119',
@@ -13,6 +13,31 @@ describe('normalizeBaseUrl', () => {
   it('adds http:// and strips trailing slashes', () => {
     assert.equal(normalizeBaseUrl(' 192.168.1.20:9119/ '), 'http://192.168.1.20:9119')
     assert.equal(normalizeBaseUrl('https://hermes.tail.ts.net//'), 'https://hermes.tail.ts.net')
+  })
+})
+
+describe('plainOverInternet', () => {
+  it('warns for plain http to a public address', () => {
+    assert.equal(plainOverInternet('http://hermes.example.com:9119'), true)
+    assert.equal(plainOverInternet('203.0.113.7:9119'), true)
+  })
+
+  it('does not warn for https, this phone, private networks or Tailscale', () => {
+    for (const url of [
+      'https://hermes.example.com',
+      'http://127.0.0.1:9119',
+      'localhost:9119',
+      'http://192.168.1.20:9119',
+      'http://10.0.0.5:9119',
+      'http://172.20.1.1:9119',
+      'http://100.64.0.1:9119',
+      'http://home-server:9119',
+      'http://home-server.tail1234.ts.net:9119',
+      'http://home-server.local:9119',
+      'http://[::1]:9119',
+    ]) {
+      assert.equal(plainOverInternet(url), false, url)
+    }
   })
 })
 

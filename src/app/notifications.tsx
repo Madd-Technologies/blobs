@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard'
 import { useEffect, useState } from 'react'
-import { Linking, ScrollView, StyleSheet, View } from 'react-native'
+import { Linking, Platform, ScrollView, StyleSheet, View } from 'react-native'
 
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { Pill } from '@/components/ui/Pill'
@@ -8,13 +8,17 @@ import { Screen } from '@/components/ui/Screen'
 import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { Sheet } from '@/components/ui/Sheet'
 import { Spinner } from '@/components/ui/Spinner'
+import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
 import { installMessage } from '@/features/plugins/catalog'
-import type { PushLevel } from '@/lib/hermes/push-api'
+import { expoDeviceName } from '@/lib/expoPush'
+import type { PushLevel, PushSettings } from '@/lib/hermes/push-api'
 import { useBotViews } from '@/stores/bots'
 import { useNow } from '@/lib/useNow'
+import { useExpoPush } from '@/stores/expoPush'
 import { push, usePush } from '@/stores/push'
-import { toast } from '@/stores/toast'
+import { useStation } from '@/stores/station'
+import { toast } from '@/stores/ui'
 
 const NTFY_URL = 'https://play.google.com/store/apps/details?id=io.heckel.ntfy'
 
@@ -46,22 +50,233 @@ type Target = { profile: string | null; name: string }
 
 export default function Notifications() {
   const phase = usePush(state => state.phase)
+  const expoEnabled = useExpoPush(state => state.enabled)
+  const [showUnified, setShowUnified] = useState(false)
 
   useEffect(() => {
     void push.refresh()
+    void useExpoPush.getState().refresh()
+    void useStation.getState().refreshQuiet()
   }, [])
+
+  const unifiedActive = Platform.OS === 'android' && phase.kind === 'on' && !expoEnabled
 
   return (
     <Screen edges={['top', 'bottom']}>
       <ScreenHeader title="Notifications" />
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        {phase.kind === 'on' ? (
-          <On />
-        ) : (
-          <Setup />
-        )}
+        {unifiedActive ? <On /> : <ExpoPushSection />}
+        <QuietHoursSection />
+        {Platform.OS === 'android' ? (
+          <View style={styles.quietWrap}>
+            <T variant="meta" color="text2" style={styles.section}>
+              Self-hosted distributor
+            </T>
+            <GroupedList>
+              <Row
+                label="UnifiedPush (ntfy)"
+                value={phase.kind === 'on' ? 'Active' : showUnified ? 'Hide' : 'Configure'}
+                onPress={() => setShowUnified(prev => !prev)}
+              />
+            </GroupedList>
+            {showUnified && !unifiedActive ? (phase.kind === 'on' ? <On /> : <Setup />) : null}
+          </View>
+        ) : null}
       </ScrollView>
     </Screen>
+  )
+}
+
+function ExpoPushSection() {
+  const supported = useExpoPush(state => state.supported)
+  const loading = useExpoPush(state => state.loading)
+  const busy = useExpoPush(state => state.busy)
+  const enabled = useExpoPush(state => state.enabled)
+  const minimal = useExpoPush(state => state.minimal)
+  const deviceId = useExpoPush(state => state.deviceId)
+  const devices = useExpoPush(state => state.devices)
+  const settings = useExpoPush(state => state.settings)
+  const serverHasPlugin = useExpoPush(state => state.serverHasPlugin)
+  const serverSupportsExpo = useExpoPush(state => state.serverSupportsExpo)
+  const testMessage = useExpoPush(state => state.testMessage)
+  const error = useExpoPush(state => state.error)
+  const refresh = useExpoPush(state => state.refresh)
+  const enable = useExpoPush(state => state.enable)
+  const disable = useExpoPush(state => state.disable)
+  const setMinimal = useExpoPush(state => state.setMinimal)
+  const sendTest = useExpoPush(state => state.sendTest)
+  const setDefault = useExpoPush(state => state.setDefault)
+  const setLevel = useExpoPush(state => state.setLevel)
+  const nowS = useNow()
+
+  if (loading && !enabled && devices.length === 0) {
+    return (
+      <View style={styles.center}>
+        <Spinner size={16} />
+      </View>
+    )
+  }
+
+  if (!supported) {
+    return (
+      <Message
+        title="Notifications need a mobile build"
+        body="Install Blobs from TestFlight, the App Store, or Google Play to enable push notifications."
+      />
+    )
+  }
+
+  if (!enabled && serverHasPlugin === false) {
+    return (
+      <Message
+        title="Your server can’t send notifications yet"
+        body="Hermes sends notifications through the Blobs plugin (hermes-bot-mobile). Copy the setup message and paste it to your bot, then restart Hermes and check again."
+      >
+        <Pill
+          label="Copy setup message"
+          icon="copy"
+          variant="primary"
+          onPress={() => {
+            void Clipboard.setStringAsync(installMessage(['hermes-bot-mobile']))
+            toast('Copied. Paste it to your Hermes bot, then restart Hermes when it’s done.')
+          }}
+        />
+        <Pill label="Check again" onPress={() => void refresh()} />
+      </Message>
+    )
+  }
+
+  if (!enabled && serverSupportsExpo === false) {
+    return (
+      <Message
+        title="Update your server plugin"
+        body="Cross-platform notifications require hermes-bot-mobile 0.5.0 or newer. Copy the update message and paste it to your bot, then restart Hermes."
+      >
+        <Pill
+          label="Copy update message"
+          icon="copy"
+          variant="primary"
+          onPress={() => {
+            void Clipboard.setStringAsync(installMessage(['hermes-bot-mobile']))
+            toast('Copied. Paste it to your Hermes bot, then restart Hermes when it’s done.')
+          }}
+        />
+        <Pill label="Check again" onPress={() => void refresh()} />
+      </Message>
+    )
+  }
+
+  if (!enabled) {
+    return (
+      <Message
+        title="Know when a bot needs you"
+        body="Get alerts with one-tap Allow and Deny buttons when a bot is waiting on you, even when Blobs is closed."
+      >
+        {error ? (
+          <T variant="label" color="danger" style={styles.centered}>
+            {error}
+          </T>
+        ) : null}
+        <Pill label="Turn on notifications" variant="primary" height={52} loading={busy} onPress={() => void enable()} />
+      </Message>
+    )
+  }
+
+  const device = devices.find(row => row.id === deviceId)
+  const lastPush = device?.last_error ? 'Last push failed' : device?.last_ok ? `Delivered ${since(device.last_ok, nowS)}` : 'Nothing sent yet'
+
+  return (
+    <View style={styles.stack}>
+      <GroupedList>
+        <Row label="This device" value={device?.name || expoDeviceName()} chevron={false} />
+        <Row label="Delivery" value={lastPush} chevron={false} />
+        <Row label="Send a test" onPress={() => void sendTest()} />
+        <Row
+          label="Hide message previews"
+          right={<Switch value={minimal} onValueChange={next => void setMinimal(next).then(err => err && toast(err))} label="Hide message previews" />}
+        />
+      </GroupedList>
+      <T variant="label" color="text2" style={styles.note}>
+        When on, push alerts say only “Needs your OK” or “New message” so bot text never touches push servers.
+      </T>
+      {testMessage ? (
+        <T variant="label" color={testMessage.ok ? 'text2' : 'danger'} style={styles.note}>
+          {testMessage.text}
+        </T>
+      ) : null}
+      <BotLevelsSection settings={settings} onSetDefault={setDefault} onSetBot={setLevel} />
+      <GroupedList>
+        <Row label="Turn off notifications" destructive onPress={() => void disable()} />
+      </GroupedList>
+    </View>
+  )
+}
+
+const QUIET_PRESETS = [
+  { start: '22:00', end: '07:00', label: '22:00 – 07:00' },
+  { start: '21:00', end: '07:00', label: '21:00 – 07:00' },
+  { start: '23:00', end: '08:00', label: '23:00 – 08:00' },
+  { start: '00:00', end: '08:00', label: '00:00 – 08:00' },
+]
+
+function QuietHoursSection() {
+  const quiet = useStation(state => state.quiet)
+  const updateQuiet = useStation(state => state.updateQuiet)
+  const silenceFor = useStation(state => state.silenceFor)
+  const nowS = useNow(60)
+  const [pickSchedule, setPickSchedule] = useState(false)
+
+  if (!quiet) {
+    return null
+  }
+
+  const silenced = (quiet.muted_until ?? 0) > nowS
+
+  async function save(patch: Parameters<typeof updateQuiet>[0]) {
+    const error = await updateQuiet(patch)
+    if (error) toast(error)
+  }
+
+  return (
+    <View style={styles.quietWrap}>
+      <T variant="meta" color="text2" style={styles.section}>
+        Quiet hours
+      </T>
+      <GroupedList>
+        <Row
+          label="Quiet schedule"
+          right={<Switch value={quiet.enabled} onValueChange={enabled => void save({ enabled })} label="Quiet schedule" />}
+        />
+        <Row label="Hours" value={`${quiet.start} – ${quiet.end}`} onPress={() => setPickSchedule(true)} />
+        <Row
+          label="Allow urgent approvals"
+          right={<Switch value={quiet.allow_urgent} onValueChange={allow_urgent => void save({ allow_urgent })} label="Allow urgent approvals" />}
+        />
+        <Row
+          label={silenced ? 'Clear temporary silence' : 'Silence for 1 hour'}
+          value={silenced && quiet.muted_until ? `Until ${new Date(quiet.muted_until * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : undefined}
+          chevron={false}
+          onPress={() => void (silenced ? silenceFor(0) : silenceFor(3600)).then(err => err && toast(err))}
+        />
+      </GroupedList>
+
+      <Sheet visible={pickSchedule} onClose={() => setPickSchedule(false)} label="Quiet hours schedule">
+        <GroupedList>
+          {QUIET_PRESETS.map(preset => (
+            <Row
+              key={preset.label}
+              label={preset.label}
+              chevron={false}
+              value={quiet.start === preset.start && quiet.end === preset.end ? 'Selected' : undefined}
+              onPress={() => {
+                setPickSchedule(false)
+                void save({ start: preset.start, end: preset.end, enabled: true })
+              }}
+            />
+          ))}
+        </GroupedList>
+      </Sheet>
+    </View>
   )
 }
 
@@ -165,19 +380,66 @@ function Message({ title, body, children }: { title: string; body: string; child
   )
 }
 
+function BotLevelsSection({
+  settings,
+  onSetDefault,
+  onSetBot,
+}: {
+  settings: PushSettings
+  onSetDefault: (level: PushLevel) => void | Promise<void>
+  onSetBot: (profile: string, level: PushLevel) => void | Promise<void>
+}) {
+  const views = useBotViews({ includeHidden: true })
+  const [target, setTarget] = useState<Target | null>(null)
+  const current = (profile: string | null): PushLevel => (profile ? (settings.bots[profile] ?? settings.default) : settings.default)
+
+  return (
+    <>
+      <T variant="meta" color="text2" style={styles.section}>
+        How much each bot may tell you
+      </T>
+      <GroupedList>
+        <Row label="Everyone else" value={levelLabel(settings.default)} onPress={() => setTarget({ profile: null, name: 'Everyone else' })} />
+        {views.map(view => (
+          <Row key={view.profile} label={view.name} value={levelLabel(current(view.profile))} onPress={() => setTarget({ profile: view.profile, name: view.name })} />
+        ))}
+      </GroupedList>
+
+      <Sheet visible={target !== null} onClose={() => setTarget(null)} label={target ? `${target.name} notifications` : 'Notifications'}>
+        <GroupedList>
+          {LEVELS.map(option => (
+            <Row
+              key={option.value}
+              label={option.label}
+              value={target && current(target.profile) === option.value ? 'Selected' : undefined}
+              chevron={false}
+              onPress={() => {
+                if (target) {
+                  void (target.profile ? onSetBot(target.profile, option.value) : onSetDefault(option.value))
+                }
+
+                setTarget(null)
+              }}
+            />
+          ))}
+        </GroupedList>
+        <T variant="label" color="text2" style={styles.hints}>
+          {LEVELS.map(option => `${option.label}: ${option.hint}`).join('\n')}
+        </T>
+      </Sheet>
+    </>
+  )
+}
+
 function On() {
   const devices = usePush(state => state.devices)
   const mine = usePush(state => state.mine)
   const settings = usePush(state => state.settings)
   const test = usePush(state => state.test)
-  const views = useBotViews({ includeHidden: true })
-  const [target, setTarget] = useState<Target | null>(null)
   const device = devices.find(row => row.id === mine)
   const nowS = useNow()
 
   const lastPush = device?.last_error ? 'Last push failed' : device?.last_ok ? `Delivered ${since(device.last_ok, nowS)}` : 'Nothing sent yet'
-
-  const current = (profile: string | null): PushLevel => (profile ? (settings.bots[profile] ?? settings.default) : settings.default)
 
   return (
     <View style={styles.stack}>
@@ -192,42 +454,15 @@ function On() {
         </T>
       ) : null}
 
-      <T variant="meta" color="text2" style={styles.section}>
-        How much each bot may tell you
-      </T>
-      <GroupedList>
-        <Row label="Everyone else" value={levelLabel(settings.default)} onPress={() => setTarget({ profile: null, name: 'Everyone else' })} />
-        {views.map(view => (
-          <Row key={view.profile} label={view.name} value={levelLabel(current(view.profile))} onPress={() => setTarget({ profile: view.profile, name: view.name })} />
-        ))}
-      </GroupedList>
+      <BotLevelsSection
+        settings={settings}
+        onSetDefault={level => push.setDefault(level)}
+        onSetBot={(profile, level) => push.setLevel(profile, level)}
+      />
 
       <GroupedList>
         <Row label="Turn off notifications" destructive onPress={() => void push.disable()} />
       </GroupedList>
-
-      <Sheet visible={target !== null} onClose={() => setTarget(null)} label={target ? `${target.name} notifications` : 'Notifications'}>
-        <GroupedList>
-          {LEVELS.map(option => (
-            <Row
-              key={option.value}
-              label={option.label}
-              value={target && current(target.profile) === option.value ? 'Selected' : undefined}
-              chevron={false}
-              onPress={() => {
-                if (target) {
-                  void (target.profile ? push.setLevel(target.profile, option.value) : push.setDefault(option.value))
-                }
-
-                setTarget(null)
-              }}
-            />
-          ))}
-        </GroupedList>
-        <T variant="label" color="text2" style={styles.hints}>
-          {LEVELS.map(option => `${option.label}: ${option.hint}`).join('\n')}
-        </T>
-      </Sheet>
     </View>
   )
 }
@@ -242,5 +477,6 @@ const styles = StyleSheet.create({
   lead: { textAlign: 'center', paddingTop: 4 },
   note: { paddingHorizontal: 4, marginTop: -8 },
   section: { paddingHorizontal: 4, paddingTop: 8, marginBottom: -8 },
+  quietWrap: { marginTop: 24, gap: 16 },
   hints: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
 })

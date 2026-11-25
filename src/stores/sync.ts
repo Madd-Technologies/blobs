@@ -1,12 +1,15 @@
 import { startDashboardsSync } from '@/stores/dashboards'
 import { inbox, startInboxSync } from '@/stores/inbox'
+import { startLiveStationSync } from '@/stores/liveStation'
 import { startPhoneSync } from '@/stores/phone'
 import { startPresenceSync } from '@/stores/presence'
+import { startExpoPushSync } from '@/stores/expoPush'
 import { startPushSync } from '@/stores/push'
 import { startRestartSync } from '@/stores/restart'
 import { startRoomsSync } from '@/stores/rooms'
 import { startRosterSync, useRoster } from '@/stores/roster'
 import { useSeen } from '@/stores/seen'
+import { startStationSync } from '@/stores/station'
 import { startVisibleSync } from '@/stores/visible'
 import { sessions, startLastChatSync } from '@/stores/sessions'
 import { useConnection } from '@/stores/connection'
@@ -18,17 +21,34 @@ import { startWatchSync } from '@/stores/watch'
  * that stops it.
  */
 export function startSessionSync(): () => void {
-  const stopRoster = startRosterSync()
-  const stopInbox = startInboxSync()
-  const stopRooms = startRoomsSync()
-  const stopDashboards = startDashboardsSync()
-  const stopPhone = startPhoneSync()
-  const stopVisible = startVisibleSync()
-  const stopPush = startPushSync()
-  const stopPresence = startPresenceSync()
-  const stopLastChat = startLastChatSync()
-  const stopRestart = startRestartSync()
-  const stopWatch = startWatchSync()
+  let stopped = false
+  const stops: (() => void)[] = [
+    startRosterSync(),
+    startInboxSync(),
+    startVisibleSync(),
+    startWatchSync(),
+    startLastChatSync(),
+  ]
+  const timers: ReturnType<typeof setTimeout>[] = []
+
+  const defer = (delayMs: number, starts: (() => () => void)[]) => {
+    timers.push(
+      setTimeout(() => {
+        if (stopped) {
+          return
+        }
+
+        for (const start of starts) {
+          stops.push(start())
+        }
+      }, delayMs),
+    )
+  }
+
+  // Stagger secondary sync subsystems so initial roster + needs-you reads aren't crowded out on cold start.
+  defer(350, [startDashboardsSync, startRoomsSync])
+  defer(850, [startPhoneSync, startPushSync, startExpoPushSync, startPresenceSync, startRestartSync, startStationSync, startLiveStationSync])
+
   let generation = useConnection.getState().generation
 
   const stopConnection = useConnection.subscribe(state => {
@@ -49,17 +69,9 @@ export function startSessionSync(): () => void {
   const stopHydration = useSeen.persist.onFinishHydration(seed)
 
   return () => {
-    stopRoster()
-    stopInbox()
-    stopRooms()
-    stopDashboards()
-    stopPhone()
-    stopVisible()
-    stopPush()
-    stopPresence()
-    stopLastChat()
-    stopRestart()
-    stopWatch()
+    stopped = true
+    timers.forEach(clearTimeout)
+    stops.forEach(stop => stop())
     stopConnection()
     stopSeed()
     stopHydration()

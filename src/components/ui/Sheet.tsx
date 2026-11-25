@@ -58,10 +58,12 @@ export function Sheet({ visible, onClose, children, label, avoidKeyboard = false
     .activeOffsetY(12)
     .failOffsetX([-20, 20])
     .onUpdate(event => {
+      'worklet'
       // Down follows the finger; up gives a little, like paper held at the edge.
       drag.set(event.translationY > 0 ? event.translationY : event.translationY * 0.12)
     })
     .onEnd(event => {
+      'worklet'
       if (event.velocityY > motion.flingClose || drag.get() > panelHeight.get() * 0.4) {
         runOnJS(haptic)('gestureEnd')
         runOnJS(onClose)()
@@ -87,6 +89,7 @@ export function Sheet({ visible, onClose, children, label, avoidKeyboard = false
             <Animated.View
               accessibilityViewIsModal
               accessibilityLabel={label}
+              onAccessibilityEscape={onClose}
               onLayout={event => {
                 panelHeight.set(event.nativeEvent.layout.height)
               }}

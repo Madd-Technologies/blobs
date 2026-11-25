@@ -15,14 +15,15 @@ import { ConfirmSheet } from '@/components/ui/ConfirmSheet'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
+import { SkeletonChat } from '@/components/ui/Skeleton'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { callingErrand, errandsForChat, placeErrands, type Placed } from '@/features/phone/view'
-import type { BotView } from '@/features/roster/view'
+import { botLastActive, type Attention } from '@/features/attention/derive'
+import type { ProfileRow } from '@/lib/hermes/protocol'
 import type { BotSession } from '@/features/sessions/store'
 import { pendingPrompts } from '@/features/transcript/reduce'
 import { buildDisplay, type DisplayItem } from '@/features/transcript/display'
-import { botLastActive } from '@/features/attention/derive'
 import { runningLine } from '@/features/transcript/display'
 import { jobsLine, runningJobs } from '@/features/transcript/jobs'
 import { ageLabel } from '@/features/roster/derive'
@@ -34,19 +35,19 @@ import { canCall } from '@/lib/duplexAudio'
 import { useNow, useNowMs } from '@/lib/useNow'
 import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useViewableRows } from '@/lib/useViewableRows'
-import { useBotView, useFaceColor } from '@/stores/bots'
+import { useBotIdentity, useFaceColor } from '@/stores/bots'
 import { useCall } from '@/stores/call'
 import { useCommands } from '@/stores/commands'
 import { useConnection } from '@/stores/connection'
 import { useSpeech } from '@/stores/speech'
 import { useDrafts } from '@/stores/drafts'
-import { useOpenChat } from '@/stores/inbox'
+import { useBotAttention, useOpenChat } from '@/stores/inbox'
 import { usePhone } from '@/stores/phone'
 import { usePrefs } from '@/stores/prefs'
 import { useSeen } from '@/stores/seen'
 import { useOnScreen } from '@/stores/presence'
 import { sessions, useBotSession, useChosenChat } from '@/stores/sessions'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useVoice } from '@/stores/voice'
 import { BotTint } from '@/theme/ThemeProvider'
 
@@ -54,7 +55,7 @@ import { BotTint } from '@/theme/ThemeProvider'
  * The quiet line under the bot's name. Once the chat is open its own transcript is the truth about
  * what the bot is doing; the polled status (which lags by seconds) only fills in before that.
  */
-function statusLine(view: BotView | undefined, session: BotSession | undefined, nowS: number, jobNowMs: number): string {
+function statusLine(view: { row: ProfileRow; attention: Attention } | undefined, session: BotSession | undefined, nowS: number, jobNowMs: number): string {
   const transcript = session?.phase === 'ready' ? session.transcript : undefined
 
   if (transcript) {
@@ -103,7 +104,12 @@ export default function BotChat() {
   const { profile, chat } = useLocalSearchParams<{ profile: string; chat?: string }>()
   const router = useRouter()
   const openedByLink = useRef(!!chat)
-  const view = useBotView(profile)
+  const identity = useBotIdentity(profile)
+  const attention = useBotAttention(profile)
+  const view = useMemo(
+    () => (identity ? { ...identity, attention: attention ?? { state: 'idle' as const, unread: false } } : undefined),
+    [identity, attention],
+  )
   const session = useBotSession(profile)
   const chosen = useChosenChat(profile)
   const draft = useDrafts(state => state.byBot[profile])
@@ -130,10 +136,10 @@ export default function BotChat() {
       if (!usePrefs.getState().reopenLast[profile]) {
         sessions.leaveSide(profile)
       }
-
-      useDrafts.getState().clear(profile)
     }
   }, [profile, setOpen])
+
+  const saveDraft = useCallback((value: string) => useDrafts.getState().save(profile, value), [profile])
 
   // The chat a link names, also when one arrives while this bot is already on screen. The parameter is cleared after, so the
   // same notification works again once you have moved to another chat.
@@ -279,7 +285,9 @@ export default function BotChat() {
     setReplyTo(null)
     jumpToLatest()
 
-    if (!(await sessions.send(profile, replying ? withReply(replying.text, text) : text, sending))) {
+    if (await sessions.send(profile, replying ? withReply(replying.text, text) : text, sending)) {
+      useDrafts.getState().clear(profile)
+    } else {
       setFiles(sending)
       setReplyTo(replying)
 
@@ -297,6 +305,8 @@ export default function BotChat() {
       useDrafts.getState().set(profile, text)
     } else if (outcome.prefill) {
       useDrafts.getState().set(profile, outcome.prefill)
+    } else {
+      useDrafts.getState().clear(profile)
     }
   }
 
@@ -407,9 +417,7 @@ export default function BotChat() {
 
         <KeyboardAvoidingView style={styles.fill} behavior="padding">
           {opening ? (
-            <View style={styles.center}>
-              <Spinner size={18} />
-            </View>
+            <SkeletonChat />
           ) : failed ? (
             <View style={styles.center}>
               <T variant="secondary" color="text2" style={styles.centered}>
@@ -475,7 +483,7 @@ export default function BotChat() {
           {callHere ? (
             <CallBar profile={profile} botName={name} meta={view?.meta} call={callHere} waiting={!!transcript && pendingPrompts(transcript).length > 0} onOpen={openCall} />
           ) : (
-            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} above={
+            <Composer key={draft?.nonce ?? 0} botName={name} running={!!transcript?.running} initialText={draft?.text} autoFocus={(draft?.nonce ?? 0) > 0} onDraftChange={saveDraft} files={files} onFilesChange={setFiles} voiceProfile={profile} onCall={callable ? startCall : undefined} commands={commands?.options} above={
                 replyTo || calling ? (
                   <>
                     {replyTo ? <ReplyStrip who={replyTo.who} text={replyTo.text} onCancel={() => setReplyTo(null)} /> : null}

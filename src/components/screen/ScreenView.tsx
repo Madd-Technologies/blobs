@@ -1,10 +1,10 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 
+import novncAsset from '../../../assets/web/novnc.html'
 import { parseViewerMessage, type ViewerEvent } from '@/features/display/viewer'
-
-import { NOVNC_HTML } from './novncHtml'
+import { loadTextAsset } from '@/lib/webAsset'
 
 export interface ScreenViewHandle {
   /** Open the display websocket. The URL carries a single-use ticket: never log it. */
@@ -28,7 +28,35 @@ interface Props {
 /** noVNC in a WebView, driven by messages. The page posts `ready` once it can take commands. */
 export const ScreenView = forwardRef<ScreenViewHandle, Props>(function ScreenView({ baseUrl, onEvent, style }, ref) {
   const web = useRef<WebView>(null)
-  const source = useMemo(() => ({ html: NOVNC_HTML, baseUrl }), [baseUrl])
+  const [html, setHtml] = useState<string | null>(null)
+  const onEventRef = useRef(onEvent)
+
+  useEffect(() => {
+    onEventRef.current = onEvent
+  }, [onEvent])
+
+  useEffect(() => {
+    let live = true
+
+    void loadTextAsset(novncAsset).then(
+      text => {
+        if (live) {
+          setHtml(text)
+        }
+      },
+      error => {
+        if (live) {
+          onEventRef.current({ type: 'error', message: error instanceof Error ? error.message : 'Could not load screen viewer.' })
+        }
+      },
+    )
+
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const source = useMemo(() => (html ? { html, baseUrl } : null), [html, baseUrl])
 
   function send(message: Record<string, unknown>) {
     // The page defines `__rn` when its script has loaded; a command sent before that is dropped, not an error.
@@ -54,24 +82,26 @@ export const ScreenView = forwardRef<ScreenViewHandle, Props>(function ScreenVie
 
   return (
     <View style={[styles.fill, style]}>
-      <WebView
-        ref={web}
-        source={source}
-        originWhitelist={['*']}
-        onMessage={onMessage}
-        // The page is loaded once and kept: it holds the connection. If iOS kills its process (memory), load it
-        // again; it posts `ready` and the caller redials.
-        onContentProcessDidTerminate={() => web.current?.reload()}
-        javaScriptEnabled
-        scrollEnabled={false}
-        bounces={false}
-        overScrollMode="never"
-        setSupportMultipleWindows={false}
-        automaticallyAdjustContentInsets={false}
-        contentInsetAdjustmentBehavior="never"
-        hideKeyboardAccessoryView
-        style={styles.web}
-      />
+      {source ? (
+        <WebView
+          ref={web}
+          source={source}
+          originWhitelist={['*']}
+          onMessage={onMessage}
+          // The page is loaded once and kept: it holds the connection. If iOS kills its process (memory), load it
+          // again; it posts `ready` and the caller redials.
+          onContentProcessDidTerminate={() => web.current?.reload()}
+          javaScriptEnabled
+          scrollEnabled={false}
+          bounces={false}
+          overScrollMode="never"
+          setSupportMultipleWindows={false}
+          automaticallyAdjustContentInsets={false}
+          contentInsetAdjustmentBehavior="never"
+          hideKeyboardAccessoryView
+          style={styles.web}
+        />
+      ) : null}
     </View>
   )
 })

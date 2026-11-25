@@ -4,7 +4,7 @@ import { MuteSheet } from '@/components/dashboard/MuteSheet'
 import { formatTyped, untilLabel } from '@/features/dashboard/view'
 import type { ViewRow } from '@/lib/hermes/dashboard'
 import { useDashboards } from '@/stores/dashboards'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 /**
  * What a swipe on a record's row does, the same on a dashboard, a full view and Needs you (which lists several bots, so each

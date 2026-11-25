@@ -2,7 +2,7 @@ import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, 
 import { readAsStringAsync } from 'expo-file-system/legacy'
 import { useCallback, useEffect, useState } from 'react'
 
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
 import { transcribeRecording } from '@/lib/hermes/audio'
 import { useConnection } from '@/stores/connection'
 

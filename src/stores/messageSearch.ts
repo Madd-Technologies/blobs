@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 import { mergeHits, searchSessions, type SessionHit } from '@/lib/hermes/search'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 /** One slow bot must not hold up the rest. */
 const PER_BOT_TIMEOUT_MS = 8000
@@ -67,3 +68,7 @@ export const useMessageSearch = create<MessageSearchState>(set => ({
     set({ hits: [], forQuery: '', searching: false, error: null })
   },
 }))
+
+registerServerReset(() => {
+  useMessageSearch.getState().clear()
+})

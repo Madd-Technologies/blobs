@@ -1,0 +1,110 @@
+services:
+  hermes-demo:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+    environment:
+      DEMO_PUBLIC_URL: ${DEMO_PUBLIC_URL:-https://demo.blobs.maddtechnologies.com}
+      DEMO_TRUSTED_PROXIES: ${DEMO_TRUSTED_PROXIES:-172.30.0.0/24}
+      DEMO_USERNAME: ${DEMO_USERNAME:-demo}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-}
+      DEMO_AUTH_SECRET: ${DEMO_AUTH_SECRET:-}
+      DEMO_RESET_ON_START: ${DEMO_RESET_ON_START:-0}
+    volumes:
+      - demo-data:/data
+    networks:
+      - demo-internal
+    shm_size: 512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: 2.0
+    mem_limit: 2560m
+    pids_limit: 256
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9219/api/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    # Uncomment for local smoke-testing on Hydra only (never bind 0.0.0.0):
+    # ports:
+    #   - "127.0.0.1:9219:8080"
+    networks:
+      - edge-net
+      - demo-internal
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 64
+    depends_on:
+      hermes-demo:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    networks:
+      - edge-net
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 64
+    depends_on:
+      nginx:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  demo-internal:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  edge-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+
+volumes:
+  demo-data:

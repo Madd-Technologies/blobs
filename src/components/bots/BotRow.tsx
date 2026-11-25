@@ -12,11 +12,12 @@ import { BotFace } from './BotFace'
 
 interface Props {
   view: BotView
-  onPress: () => void
+  onOpen: (profile: string) => void
+  onLongPress?: (view: BotView) => void
 }
 
 /** One bot in the list: face, name, one line of what is going on, age, and amber if it needs you. */
-export const BotRow = memo(function BotRow({ view, onPress }: Props) {
+export const BotRow = memo(function BotRow({ view, onOpen, onLongPress }: Props) {
   const { c } = useTheme()
   const needsYou = view.attention.state === 'needsYou'
   // The face squishes as you press the row.
@@ -26,7 +27,8 @@ export const BotRow = memo(function BotRow({ view, onPress }: Props) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${view.name}. ${needsYou ? 'Needs you. ' : ''}${view.preview}`}
-      onPress={onPress}
+      onPress={() => onOpen(view.profile)}
+      onLongPress={onLongPress ? () => onLongPress(view) : undefined}
       onPressIn={() => setPoke(count => count + 1)}
       style={({ pressed }) => [styles.row, { backgroundColor: pressed ? c.tone : 'transparent' }]}
     >

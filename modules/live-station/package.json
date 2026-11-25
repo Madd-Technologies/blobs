@@ -1,0 +1,6 @@
+{
+  "name": "live-station",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Home Screen Widget snapshot bridge and ActivityKit Live Activity updates for Blobs on iOS."
+}

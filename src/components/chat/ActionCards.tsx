@@ -12,7 +12,7 @@ import type { ClarifyAnswer, RespondResult } from '@/features/sessions/store'
 import type { PromptState } from '@/features/transcript/types'
 import { haptic } from '@/lib/haptics'
 import type { ApprovalChoice, ClarifyQuestion } from '@/lib/hermes/protocol'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

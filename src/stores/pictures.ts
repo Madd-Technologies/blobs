@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { fetchPicture, viewError } from '@/lib/hermes/media'
 import { createLimiter, createWants, evictions, MAX_CACHED_CHARS } from '@/lib/hermes/pictureCache'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 type Entry =
   | { status: 'loading' }
@@ -49,12 +50,16 @@ export const usePictures = create<PicturesState>((set, get) => {
     try {
       const url = await limit(() => {
         // Its turn came, but nobody is looking any more (it scrolled away while waiting): do not download it.
-        if (!wants.isWanted(key)) {
+        if (!wants.isWanted(key) || useConnection.getState().config?.baseUrl !== config.baseUrl) {
           throw new Unwanted()
         }
 
         return fetchPicture(config, path, profile)
       })
+
+      if (useConnection.getState().config?.baseUrl !== config.baseUrl) {
+        return
+      }
 
       set(state => {
         const next = { ...state.byKey, [key]: { status: 'ready' as const, url, size: url.length, used: ++clock } }
@@ -109,4 +114,9 @@ export const usePictures = create<PicturesState>((set, get) => {
       }
     },
   }
+})
+
+registerServerReset(() => {
+  wants.clear()
+  usePictures.setState({ byKey: {} })
 })

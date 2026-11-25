@@ -13,18 +13,18 @@ import { RoomFaces } from './RoomFaces'
 interface Props {
   view: RoomView
   metas: Record<string, BotMeta | undefined>
-  onPress: () => void
+  onOpen: (id: string) => void
 }
 
 /** One room in the Home list: its members' faces, name, the last thing said, age, and amber if it needs you. */
-export const RoomRow = memo(function RoomRow({ view, metas, onPress }: Props) {
+export const RoomRow = memo(function RoomRow({ view, metas, onOpen }: Props) {
   const { c } = useTheme()
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${view.name}, a room. ${view.needsYou ? 'Needs you. ' : ''}${view.preview}`}
-      onPress={onPress}
+      onPress={() => onOpen(view.id)}
       style={({ pressed }) => [styles.row, { backgroundColor: pressed ? c.tone : 'transparent' }]}
     >
       <RoomFaces members={view.data.room.members} metas={metas} variant="row" ring={c.sheet} />

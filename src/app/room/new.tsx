@@ -11,7 +11,7 @@ import { T } from '@/components/ui/T'
 import { buildMembers, MAX_MEMBERS, MIN_MEMBERS, nameList } from '@/lib/hermes/rooms'
 import { useBotViews } from '@/stores/bots'
 import { makeRoom, useRooms } from '@/stores/rooms'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

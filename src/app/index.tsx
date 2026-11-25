@@ -1,22 +1,30 @@
 import Feather from '@expo/vector-icons/Feather'
 import { useRouter } from 'expo-router'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, RefreshControl, StyleSheet, TextInput, View } from 'react-native'
+import { useStore } from 'zustand'
 
 import { BotRow } from '@/components/bots/BotRow'
 import { DashboardStrip } from '@/components/bots/DashboardStrip'
 import { HitRow } from '@/components/bots/HitRow'
+import { InFlightStrip } from '@/components/bots/InFlightStrip'
 import { NeedsYouSheet } from '@/components/bots/NeedsYouSheet'
 import { RoomRow } from '@/components/rooms/RoomRow'
+import { BriefingCard } from '@/components/station/BriefingCard'
+import { CommandPalette } from '@/components/station/CommandPalette'
+import { FleetBanner } from '@/components/station/FleetBanner'
 import { GroupedList, Row } from '@/components/ui/GroupedList'
 import { IconCircle } from '@/components/ui/IconCircle'
 import { Pill } from '@/components/ui/Pill'
+import { Press } from '@/components/ui/Press'
 import { Screen } from '@/components/ui/Screen'
 import { Sheet } from '@/components/ui/Sheet'
+import { SkeletonRows } from '@/components/ui/Skeleton'
 import { T } from '@/components/ui/T'
 import { roomMatches, type RoomView } from '@/features/rooms/view'
 import { ageLabel, filterRoster } from '@/features/roster/derive'
 import { homeList } from '@/features/roster/home'
+import { deriveInFlight, type InFlightItem } from '@/features/roster/inflight'
 import type { BotView } from '@/features/roster/view'
 import { isMainChat, type SessionHit } from '@/lib/hermes/search'
 import { holdOrder } from '@/lib/holdOrder'
@@ -25,9 +33,15 @@ import { useBotMetas, useBotViews } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useDashboards } from '@/stores/dashboards'
 import { useDeck } from '@/stores/deck'
+import { inbox } from '@/stores/inbox'
 import { useMessageSearch } from '@/stores/messageSearch'
+import { usePhone } from '@/stores/phone'
+import { saveBotMeta } from '@/stores/profiles'
 import { useRoomViews, useRooms } from '@/stores/rooms'
 import { useRoster } from '@/stores/roster'
+import { sessions } from '@/stores/sessions'
+import { useStation } from '@/stores/station'
+import { toast } from '@/stores/ui'
 import { useWatch } from '@/stores/watch'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
@@ -57,10 +71,19 @@ export default function Home() {
   const dashboardNeeds = useMemo(() => Object.fromEntries(Object.entries(dashboardSummary).map(([profile, entry]) => [profile, entry.needs_you])), [dashboardSummary])
   const metas = useBotMetas()
   const deck = useDeck()
+  const errands = usePhone(state => state.errands)
+  const botSessions = useStore(sessions.store, state => state.bots)
+  const background = useStore(inbox.store, state => state.background)
+  const inFlight = useMemo(
+    () => deriveInFlight({ views, rooms: roomViews, errands, sessions: botSessions, background }),
+    [views, roomViews, errands, botSessions, background],
+  )
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [pulling, setPulling] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [quickBot, setQuickBot] = useState<BotView | null>(null)
   const nowS = useNow(60)
   const hits = useMessageSearch(state => state.hits)
   const messagesSearching = useMessageSearch(state => state.searching)
@@ -165,22 +188,37 @@ export default function Home() {
   }, [dashboardKey])
   const needsYou = views.filter(view => view.attention.state === 'needsYou')
   const roomsNeedYou = roomViews.filter(view => view.needsYou)
-  const open = (profile: string) => router.push({ pathname: '/bot/[profile]', params: { profile } })
+  const open = useCallback((profile: string) => router.push({ pathname: '/bot/[profile]', params: { profile } }), [router])
   // A pinned bot opens its dashboard where the server has hermes-dashboard; elsewhere its chat, as before.
-  const openPinned = (profile: string) => (dashboardsReady ? router.push({ pathname: '/bot/[profile]/dashboard', params: { profile } }) : open(profile))
-  const openRoom = (id: string) => router.push({ pathname: '/room/[id]', params: { id } })
+  const openPinned = useCallback((profile: string) => (dashboardsReady ? router.push({ pathname: '/bot/[profile]/dashboard', params: { profile } }) : open(profile)), [dashboardsReady, router, open])
+  const openRoom = useCallback((id: string) => router.push({ pathname: '/room/[id]', params: { id } }), [router])
+  const openInFlight = useCallback(
+    (item: InFlightItem) => {
+      if (item.kind === 'errand') {
+        router.push({ pathname: '/bot/[profile]/errand', params: { profile: item.profile, id: item.errandId } })
+      } else if (item.kind === 'room') {
+        openRoom(item.roomId)
+      } else {
+        open(item.profile)
+      }
+    },
+    [open, openRoom, router],
+  )
 
   // A message found in a bot's main chat opens the bot as it always does. One in any other chat opens to read, because the
   // server will not hand every old chat back to a phone to write in (a Kanban worker's transcript, for one).
-  function openHit(hit: SessionHit) {
-    const canonical = useRoster.getState().rows.find(row => row.name === hit.profile)?.canonical_session
+  const openHit = useCallback(
+    (hit: SessionHit) => {
+      const canonical = useRoster.getState().rows.find(row => row.name === hit.profile)?.canonical_session
 
-    if (isMainChat(hit, canonical)) {
-      open(hit.profile)
-    } else {
-      router.push({ pathname: '/bot/[profile]/past', params: { profile: hit.profile, session: hit.sessionId, title: hit.title } })
-    }
-  }
+      if (isMainChat(hit, canonical)) {
+        open(hit.profile)
+      } else {
+        router.push({ pathname: '/bot/[profile]/past', params: { profile: hit.profile, session: hit.sessionId, title: hit.title } })
+      }
+    },
+    [open, router],
+  )
 
   // Things on bots' dashboards that need you count too, and name their bot once.
   const dashboardNames = views.filter(view => (dashboardNeeds[view.profile] ?? 0) > 0 && view.attention.state !== 'needsYou').map(view => view.name)
@@ -189,26 +227,25 @@ export default function Home() {
 
   async function onPull() {
     setPulling(true)
-    await refresh()
+    await Promise.all([refresh(), useStation.getState().refresh()])
     setPulling(false)
   }
 
   function renderRow(item: Item) {
     switch (item.kind) {
       case 'bot':
-        return <BotRow view={item.view} onPress={() => open(item.view.profile)} />
+        return <BotRow view={item.view} onOpen={open} onLongPress={setQuickBot} />
       case 'room':
-        return <RoomRow view={item.view} metas={metas} onPress={() => openRoom(item.view.id)} />
+        return <RoomRow view={item.view} metas={metas} onOpen={openRoom} />
       case 'hit':
         return (
           <HitRow
-            profile={item.hit.profile}
+            hit={item.hit}
             name={views.find(view => view.profile === item.hit.profile)?.name ?? item.hit.profile}
             meta={metas[item.hit.profile]}
             chatTitle={isMainChat(item.hit, useRoster.getState().rows.find(row => row.name === item.hit.profile)?.canonical_session) ? '' : item.hit.title}
-            snippet={item.hit.snippet}
             age={ageLabel(item.hit.lastActive, nowS)}
-            onPress={() => openHit(item.hit)}
+            onOpen={openHit}
           />
         )
       case 'unsearched':
@@ -264,8 +301,19 @@ export default function Home() {
         </View>
       ) : (
         <View style={styles.header}>
-          <IconCircle icon="server" label={`Settings, ${hostOf(baseUrl)}, ${status}`} muted dot={serverDot} onPress={() => router.push('/settings')} />
+          <Press
+            accessibilityRole="button"
+            accessibilityLabel={`Settings, ${hostOf(baseUrl)}, ${status}`}
+            onPress={() => router.push('/settings')}
+            style={[styles.serverPill, { backgroundColor: c.control }]}
+          >
+            <View style={[styles.serverDot, { backgroundColor: serverDot }]} />
+            <T variant="label" numberOfLines={1} style={styles.serverHost}>
+              {hostOf(baseUrl) || 'Server'}
+            </T>
+          </Press>
           <View style={styles.fill} />
+          <IconCircle icon="command" label="Command palette" onPress={() => setPaletteOpen(true)} />
           <IconCircle icon="search" label="Search" onPress={() => setSearching(true)} />
           <IconCircle icon="monitor" label="Bot screens" onPress={() => router.push('/screens')} />
           <IconCircle icon="plus" label={roomsReady ? 'New bot or room' : 'New bot'} onPress={() => (roomsReady ? setCreating(true) : router.push('/bot/new'))} />
@@ -297,6 +345,7 @@ export default function Home() {
                   </T>
                 </View>
               ) : null}
+              <FleetBanner />
               {/* What is waiting on you, first thing on Home: several at once, raised, with Review all. */}
               <NeedsYouSheet
                 count={deck.waiting}
@@ -305,8 +354,12 @@ export default function Home() {
                 names={namesLine}
                 loaded={loaded}
                 onReview={() => router.push('/inbox')}
+                onReviewBucket={bucket => router.push({ pathname: '/inbox', params: { bucket } })}
                 onOpen={card => router.push({ pathname: '/inbox', params: { start: card.key } })}
               />
+              <BriefingCard />
+              {/* Active calls, working bots, replying rooms, and background helpers in motion right now. */}
+              <InFlightStrip items={inFlight} metas={metas} onOpen={openInFlight} />
               {/* The pinned bots' dashboards, where the server has them; their chats are the first rows below. */}
               {dashboardsReady ? <DashboardStrip views={pinned} onOpen={openPinned} nowS={nowS} /> : null}
               {/* The list is a sheet of paper over the canvas: its rounded top here, the rows on it, and its foot to the bottom. */}
@@ -317,27 +370,31 @@ export default function Home() {
         ListFooterComponent={<View style={[styles.sheetFoot, { backgroundColor: c.sheet }]} />}
         ListFooterComponentStyle={styles.fill}
         ListEmptyComponent={
-          <View style={[styles.empty, { backgroundColor: c.sheet }]}>
-            {!loaded ? (
-              <T variant="secondary" color="text2">
-                {status === 'online' ? 'Loading your bots…' : 'Connecting…'}
-              </T>
-            ) : query.trim() ? (
-              <T variant="secondary" color="text2">
-                Nothing matches “{query.trim()}”.
-              </T>
-            ) : (
-              <>
-                <T variant="heading">No bots yet</T>
-                <T variant="secondary" color="text2" style={styles.centered}>
-                  Bots are Hermes profiles. Create one on your server and it will appear here.
+          !loaded ? (
+            <View style={{ backgroundColor: c.sheet }}>
+              <SkeletonRows />
+            </View>
+          ) : (
+            <View style={[styles.empty, { backgroundColor: c.sheet }]}>
+              {query.trim() ? (
+                <T variant="secondary" color="text2">
+                  Nothing matches “{query.trim()}”.
                 </T>
-              </>
-            )}
-          </View>
+              ) : (
+                <>
+                  <T variant="heading">No bots yet</T>
+                  <T variant="secondary" color="text2" style={styles.centered}>
+                    Bots are Hermes profiles. Create one on your server and it will appear here.
+                  </T>
+                </>
+              )}
+            </View>
+          )
         }
         contentContainerStyle={styles.content}
       />
+
+      <CommandPalette visible={paletteOpen} onClose={() => setPaletteOpen(false)} dashboardsReady={dashboardsReady} />
 
       <Sheet visible={creating} onClose={() => setCreating(false)} label="Create">
         <GroupedList>
@@ -357,6 +414,66 @@ export default function Home() {
           />
         </GroupedList>
       </Sheet>
+
+      <Sheet visible={!!quickBot} onClose={() => setQuickBot(null)} label={quickBot?.name ?? 'Bot actions'}>
+        {quickBot ? (
+          <GroupedList>
+            <Row
+              label="Open chat"
+              onPress={() => {
+                const target = quickBot
+                setQuickBot(null)
+                open(target.profile)
+              }}
+            />
+            {dashboardsReady ? (
+              <Row
+                label="Open dashboard"
+                onPress={() => {
+                  const target = quickBot
+                  setQuickBot(null)
+                  router.push({ pathname: '/bot/[profile]/dashboard', params: { profile: target.profile } })
+                }}
+              />
+            ) : null}
+            <Row
+              label="New chat"
+              onPress={() => {
+                const target = quickBot
+                setQuickBot(null)
+                void sessions.newChat(target.profile).then(failed => {
+                  if (failed) {
+                    toast(failed)
+                  } else {
+                    open(target.profile)
+                  }
+                })
+              }}
+            />
+            <Row
+              label={quickBot.pinned ? 'Unpin from dashboards' : 'Pin to dashboards'}
+              chevron={false}
+              onPress={() => {
+                const target = quickBot
+                setQuickBot(null)
+                void saveBotMeta(target.profile, { pinned: target.pinned ? null : true }).then(error => {
+                  if (error) {
+                    toast(error)
+                  }
+                })
+              }}
+            />
+            <Row
+              label="Bot details"
+              onPress={() => {
+                const target = quickBot
+                setQuickBot(null)
+                router.push({ pathname: '/bot/[profile]/details', params: { profile: target.profile } })
+              }}
+            />
+          </GroupedList>
+        ) : null}
+      </Sheet>
     </Screen>
   )
 }
@@ -364,6 +481,9 @@ export default function Home() {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingLeft: 20, paddingTop: 8, paddingBottom: 8, minHeight: 56 },
+  serverPill: { height: 40, borderRadius: radius.pill, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: 196 },
+  serverDot: { width: 8, height: 8, borderRadius: 4 },
+  serverHost: { flexShrink: 1, fontFamily: fonts.medium },
   search: { flex: 1, height: 40, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14 },
   searchInput: { flex: 1, padding: 0, fontFamily: fonts.regular, fontSize: 15 },
   content: { flexGrow: 1 },

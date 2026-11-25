@@ -1,23 +1,30 @@
 import Feather from '@expo/vector-icons/Feather'
-import { Geist_400Regular, Geist_500Medium, Geist_600SemiBold, Geist_700Bold } from '@expo-google-fonts/geist'
-import { GeistMono_400Regular, GeistMono_500Medium } from '@expo-google-fonts/geist-mono'
+import { Geist_400Regular } from '@expo-google-fonts/geist/400Regular'
+import { Geist_500Medium } from '@expo-google-fonts/geist/500Medium'
+import { Geist_600SemiBold } from '@expo-google-fonts/geist/600SemiBold'
+import { Geist_700Bold } from '@expo-google-fonts/geist/700Bold'
+import { GeistMono_400Regular } from '@expo-google-fonts/geist-mono/400Regular'
+import { GeistMono_500Medium } from '@expo-google-fonts/geist-mono/500Medium'
 import { useFonts } from 'expo-font'
 import * as ScreenOrientation from 'expo-screen-orientation'
-import { Stack } from 'expo-router'
+import { Stack, useRouter } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import * as SystemUI from 'expo-system-ui'
 import { useEffect, useState } from 'react'
-import { Platform } from 'react-native'
+import { Linking, Platform } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
-import { useBoot } from '@/stores/boot'
+import { configureExpoNotifications, consumeInitialExpoNotificationUrl, subscribeExpoNotificationResponses } from '@/lib/expoPush'
+import { onSharedInbox } from '@/lib/shareInbox'
+import { useBoot } from '@/stores/ui'
 import { useConnection } from '@/stores/connection'
 import { prefsHydrated, usePrefs } from '@/stores/prefs'
 import { startSessionSync } from '@/stores/sync'
 import { BootSplash } from '@/components/boot/BootSplash'
 import { DiagramViewer } from '@/components/chat/DiagramViewer'
 import { ImageViewer } from '@/components/chat/ImageViewer'
+import { MathWorkerHost } from '@/components/chat/MathWorkerHost'
 import { RestartingScreen } from '@/components/restart/RestartingScreen'
 import { RestartSheet } from '@/components/restart/RestartSheet'
 import { ToastHost } from '@/components/ui/ToastHost'
@@ -33,11 +40,36 @@ export const unstable_settings = { anchor: 'index' }
 
 function RootStack() {
   const { c, scheme } = useTheme()
+  const router = useRouter()
   const configured = useConnection(s => s.config !== null)
 
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(c.canvas)
   }, [c.canvas])
+
+  useEffect(() => {
+    if (!configured) {
+      return
+    }
+
+    void configureExpoNotifications()
+    const pendingUrl = consumeInitialExpoNotificationUrl()
+    if (pendingUrl) {
+      void Linking.openURL(pendingUrl).catch(() => {})
+    }
+
+    const stopResponses = subscribeExpoNotificationResponses(url => {
+      void Linking.openURL(url).catch(() => {})
+    })
+    const stopInbox = onSharedInbox(() => {
+      router.push('/share')
+    })
+
+    return () => {
+      stopResponses()
+      stopInbox()
+    }
+  }, [configured, router])
 
   return (
     <>
@@ -55,11 +87,20 @@ function RootStack() {
         <Stack.Protected guard={configured}>
           <Stack.Screen name="index" />
           <Stack.Screen name="inbox" />
+          <Stack.Screen name="briefing" />
+          <Stack.Screen name="fleet" />
+          <Stack.Screen name="telemetry" />
+          <Stack.Screen name="approve" options={{ animation: 'fade' }} />
+          <Stack.Screen name="share" options={{ animation: 'fade' }} />
           <Stack.Screen name="settings" />
+          <Stack.Screen name="server-add" />
           <Stack.Screen name="notifications" />
           <Stack.Screen name="plugins" />
+          <Stack.Screen name="licences" />
           <Stack.Screen name="phone/index" />
           <Stack.Screen name="phone/never-share" />
+          <Stack.Screen name="phone/answer" />
+          <Stack.Screen name="phone/join" />
           <Stack.Screen name="screens/index" />
           <Stack.Screen name="screens/[profile]" />
           {/* One screen per bot (and per room): opening a bot that is already open brings that screen up instead of a second copy
@@ -70,6 +111,7 @@ function RootStack() {
           <Stack.Screen name="bot/[profile]/dashboard" />
           <Stack.Screen name="bot/[profile]/view" />
           <Stack.Screen name="bot/[profile]/record" />
+          <Stack.Screen name="bot/[profile]/page" />
           <Stack.Screen name="bot/[profile]/chats" />
           <Stack.Screen name="bot/[profile]/details" />
           <Stack.Screen name="bot/[profile]/edit" />
@@ -79,6 +121,8 @@ function RootStack() {
           <Stack.Screen name="bot/[profile]/routines" />
           <Stack.Screen name="bot/[profile]/tools" />
           <Stack.Screen name="bot/[profile]/runs-on" />
+          <Stack.Screen name="bot/[profile]/keys" />
+          <Stack.Screen name="bot/[profile]/voice" />
           <Stack.Screen name="bot/[profile]/past" />
           <Stack.Screen name="bot/[profile]/errand" />
           <Stack.Screen name="bot/[profile]/errand-call" />
@@ -86,6 +130,9 @@ function RootStack() {
           <Stack.Screen name="room/[id]" dangerouslySingular />
           <Stack.Screen name="bot/new" />
           <Stack.Screen name="viewer" />
+        </Stack.Protected>
+        <Stack.Protected guard={__DEV__ && configured}>
+          <Stack.Screen name="dev/gallery" />
         </Stack.Protected>
         <Stack.Protected guard={!configured}>
           <Stack.Screen name="connect" options={{ animation: 'fade' }} />
@@ -96,6 +143,7 @@ function RootStack() {
       </Stack>
       <ImageViewer />
       <DiagramViewer />
+      <MathWorkerHost />
       <RestartingScreen />
       <RestartSheet />
       <ToastHost />

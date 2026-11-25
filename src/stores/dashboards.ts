@@ -1,13 +1,17 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
 
 import { dashboardRoutines, refreshedSince } from '@/features/dashboard/view'
-import { describeError } from '@/features/sessions/store'
+import { describeError } from '@/lib/hermes/errors'
+import { sameJson } from '@/lib/equal'
 import { absentGate } from '@/lib/absent'
 import { listCronJobs, triggerCronJob, type CronJob } from '@/lib/hermes/cron'
-import { addRecordNote, changeRecord, DraftChanged, getBotDashboard, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
+import { addRecordNote, bulkRecords, changeRecord, DraftChanged, getBotDashboard, type BulkRecordAction, type View, getDashboardsSummary, getNeedsYou, getRecord, muteRecord, OldDashboardPlugin, pressAction, setRecordClosed, type BotDashboard, type DashboardsSummary, type NeedsYouRecord, type RecordDetail } from '@/lib/hermes/dashboard'
 import { DASHBOARD_CHANGED, parseDashboardChanged } from '@/lib/hermes/livepush'
 import { startPoller } from '@/lib/poller'
 import { onGatewayEvent, useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { sessions } from '@/stores/sessions'
 import { isShown, pushes } from '@/stores/watch'
 
@@ -20,6 +24,7 @@ export interface BotBoard {
 }
 
 interface DashboardsState {
+  server: string | null
   /** Whether the server has hermes-dashboard: null until known. Without it, pinned bots open their chat as before. */
   available: boolean | null
   summary: DashboardsSummary['bots']
@@ -45,6 +50,10 @@ interface DashboardsState {
   note: (profile: string, id: string, text: string) => Promise<string | null>
   /** Mutes a record until a time (server seconds), or unmutes it (null). */
   mute: (profile: string, id: string, until: number | null) => Promise<string | null>
+  /** Bulk closes/reopens many records across profiles with one batched refresh. */
+  bulkSetClosed: (items: { profile: string; id: string }[], closed: boolean) => Promise<{ failed: { id: string; error: string }[]; error?: string }>
+  /** Bulk mutes/unmutes many records across profiles with one batched refresh. */
+  bulkMute: (items: { profile: string; id: string }[], until: number | null) => Promise<{ failed: { id: string; error: string }[]; error?: string }>
   /** You pressed a record's button: a fresh side chat with the bot gets the job (and is then the chat the bot shows). */
   press: (profile: string, id: string, action: string) => Promise<string | null>
   /**
@@ -69,313 +78,357 @@ const WATCH_MS = 10 * 60_000
 /** hermes-dashboard is optional: once the server is found without it, the timers ask only now and then. */
 const plugin = absentGate()
 
-export const useDashboards = create<DashboardsState>((set, get) => {
-  let summaryBusy = false
-  const loading = new Set<string>()
+export const useDashboards = create<DashboardsState>()(
+  persist(
+    (set, get) => {
+      let summaryBusy = false
+      const loading = new Set<string>()
 
-  const config = () => useConnection.getState().config
+      const config = () => useConnection.getState().config
 
-  /** After you change a record: it, its bot's dashboard, what it holds for you and the summary are read again. */
-  async function after(profile: string, id: string) {
-    await Promise.all([get().loadRecord(id), get().load(profile), get().loadNeedsYou(profile), get().refreshSummary()])
-  }
-
-  async function act(profile: string, id: string, run: () => Promise<unknown>): Promise<string | null> {
-    if (!config()) {
-      return 'Not connected to the server.'
-    }
-
-    try {
-      await run()
-      await after(profile, id)
-
-      return null
-    } catch (error) {
-      return describeError(error)
-    }
-  }
-
-  async function watch(profile: string, sinceS: number) {
-    const deadline = Date.now() + WATCH_MS
-
-    while (Date.now() < deadline && get().checking[profile]) {
-      await new Promise(resolve => setTimeout(resolve, WATCH_EVERY_MS))
-      await get().load(profile)
-
-      if (refreshedSince(get().byBot[profile]?.dashboard?.views ?? [], sinceS)) {
-        break
-      }
-    }
-
-    set(state => {
-      const checking = { ...state.checking }
-      delete checking[profile]
-
-      return { checking }
-    })
-    void get().refreshSummary()
-  }
-
-  return {
-    available: null,
-    summary: {},
-    byBot: {},
-    records: {},
-    needsYou: {},
-    keepers: {},
-    checking: {},
-    pushed: {},
-
-    refreshSummary: async () => {
-      const current = config()
-
-      if (!current || summaryBusy || !plugin.due()) {
-        return
+      /** After you change a record: it, its bot's dashboard, what it holds for you and the summary are read again. */
+      async function after(profile: string, id: string) {
+        await Promise.all([get().loadRecord(id), get().load(profile), get().loadNeedsYou(profile), get().refreshSummary()])
       }
 
-      summaryBusy = true
-
-      try {
-        const answer = await getDashboardsSummary(current)
-        plugin.seen(!!answer)
-        set(answer ? { available: true, summary: answer.bots } : { available: false, summary: {} })
-      } catch {
-        // The next poll tries again; what is shown stays.
-      } finally {
-        summaryBusy = false
-      }
-    },
-
-    load: async (profile, options = {}) => {
-      const current = config()
-
-      if (!current || (loading.has(profile) && !options.fresh)) {
-        return
-      }
-
-      if (!plugin.due() && !options.fresh) {
-        // The server has no dashboards plugin: the screen says so without asking again every few seconds.
-        if (!get().byBot[profile]?.loaded) {
-          set(state => ({ available: false, byBot: { ...state.byBot, [profile]: { ...empty, loaded: true } } }))
+      async function act(profile: string, id: string, run: () => Promise<unknown>): Promise<string | null> {
+        if (!config()) {
+          return 'Not connected to the server.'
         }
 
-        return
+        try {
+          await run()
+          await after(profile, id)
+
+          return null
+        } catch (error) {
+          return describeError(error)
+        }
       }
 
-      loading.add(profile)
+      async function runBulk(items: { profile: string; id: string }[], action: BulkRecordAction, until?: number | null): Promise<{ failed: { id: string; error: string }[]; error?: string }> {
+        const current = config()
 
-      try {
-        const shown = get().byBot[profile]?.dashboard
-        const dashboard = await getBotDashboard(current, profile, { since: options.fresh ? undefined : shown?.version, fresh: options.fresh })
+        if (!current) {
+          return { failed: [], error: 'Not connected to the server.' }
+        }
 
-        if (dashboard === 'unchanged') {
-          // Nothing on it changed since the last read: keep what is shown (and skip a re-render).
-          if (get().byBot[profile]?.error) {
-            set(state => ({ byBot: { ...state.byBot, [profile]: { ...(state.byBot[profile] ?? empty), loaded: true, error: null } } }))
+        if (items.length === 0) {
+          return { failed: [] }
+        }
+
+        try {
+          const result = await bulkRecords(current, items.map(item => item.id), action, until)
+          const profiles = [...new Set(items.map(item => item.profile))]
+          await Promise.all([
+            ...profiles.map(profile => Promise.all([get().load(profile), get().loadNeedsYou(profile)])),
+            get().refreshSummary(),
+          ])
+
+          return { failed: result.failed }
+        } catch (error) {
+          return { failed: [], error: describeError(error) }
+        }
+      }
+
+      async function watch(profile: string, sinceS: number) {
+        const deadline = Date.now() + WATCH_MS
+
+        while (Date.now() < deadline && get().checking[profile]) {
+          await new Promise(resolve => setTimeout(resolve, WATCH_EVERY_MS))
+          await get().load(profile)
+
+          if (refreshedSince(get().byBot[profile]?.dashboard?.views ?? [], sinceS)) {
+            break
+          }
+        }
+
+        set(state => {
+          const checking = { ...state.checking }
+          delete checking[profile]
+
+          return { checking }
+        })
+        void get().refreshSummary()
+      }
+
+      return {
+        server: null,
+        available: null,
+        summary: {},
+        byBot: {},
+        records: {},
+        needsYou: {},
+        keepers: {},
+        checking: {},
+        pushed: {},
+
+        refreshSummary: async () => {
+          const current = config()
+
+          if (!current || summaryBusy || !plugin.due()) {
+            return
           }
 
-          return
+          summaryBusy = true
+
+          try {
+            const answer = await getDashboardsSummary(current)
+            plugin.seen(!!answer)
+            set(answer ? { server: current.baseUrl, available: true, summary: answer.bots } : { server: current.baseUrl, available: false, summary: {} })
+          } catch {
+            // The next poll tries again; what is shown stays.
+          } finally {
+            summaryBusy = false
+          }
+        },
+
+        load: async (profile, options = {}) => {
+          const current = config()
+
+          if (!current || (loading.has(profile) && !options.fresh)) {
+            return
+          }
+
+          if (!plugin.due() && !options.fresh) {
+            // The server has no dashboards plugin: the screen says so without asking again every few seconds.
+            if (!get().byBot[profile]?.loaded) {
+              set(state => ({ available: false, byBot: { ...state.byBot, [profile]: { ...empty, loaded: true } } }))
+            }
+
+            return
+          }
+
+          loading.add(profile)
+
+          try {
+            const shown = get().byBot[profile]?.dashboard
+            const dashboard = await getBotDashboard(current, profile, { since: options.fresh ? undefined : shown?.version, fresh: options.fresh })
+
+            if (dashboard === 'unchanged') {
+              // Nothing on it changed since the last read: keep what is shown (and skip a re-render).
+              if (get().byBot[profile]?.error) {
+                set(state => ({ byBot: { ...state.byBot, [profile]: { ...(state.byBot[profile] ?? empty), loaded: true, error: null } } }))
+              }
+
+              return
+            }
+
+            plugin.seen(!!dashboard)
+            set(state => (dashboard ? { available: true, byBot: { ...state.byBot, [profile]: { dashboard, loaded: true, error: null } } } : { available: false, byBot: { ...state.byBot, [profile]: { ...empty, loaded: true } } }))
+          } catch (error) {
+            const old = error instanceof OldDashboardPlugin
+            set(state => ({ byBot: { ...state.byBot, [profile]: { ...(state.byBot[profile] ?? empty), loaded: true, old, error: describeError(error) } } }))
+          } finally {
+            loading.delete(profile)
+          }
+        },
+
+        loadRecord: async id => {
+          const current = config()
+
+          if (!current) {
+            return 'Not connected to the server.'
+          }
+
+          try {
+            const detail = await getRecord(current, id)
+            set(state => ({ records: { ...state.records, [id]: detail } }))
+
+            return null
+          } catch (error) {
+            return describeError(error)
+          }
+        },
+
+        loadNeedsYou: async profile => {
+          const current = config()
+
+          if (!current) {
+            return
+          }
+
+          try {
+            const answer = await getNeedsYou(current, profile)
+            set(state => ({ needsYou: { ...state.needsYou, [profile]: answer } }))
+          } catch {
+            // What is shown stays until the next read.
+          }
+        },
+
+        loadKeepers: async profile => {
+          const current = config()
+
+          if (!current) {
+            return []
+          }
+
+          const routines = dashboardRoutines(await listCronJobs(current, profile))
+          set(state => ({ keepers: { ...state.keepers, [profile]: routines } }))
+
+          return routines
+        },
+
+        change: (profile, id, values) => act(profile, id, () => changeRecord(config()!, id, values)),
+        setClosed: (profile, id, closed) => act(profile, id, () => setRecordClosed(config()!, id, closed)),
+        note: (profile, id, text) => act(profile, id, () => addRecordNote(config()!, id, text)),
+        mute: (profile, id, until) => act(profile, id, () => muteRecord(config()!, id, until)),
+        bulkSetClosed: (items, closed) => runBulk(items, closed ? 'close' : 'reopen'),
+        bulkMute: (items, until) => runBulk(items, 'mute', until),
+
+        press: async (profile, id, action) => {
+          const current = config()
+
+          if (!current) {
+            return 'Not connected to the server.'
+          }
+
+          // The job gets its own side chat, so the bot's main chat is not interrupted and the person can watch it there.
+          const failed = await sessions.newChat(profile)
+
+          if (failed) {
+            return failed
+          }
+
+          try {
+            const { message } = await pressAction(current, id, action, sessions.store.getState().chosen[profile] ?? null)
+            const sent = await sessions.send(profile, message)
+            void after(profile, id)
+
+            return sent ? null : 'The side chat didn’t take the job. Open it and try again.'
+          } catch (error) {
+            return describeError(error)
+          }
+        },
+
+        approve: async (profile, id, action, digest) => {
+          const current = config()
+
+          if (!current) {
+            return 'Not connected to the server.'
+          }
+
+          const failed = await sessions.newChat(profile)
+
+          if (failed) {
+            return failed
+          }
+
+          try {
+            const { message } = await pressAction(current, id, action, sessions.store.getState().chosen[profile] ?? null, digest)
+            const sent = await sessions.send(profile, message)
+            void after(profile, id)
+
+            return sent ? null : 'The side chat didn’t take the job. Open it and try again.'
+          } catch (error) {
+            if (error instanceof DraftChanged) {
+              // Nothing started: leave the fresh side chat and show the new version.
+              void sessions.leaveSide(profile)
+              await get().loadRecord(id)
+
+              return { changed: error.current }
+            }
+
+            return describeError(error)
+          }
+        },
+
+        checkNow: async profile => {
+          const current = config()
+
+          if (!current) {
+            return { error: 'Not connected to the server.' }
+          }
+
+          if (get().checking[profile]) {
+            return { started: 0 }
+          }
+
+          try {
+            await get().load(profile)
+            const sinceS = get().byBot[profile]?.dashboard?.now || Math.round(Date.now() / 1000)
+            const routines = await get().loadKeepers(profile)
+
+            if (!routines.length) {
+              return { started: 0 }
+            }
+
+            set(state => ({ checking: { ...state.checking, [profile]: true } }))
+            await Promise.all(routines.map(job => triggerCronJob(current, profile, job.id)))
+            void watch(profile, sinceS)
+
+            return { started: routines.length }
+          } catch (error) {
+            set(state => {
+              const checking = { ...state.checking }
+              delete checking[profile]
+
+              return { checking }
+            })
+
+            return { error: describeError(error) }
+          }
+        },
+
+        checkPanel: async (profile, view) => {
+          const current = config()
+
+          if (!current) {
+            return { error: 'Not connected to the server.' }
+          }
+
+          if (view.kept?.how === 'live') {
+            await get().load(profile, { fresh: true })
+
+            return { started: 1 }
+          }
+
+          const job = view.kept?.how === 'computed' ? view.kept.feed?.job : undefined
+
+          if (!job || get().checking[profile]) {
+            return get().checkNow(profile)
+          }
+
+          try {
+            await get().load(profile)
+            const sinceS = get().byBot[profile]?.dashboard?.now || Math.round(Date.now() / 1000)
+            set(state => ({ checking: { ...state.checking, [profile]: true } }))
+            await triggerCronJob(current, profile, job)
+            void watch(profile, sinceS)
+
+            return { started: 1 }
+          } catch (error) {
+            set(state => {
+              const checking = { ...state.checking }
+              delete checking[profile]
+
+              return { checking }
+            })
+
+            return { error: describeError(error) }
+          }
+        },
+
+        reset: () => {
+          plugin.reset()
+          set({ server: useConnection.getState().config?.baseUrl ?? null, available: null, summary: {}, byBot: {}, records: {}, needsYou: {}, keepers: {}, checking: {}, pushed: {} })
+        },
+      }
+    },
+    {
+      name: 'blobs.dashboards',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: state => ({ server: state.server, available: state.available, summary: state.summary }),
+      onRehydrateStorage: () => state => {
+        const connection = useConnection.getState()
+
+        if (state && connection.hydrated && state.server !== (connection.config?.baseUrl ?? null)) {
+          useDashboards.getState().reset()
         }
-
-        plugin.seen(!!dashboard)
-        set(state => (dashboard ? { available: true, byBot: { ...state.byBot, [profile]: { dashboard, loaded: true, error: null } } } : { available: false, byBot: { ...state.byBot, [profile]: { ...empty, loaded: true } } }))
-      } catch (error) {
-        const old = error instanceof OldDashboardPlugin
-        set(state => ({ byBot: { ...state.byBot, [profile]: { ...(state.byBot[profile] ?? empty), loaded: true, old, error: describeError(error) } } }))
-      } finally {
-        loading.delete(profile)
-      }
+      },
     },
-
-    loadRecord: async id => {
-      const current = config()
-
-      if (!current) {
-        return 'Not connected to the server.'
-      }
-
-      try {
-        const detail = await getRecord(current, id)
-        set(state => ({ records: { ...state.records, [id]: detail } }))
-
-        return null
-      } catch (error) {
-        return describeError(error)
-      }
-    },
-
-    loadNeedsYou: async profile => {
-      const current = config()
-
-      if (!current) {
-        return
-      }
-
-      try {
-        const answer = await getNeedsYou(current, profile)
-        set(state => ({ needsYou: { ...state.needsYou, [profile]: answer } }))
-      } catch {
-        // What is shown stays until the next read.
-      }
-    },
-
-    loadKeepers: async profile => {
-      const current = config()
-
-      if (!current) {
-        return []
-      }
-
-      const routines = dashboardRoutines(await listCronJobs(current, profile))
-      set(state => ({ keepers: { ...state.keepers, [profile]: routines } }))
-
-      return routines
-    },
-
-    change: (profile, id, values) => act(profile, id, () => changeRecord(config()!, id, values)),
-    setClosed: (profile, id, closed) => act(profile, id, () => setRecordClosed(config()!, id, closed)),
-    note: (profile, id, text) => act(profile, id, () => addRecordNote(config()!, id, text)),
-    mute: (profile, id, until) => act(profile, id, () => muteRecord(config()!, id, until)),
-
-    press: async (profile, id, action) => {
-      const current = config()
-
-      if (!current) {
-        return 'Not connected to the server.'
-      }
-
-      // The job gets its own side chat, so the bot's main chat is not interrupted and the person can watch it there.
-      const failed = await sessions.newChat(profile)
-
-      if (failed) {
-        return failed
-      }
-
-      try {
-        const { message } = await pressAction(current, id, action, sessions.store.getState().chosen[profile] ?? null)
-        const sent = await sessions.send(profile, message)
-        void after(profile, id)
-
-        return sent ? null : 'The side chat didn’t take the job. Open it and try again.'
-      } catch (error) {
-        return describeError(error)
-      }
-    },
-
-    approve: async (profile, id, action, digest) => {
-      const current = config()
-
-      if (!current) {
-        return 'Not connected to the server.'
-      }
-
-      const failed = await sessions.newChat(profile)
-
-      if (failed) {
-        return failed
-      }
-
-      try {
-        const { message } = await pressAction(current, id, action, sessions.store.getState().chosen[profile] ?? null, digest)
-        const sent = await sessions.send(profile, message)
-        void after(profile, id)
-
-        return sent ? null : 'The side chat didn’t take the job. Open it and try again.'
-      } catch (error) {
-        if (error instanceof DraftChanged) {
-          // Nothing started: leave the fresh side chat and show the new version.
-          void sessions.leaveSide(profile)
-          await get().loadRecord(id)
-
-          return { changed: error.current }
-        }
-
-        return describeError(error)
-      }
-    },
-
-    checkNow: async profile => {
-      const current = config()
-
-      if (!current) {
-        return { error: 'Not connected to the server.' }
-      }
-
-      if (get().checking[profile]) {
-        return { started: 0 }
-      }
-
-      try {
-        await get().load(profile)
-        const sinceS = get().byBot[profile]?.dashboard?.now || Math.round(Date.now() / 1000)
-        const routines = await get().loadKeepers(profile)
-
-        if (!routines.length) {
-          return { started: 0 }
-        }
-
-        set(state => ({ checking: { ...state.checking, [profile]: true } }))
-        await Promise.all(routines.map(job => triggerCronJob(current, profile, job.id)))
-        void watch(profile, sinceS)
-
-        return { started: routines.length }
-      } catch (error) {
-        set(state => {
-          const checking = { ...state.checking }
-          delete checking[profile]
-
-          return { checking }
-        })
-
-        return { error: describeError(error) }
-      }
-    },
-
-    checkPanel: async (profile, view) => {
-      const current = config()
-
-      if (!current) {
-        return { error: 'Not connected to the server.' }
-      }
-
-      if (view.kept?.how === 'live') {
-        await get().load(profile, { fresh: true })
-
-        return { started: 1 }
-      }
-
-      const job = view.kept?.how === 'computed' ? view.kept.feed?.job : undefined
-
-      if (!job || get().checking[profile]) {
-        return get().checkNow(profile)
-      }
-
-      try {
-        await get().load(profile)
-        const sinceS = get().byBot[profile]?.dashboard?.now || Math.round(Date.now() / 1000)
-        set(state => ({ checking: { ...state.checking, [profile]: true } }))
-        await triggerCronJob(current, profile, job)
-        void watch(profile, sinceS)
-
-        return { started: 1 }
-      } catch (error) {
-        set(state => {
-          const checking = { ...state.checking }
-          delete checking[profile]
-
-          return { checking }
-        })
-
-        return { error: describeError(error) }
-      }
-    },
-
-    reset: () => {
-      plugin.reset()
-      set({ available: null, summary: {}, byBot: {}, records: {}, needsYou: {}, keepers: {}, checking: {}, pushed: {} })
-    },
-  }
-})
+  ),
+)
 
 /**
  * Keeps each bot's dashboard summary current for the dots on Home: pushed by the server when anything on a dashboard moves
@@ -383,6 +436,12 @@ export const useDashboards = create<DashboardsState>((set, get) => {
  * With the push, the ask is a safety check every 2 minutes.
  */
 export function startDashboardsSync(): () => void {
+  const connection = useConnection.getState()
+
+  if (connection.hydrated && useDashboards.getState().server !== (connection.config?.baseUrl ?? null)) {
+    useDashboards.getState().reset()
+  }
+
   const online = () => useConnection.getState().status === 'online'
   const stopPoll = startPoller(() => void useDashboards.getState().refreshSummary(), () => (pushes('dashboardChanged') ? 120_000 : 30_000), online)
   const stopEvents = onGatewayEvent(event => {
@@ -398,7 +457,7 @@ export function startDashboardsSync(): () => void {
 
     const store = useDashboards.getState()
 
-    if (change.summary && JSON.stringify(change.summary) !== JSON.stringify(store.summary)) {
+    if (change.summary && !sameJson(change.summary, store.summary)) {
       useDashboards.setState({ available: true, summary: change.summary })
     }
 
@@ -414,8 +473,8 @@ export function startDashboardsSync(): () => void {
     }
   })
   const stopConnection = useConnection.subscribe((state, previous) => {
-    // Another server: nothing of the last one's dashboards applies.
-    if (state.config?.baseUrl !== previous.config?.baseUrl) {
+    // Another server (or signed out): nothing of the cached server's dashboards applies.
+    if (state.hydrated && useDashboards.getState().server !== (state.config?.baseUrl ?? null)) {
       useDashboards.getState().reset()
     }
 
@@ -425,6 +484,10 @@ export function startDashboardsSync(): () => void {
       void useDashboards.getState().refreshSummary()
     }
   })
+
+  if (online()) {
+    void useDashboards.getState().refreshSummary()
+  }
 
   return () => {
     stopPoll()
@@ -445,3 +508,5 @@ export function startDashboardPoll(profile: string): () => void {
 export function useBotBoard(profile: string): BotBoard {
   return useDashboards(state => state.byBot[profile] ?? empty)
 }
+
+registerServerReset(() => useDashboards.getState().reset())

@@ -36,7 +36,8 @@
         "appName": "Blobs - a Hermes Agent client",
         "companyName": "Madd Technologies LLC",
         "language": "en-US",
-        "sku": "blobs-ios"
+        "sku": "blobs-ios",
+        "ascAppId": "6823473365"
       }
     },
     "production": {
@@ -49,7 +50,8 @@
         "appName": "Blobs - a Hermes Agent client",
         "companyName": "Madd Technologies LLC",
         "language": "en-US",
-        "sku": "blobs-ios"
+        "sku": "blobs-ios",
+        "ascAppId": "6823473365"
       }
     }
   }

@@ -86,11 +86,13 @@ EAS keeps them; none are in the repo (`*.jks`, `*.p8`, `*.p12` and `*.mobileprov
 
 - **iOS:** the provisioning profile (and the distribution certificate, unless the team's existing one is reused) is made
   by EAS the first time it signs in to the Apple account during `eas build`. EAS also keeps the App Store Connect API
-  key that uploads use.
+  key and the Apple Push Notification service (APNs `.p8`) key (`eas credentials --platform ios`).
 - **GitHub:** only `EXPO_TOKEN`, as an Actions secret. No Apple or Google credential is ever stored in GitHub.
 - **Android:** EAS makes the upload keystore on the first build. Download a copy straight away (`eas credentials
-  --platform android` → Download credentials) and keep two backups outside the repo. A lost upload key can be reset
-  through Play support, but it takes days.
+  --platform android` → Download credentials) and keep two backups outside the repo. For FCM push delivery via Expo Push,
+  upload an FCM v1 Service Account JSON key in `eas credentials --platform android` and add `google-services.json` as an
+  EAS file environment variable (`GOOGLE_SERVICES_JSON`, gitignored locally). A lost upload key can be reset through
+  Play support, but it takes days.
 
 ## What App Review should know
 
@@ -99,4 +101,4 @@ EAS keeps them; none are in the repo (`*.jks`, `*.p8`, `*.p12` and `*.mobileprov
 - `NSAllowsArbitraryLoads` is on because people's Hermes servers usually speak plain `http://` on a private network
   (the home network or a VPN such as Tailscale). Say so in the review notes.
 - No non-exempt encryption (`ITSAppUsesNonExemptEncryption` is false): the app only uses the system's HTTPS.
-- Push notifications are Android only (UnifiedPush). The iOS build has none yet.
+- Push notifications use `expo-notifications` (APNs on iOS, FCM on Android) with an optional UnifiedPush (`ntfy`) option on Android.

@@ -15,11 +15,11 @@ import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { afterSheetCloses } from '@/lib/afterSheet'
 import { EnvError, isEnvName, linkHost, matchKeys, removeEnvKey, saveEnvKey, setKeys, typedName, XAI_KEY, type EnvKey } from '@/lib/hermes/env'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useKeys } from '@/stores/keys'
 import { reloadEnv } from '@/stores/profiles'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
@@ -37,7 +37,7 @@ export default function BotKeys() {
   // `key`: a screen that needs one (a voice call paying with the bot's own xAI key) links here to have it added.
   const { profile, key } = useLocalSearchParams<{ profile: string; key?: string }>()
   const online = useConnection(state => state.status === 'online')
-  const name = useBotView(profile)?.name ?? profile
+  const name = useBotIdentity(profile)?.name ?? profile
   const { c } = useTheme()
   const rows = useKeys(state => state.byBot[profile]?.rows ?? null)
   const error = useKeys(state => state.byBot[profile]?.error ?? null)

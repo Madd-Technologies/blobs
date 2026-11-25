@@ -27,7 +27,7 @@ import { useStickToLatest } from '@/lib/useStickToLatest'
 import { useBotMetas } from '@/stores/bots'
 import { removeRoom, sendToRoom, startRoomPoll, stopRoomWork, useRoomData, useRooms } from '@/stores/rooms'
 import { useOnScreen } from '@/stores/presence'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useWatch } from '@/stores/watch'
 
 /** A group room: you and several bots in one conversation, run by the server so it carries on with the app closed. */

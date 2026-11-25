@@ -2,8 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
-import { inMotion } from '@/features/phone/view'
-import { describeError } from '@/features/sessions/store'
+import { ASKED_DAYS, inMotion } from '@/features/phone/view'
+import { describeError } from '@/lib/hermes/errors'
 import {
   answerCall,
   approveErrand,
@@ -27,6 +27,7 @@ import {
 import { absentGate } from '@/lib/absent'
 import { startPoller } from '@/lib/poller'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 
 /** While a call is being made, the errands are read this often; otherwise every 30 s. */
 const LIVE_MS = 5_000
@@ -35,6 +36,7 @@ const IDLE_MS = 30_000
 const plugin = absentGate()
 
 interface PhoneState {
+  server: string | null
   /** Whether the server has hermes-phone: null until known. Without it nothing about calls is shown. */
   available: boolean | null
   status: PhoneStatus | null
@@ -44,8 +46,11 @@ interface PhoneState {
   rows: ErrandRow[]
   /** Each errand in full, by id. */
   errands: Record<string, Errand>
-  /** Finished errands whose "they asked you" you marked done (kept across launches). */
+  /** Finished errands whose "they asked you" you marked done for the active server. */
   dismissed: string[]
+  /** Per-server stored dismissed lists so switching servers preserves each server's history. */
+  dismissedByServer: Record<string, string[]>
+  syncServer: (baseUrl: string | null) => void
   refresh: () => Promise<void>
   loadErrand: (id: string) => Promise<string | null>
   loadSettings: () => Promise<string | null>
@@ -112,12 +117,40 @@ export const usePhone = create<PhoneState>()(
       }
 
       return {
+        server: null,
         available: null,
         status: null,
         settings: null,
         rows: [],
         errands: {},
         dismissed: [],
+        dismissedByServer: {},
+
+        syncServer: baseUrl => {
+          const state = get()
+
+          if (baseUrl && !state.server && Object.keys(state.dismissedByServer).length === 0 && state.dismissed.length > 0) {
+            set({ server: baseUrl, dismissedByServer: { [baseUrl]: state.dismissed } })
+
+            return
+          }
+
+          if (baseUrl === state.server) {
+            return
+          }
+
+          plugin.reset()
+          busy = false
+          set({
+            server: baseUrl,
+            available: null,
+            status: null,
+            settings: null,
+            rows: [],
+            errands: {},
+            dismissed: baseUrl ? (state.dismissedByServer[baseUrl] ?? []) : [],
+          })
+        },
 
         refresh: async () => {
           const current = config()
@@ -145,25 +178,52 @@ export const usePhone = create<PhoneState>()(
               void get().loadSettings()
             }
 
-            // Read in full what is new, what changed, and what is calling now.
+            // Read in full what is active, what changed, and recent un-dismissed errands within the Needs-you window
+            // using bounded concurrency and a single batched store update instead of N sequential fetches.
             const known = get().errands
-            const stale = rows.filter(row => moving(row, known[row.id]) || known[row.id]?.status !== row.status || known[row.id]?.calls.length !== row.calls)
-
-            for (const row of stale) {
-              try {
-                keep(await getErrand(current, row.id))
-              } catch {
-                // The next refresh tries again.
+            const dismissed = new Set(get().dismissed)
+            const cutoff = Date.now() / 1000 - ASKED_DAYS * 86_400
+            const urgentRows = rows.filter(row => moving(row, known[row.id]) || (!!known[row.id] && (known[row.id]?.status !== row.status || known[row.id]?.calls.length !== row.calls)))
+            const urgentIds = new Set(urgentRows.map(row => row.id))
+            const recentNew = rows
+              .filter(row => !urgentIds.has(row.id) && !known[row.id] && !dismissed.has(row.id) && row.created >= cutoff)
+              .sort((a, b) => b.created - a.created)
+              .slice(0, 10)
+            const queue = [...urgentRows, ...recentNew]
+            const fetched: Errand[] = []
+            const worker = async () => {
+              for (let row = queue.shift(); row; row = queue.shift()) {
+                try {
+                  fetched.push(await getErrand(current, row.id))
+                } catch {
+                  // The next refresh tries again.
+                }
               }
             }
 
-            // Forget errands the list no longer has (it keeps the newest 50).
-            const ids = new Set(rows.map(row => row.id))
-            const errands = get().errands
-
-            if (Object.keys(errands).some(id => !ids.has(id))) {
-              set({ errands: Object.fromEntries(Object.entries(errands).filter(([id]) => ids.has(id))) })
+            if (queue.length) {
+              await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker))
             }
+
+            // Merge fetched errands and drop ones the list no longer holds (it keeps the newest 50) in one write.
+            const ids = new Set(rows.map(row => row.id))
+            set(state => {
+              const next: Record<string, Errand> = {}
+
+              for (const [id, item] of Object.entries(state.errands)) {
+                if (ids.has(id)) {
+                  next[id] = item
+                }
+              }
+
+              for (const item of fetched) {
+                if (ids.has(item.id)) {
+                  next[item.id] = item
+                }
+              }
+
+              return { errands: next }
+            })
           } catch {
             // What is shown stays until the next read.
           } finally {
@@ -226,7 +286,17 @@ export const usePhone = create<PhoneState>()(
           }
         },
 
-        dismiss: id => set(state => ({ dismissed: state.dismissed.includes(id) ? state.dismissed : [...state.dismissed.slice(-199), id] })),
+        dismiss: id =>
+          set(state => {
+            const next = state.dismissed.includes(id) ? state.dismissed : [...state.dismissed.slice(-199), id]
+            const server = state.server ?? useConnection.getState().config?.baseUrl ?? null
+
+            return {
+              server,
+              dismissed: next,
+              ...(server ? { dismissedByServer: { ...state.dismissedByServer, [server]: next } } : {}),
+            }
+          }),
 
         reset: () => {
           plugin.reset()
@@ -234,9 +304,22 @@ export const usePhone = create<PhoneState>()(
         },
       }
     },
-    { name: 'blobs.phone', storage: createJSONStorage(() => AsyncStorage), partialize: state => ({ dismissed: state.dismissed }) },
+    {
+      name: 'blobs.phone',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: state => ({ server: state.server, dismissed: state.dismissed, dismissedByServer: state.dismissedByServer }),
+      onRehydrateStorage: () => state => {
+        const connection = useConnection.getState()
+
+        if (state && connection.hydrated) {
+          state.syncServer(connection.config?.baseUrl ?? null)
+        }
+      },
+    },
   ),
 )
+
+registerServerReset(baseUrl => usePhone.getState().syncServer(baseUrl))
 
 /**
  * Keeps phone errands current: every 5 s in the foreground while one is calling, every 30 s otherwise, and at once when the
@@ -256,11 +339,6 @@ export function startPhoneSync(): () => void {
   }
   const stopPoll = startPoller(tick, LIVE_MS, online)
   const stopConnection = useConnection.subscribe((state, previous) => {
-    // Another server: nothing of the last one's calls applies.
-    if (state.config?.baseUrl !== previous.config?.baseUrl) {
-      usePhone.getState().reset()
-    }
-
     if (state.status === 'online' && previous.status !== 'online') {
       last = Date.now()
       plugin.reset()

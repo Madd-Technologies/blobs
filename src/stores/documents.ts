@@ -6,8 +6,8 @@ import { driveFileId, openInGoogle, type DriveFile } from '@/features/viewer/dri
 import { fileName, viewerKind } from '@/features/viewer/kind'
 import { restJson } from '@/lib/hermes/server'
 import { useConnection } from '@/stores/connection'
-import { toast } from '@/stores/toast'
-import { useViewer } from '@/stores/viewer'
+import { registerServerReset } from '@/stores/reset'
+import { toast, useUi } from '@/stores/ui'
 
 /**
  * Something to read in the viewer: a file on the server (by absolute path), something a server plugin serves (a route such as a
@@ -36,7 +36,7 @@ let opened = 0
  */
 export function openDocument(doc: ViewerDoc): void {
   if (doc.kind === 'file' && viewerKind(doc.path) === 'image') {
-    useViewer.getState().open({ name: doc.name, path: doc.path, profile: doc.profile })
+    useUi.getState().viewer.open({ name: doc.name, path: doc.path, profile: doc.profile })
 
     return
   }
@@ -92,3 +92,7 @@ async function openDriveFile(id: string, doc: ViewerDoc) {
 }
 
 export const openFile = (path: string, profile?: string, name: string = fileName(path)) => openDocument({ kind: 'file', path, name, profile })
+
+registerServerReset(() => {
+  useDocument.setState({ docs: {} })
+})

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { configureMath, texToPicture } from './math.ts'
+import { cacheMathPicture, configureMath, getCachedMathPicture, mathCacheKey, parseMathSvg, texToPicture } from './math.ts'
 import { createConverter } from './mathEngine.ts'
 
 configureMath(createConverter)
@@ -38,7 +38,19 @@ describe('texToPicture', () => {
 
   it('answers the same picture twice, from memory', () => {
     assert.equal(texToPicture('a+b', false), texToPicture('a+b', false))
-    // The same TeX in the two modes is two pictures.
     assert.notEqual(texToPicture('\\sum_{i}x_i', true)?.height, texToPicture('\\sum_{i}x_i', false)?.height)
+  })
+
+  it('parses SVG metrics and caches asynchronous worker results cleanly', () => {
+    assert.equal(parseMathSvg(null), null)
+    assert.equal(parseMathSvg('<svg width="0ex" height="1ex"></svg>'), null)
+    assert.equal(mathCacheKey('  x+1 ', false), 'Ix+1')
+    assert.equal(getCachedMathPicture('uncached-formula', false), undefined)
+    const pic = parseMathSvg('<mjx-container><svg xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.5ex;" role="img" width="2.5ex" height="1.5ex"><path/></svg></mjx-container>')
+    assert.ok(pic)
+    assert.equal(pic.depth, 0.5)
+    assert.equal(pic.width, 2.5)
+    cacheMathPicture('worker-test', true, pic)
+    assert.equal(getCachedMathPicture('worker-test', true), pic)
   })
 })

@@ -14,10 +14,10 @@ import { T } from '@/components/ui/T'
 import { timeLabel } from '@/features/dashboard/view'
 import { answeredBy, callLine, clock, duringCall, formatNumber, recorded, transcriptLines, whoHasLine } from '@/features/phone/view'
 import { useNow } from '@/lib/useNow'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { useListen } from '@/stores/listen'
 import { startPhonePoll, usePhone } from '@/stores/phone'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts } from '@/theme/tokens'
 
@@ -39,7 +39,7 @@ export default function ErrandCallScreen() {
   const router = useRouter()
   const errand = usePhone(state => state.errands[errandId])
   const name = usePhone(state => state.settings?.name ?? '')
-  const view = useBotView(profile)
+  const bot = useBotIdentity(profile)
   const { c } = useTheme()
   const nowS = useNow()
   const [all, setAll] = useState(false)
@@ -125,7 +125,7 @@ export default function ErrandCallScreen() {
                 </T>
               ) : null}
             </View>
-            {call.question ? <CallQuestionCard errand={errand} call={call} meta={view?.meta} onJoin={() => listen(true)} /> : null}
+            {call.question ? <CallQuestionCard errand={errand} call={call} meta={bot?.meta} onJoin={() => listen(true)} /> : null}
             <LiveLines lines={lines} />
           </ScrollView>
           <LiveTray

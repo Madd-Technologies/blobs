@@ -28,10 +28,12 @@ export function StampReveal({ children }: { children: ReactNode }) {
     .failOffsetX(12)
     .failOffsetY([-12, 12])
     .onUpdate(event => {
+      'worklet'
       // A little resistance: the times are there to glance at, not to pull far.
       offset.value = Math.max(-STAMP_WIDTH, Math.min(0, event.translationX * 0.7))
     })
     .onEnd(() => {
+      'worklet'
       offset.value = withSpring(0, motion.press)
     })
 
@@ -90,6 +92,7 @@ export function SwipeToReply({ onReply, label, children }: { onReply?: () => voi
     .failOffsetX(-10)
     .failOffsetY([-10, 10])
     .onUpdate(event => {
+      'worklet'
       const pulled = Math.max(0, event.translationX)
       // Past the point it follows the finger only a little: it has done its job.
       x.value = pulled > REPLY_AT ? REPLY_AT + (pulled - REPLY_AT) * 0.2 : pulled
@@ -103,6 +106,7 @@ export function SwipeToReply({ onReply, label, children }: { onReply?: () => voi
       }
     })
     .onEnd(() => {
+      'worklet'
       if (armed.value) {
         runOnJS(reply)()
       }

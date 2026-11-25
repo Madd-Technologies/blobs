@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { activityStamp, isCurrent, keepYours, lastVisible, type VisibleActivity } from '@/features/roster/visible'
 import { listSessionMessages } from '@/lib/hermes/rest'
 import { useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
 
 interface VisibleState {
@@ -78,8 +79,31 @@ export function startVisibleSync(): () => void {
           return !!(canonical?.resolved_id || canonical?.id) && !isCurrent(useVisible.getState().byBot[row.name], canonical)
         })
 
-        // A few at a time rather than one after another: with many bots the last one used to wait for all the others.
+        // A few at a time rather than one after another, batching store writes so Home and AsyncStorage update once per wave.
         const next = () => todo.shift()
+        let pending: Record<string, VisibleActivity> = {}
+        let pendingCount = 0
+
+        const flush = () => {
+          if (!pendingCount) {
+            return
+          }
+
+          const batch = pending
+          pending = {}
+          pendingCount = 0
+
+          useVisible.setState(state => {
+            const byBot = { ...state.byBot }
+
+            for (const [name, entry] of Object.entries(batch)) {
+              byBot[name] = entry.failed ? (state.byBot[name] ?? entry) : keepYours(entry, state.byBot[name])
+            }
+
+            return { byBot }
+          })
+        }
+
         const worker = async () => {
           for (let row = next(); row && !stopped; row = next()) {
             const canonical = row.canonical_session
@@ -102,15 +126,24 @@ export function startVisibleSync(): () => void {
                 visible = lastVisible((await read(WINDOW, true)).messages, stamp)
               }
 
-              useVisible.setState(state => ({ byBot: { ...state.byBot, [name]: keepYours(visible, state.byBot[name]) } }))
+              pending[name] = visible
             } catch {
               // A bot that was read before keeps what it showed. One that never was falls back to the server's own preview.
-              useVisible.setState(state => (state.byBot[name] ? state : { byBot: { ...state.byBot, [name]: { stamp, ts: 0, text: '', failed: true } } }))
+              if (!useVisible.getState().byBot[name]) {
+                pending[name] = { stamp, ts: 0, text: '', failed: true }
+              }
+            }
+
+            pendingCount++
+
+            if (pendingCount >= AT_ONCE) {
+              flush()
             }
           }
         }
 
         await Promise.all(Array.from({ length: AT_ONCE }, worker))
+        flush()
       } while (again && !stopped)
     } finally {
       busy = false
@@ -123,11 +156,6 @@ export function startVisibleSync(): () => void {
     }
   })
   const stopConnection = useConnection.subscribe((state, previous) => {
-    // Signing out forgets what this phone kept of the server's chats.
-    if (!state.config && previous.config) {
-      useVisible.setState({ server: null, byBot: {} })
-    }
-
     if (state.status === 'online' && previous.status !== 'online') {
       void run()
     }
@@ -141,3 +169,9 @@ export function startVisibleSync(): () => void {
     stopConnection()
   }
 }
+
+registerServerReset(baseUrl => {
+  if (useVisible.getState().server !== baseUrl) {
+    useVisible.setState({ server: baseUrl, byBot: {} })
+  }
+})

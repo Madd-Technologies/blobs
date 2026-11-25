@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 
-import { fetchPicture, imageOfResult, isPicture, isRemote, splitMedia, viewError } from './media.ts'
+import { fetchPicture, imageOfResult, isPicture, isRemote, splitMedia, viewError, webHost } from './media.ts'
 import { HermesHttpError, type ServerConfig } from './server.ts'
 
 const config: ServerConfig = { baseUrl: 'https://h.ts.net', auth: { kind: 'oauth', accessToken: 'tok', refreshToken: 'r', expiresAt: 0 } }
@@ -119,6 +119,12 @@ describe('the picture an image tool made', () => {
   it('knows a web address from a file', () => {
     assert.equal(isRemote('https://x/a.png'), true)
     assert.equal(isRemote('/home/a.png'), false)
+  })
+
+  it('names the host a web picture would load from', () => {
+    assert.equal(webHost('https://Images.Example.com/a.png?x=1'), 'images.example.com')
+    assert.equal(webHost('http://user:pw@example.org:8080/p.jpg'), 'example.org')
+    assert.equal(webHost('/home/orion/a.png'), null)
   })
 })
 

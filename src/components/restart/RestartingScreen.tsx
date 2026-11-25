@@ -7,7 +7,7 @@ import { IconCircle } from '@/components/ui/IconCircle'
 import { Spinner } from '@/components/ui/Spinner'
 import { T } from '@/components/ui/T'
 import { useNowMs } from '@/lib/useNow'
-import { useBotViews } from '@/stores/bots'
+import { useBotDirectory } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { useRestart } from '@/stores/restart'
 import { useTheme } from '@/theme/ThemeProvider'
@@ -32,7 +32,7 @@ export function RestartingScreen() {
   const hidden = useRestart(state => state.overlayHidden)
   const offline = useConnection(state => state.status !== 'online')
   const host = useConnection(state => state.config?.baseUrl.replace(/^https?:\/\//i, '').replace(/\/$/, '') ?? 'your server')
-  const views = useBotViews()
+  const bots = useBotDirectory()
   const showing = phase.kind === 'restarting' && offline && !hidden
   const nowMs = useNowMs(showing, 1000)
 
@@ -50,9 +50,11 @@ export function RestartingScreen() {
       </View>
       <View style={styles.center}>
         <View style={styles.faces}>
-          {views.slice(0, 5).map(view => (
-            <BotFace key={view.profile} name={view.profile} meta={view.meta} size={40} mood="off" />
-          ))}
+          {Object.entries(bots)
+            .slice(0, 5)
+            .map(([profile, bot]) => (
+              <BotFace key={profile} name={profile} meta={bot.meta} size={40} mood="off" />
+            ))}
         </View>
         <T variant="title" style={styles.centered} accessibilityRole="header">
           {slow ? 'Hermes hasn’t come back yet' : 'Restarting Hermes…'}

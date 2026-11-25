@@ -1,27 +1,29 @@
 import * as Clipboard from 'expo-clipboard'
 import { useRouter } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Platform, RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 
 import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
 import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { T } from '@/components/ui/T'
 import { installMessage } from '@/features/plugins/catalog'
-import { useBotViews } from '@/stores/bots'
+import { useBotDirectory } from '@/stores/bots'
 import { pluginView } from '@/features/plugins/view'
 import { useConnection } from '@/stores/connection'
 import { useRestart } from '@/stores/restart'
 import { SERVER_PLUGINS, useServerPlugins, type ServerPlugin } from '@/stores/serverPlugins'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { radius } from '@/theme/tokens'
 
 /** The pinned bots: a per-bot plugin (Dashboards) is installed for each of them too. */
 function usePinnedProfiles(): string[] {
-  const views = useBotViews()
+  const directory = useBotDirectory()
 
-  return views.filter(view => view.pinned).map(view => view.profile)
+  return Object.entries(directory)
+    .filter(([, bot]) => bot.pinned)
+    .map(([profile]) => profile)
 }
 
 function copySetup(plugin: ServerPlugin, bots: string[]) {
@@ -60,11 +62,11 @@ function PluginBlock({ plugin }: { plugin: ServerPlugin }) {
           {line}
         </T>
       ))}
-      {view.action || restartToLoad || (ready && plugin.name === 'hermes-bot-mobile' && Platform.OS === 'android') ? (
+      {view.action || restartToLoad || (ready && plugin.name === 'hermes-bot-mobile') ? (
         <View style={styles.actions}>
           {restartToLoad ? <Pill label="Restart Hermes" icon="rotate-cw" variant="secondary" height={40} onPress={() => useRestart.getState().open('both')} /> : null}
           {view.action ? <Pill label={view.action === 'update' ? 'Copy update message' : 'Copy setup message'} icon="copy" variant="secondary" height={40} onPress={() => copySetup(plugin, bots)} /> : null}
-          {ready && plugin.name === 'hermes-bot-mobile' && Platform.OS === 'android' ? <Pill label="Notification settings" variant="ghost" height={40} onPress={() => router.push('/notifications')} /> : null}
+          {ready && plugin.name === 'hermes-bot-mobile' ? <Pill label="Notification settings" variant="ghost" height={40} onPress={() => router.push('/notifications')} /> : null}
         </View>
       ) : null}
     </View>

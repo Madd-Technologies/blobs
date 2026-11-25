@@ -11,7 +11,7 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader'
 import { Sheet } from '@/components/ui/Sheet'
 import { T } from '@/components/ui/T'
 import { usePhone } from '@/stores/phone'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

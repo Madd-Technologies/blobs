@@ -17,7 +17,7 @@ import { enablePictures, onPastedPicture, type PastedPicture } from '@/lib/paste
 import { clipboardHasPicture, pastePicture, pickFiles, pickPhotos, takePhoto } from '@/lib/pickers'
 import { useKeyboardHeight } from '@/lib/useKeyboardHeight'
 import { useVoiceNote } from '@/lib/useVoiceNote'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 
@@ -35,9 +35,13 @@ interface Props {
   running: boolean
   /** Words already in the box when it opens (a draft handed over from another screen); the keyboard comes up with them. */
   initialText?: string
+  /** Focus automatically when mounted with a handed-off draft (leave false for passive saved drafts). */
+  autoFocus?: boolean
   /** Controlled mode: the screen owns the text (so it can add an @mention). Leave out and the box keeps its own. */
   value?: string
   onChangeText?: (text: string) => void
+  /** Uncontrolled draft observer (kept in sync across navigation without bumping nonce). */
+  onDraftChange?: (text: string) => void
   /** Files waiting to go with the message, and how to change them. Leave out where files cannot be sent (rooms). */
   files?: PendingFile[]
   onFilesChange?: (files: PendingFile[]) => void
@@ -61,14 +65,21 @@ interface Props {
  * bot works. The mic records a voice message and puts what you said in the field, where you can fix it before sending; for a
  * bot that takes calls it is Call instead.
  */
-export function Composer({ botName, running, initialText, value, onChangeText, files, onFilesChange, voiceProfile, onCall, commands, above, focusSignal, onSend, onStop }: Props) {
+export function Composer({ botName, running, initialText, autoFocus = !!initialText, value, onChangeText, onDraftChange, files, onFilesChange, voiceProfile, onCall, commands, above, focusSignal, onSend, onStop }: Props) {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
   // With the keyboard up it already covers the home-indicator / nav-bar area, so the inset would only leave a gap.
   const keyboardOpen = useKeyboardHeight() > 0
   const [own, setOwn] = useState(initialText ?? '')
   const text = value ?? own
-  const setText = onChangeText ?? setOwn
+  const setText = (next: string) => {
+    if (onChangeText) {
+      onChangeText(next)
+    } else {
+      setOwn(next)
+      onDraftChange?.(next)
+    }
+  }
   const input = useRef<TextInput>(null)
 
   useEffect(() => {
@@ -264,7 +275,7 @@ export function Composer({ botName, running, initialText, value, onChangeText, f
                   key={generation}
                   ref={input}
                   // After a send the new input takes over, so the keyboard stays up for the next message.
-                  autoFocus={generation > 0 || !!initialText}
+                  autoFocus={generation > 0 || (autoFocus && !!initialText)}
                   value={text}
                   onChangeText={changeText}
                   placeholder={attached.length ? 'Add a message' : `Message ${botName}`}

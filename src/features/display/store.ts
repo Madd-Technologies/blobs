@@ -343,12 +343,18 @@ export function createDisplay(deps: DisplayDeps) {
     patch(profile, { error: null })
   }
 
+  function reset() {
+    profileOfKey.clear()
+    sudoFrames.clear()
+    store.setState({ screens: {} })
+  }
+
   function dispose() {
     stopEvents()
     stopSudo?.()
   }
 
-  return { store, get, refresh, refreshAll, thumbnail, start, stop, install, answerSudo, observe, takeOver, handBack, viewerFor, clearError, dispose }
+  return { store, get, refresh, refreshAll, thumbnail, start, stop, install, answerSudo, observe, takeOver, handBack, viewerFor, clearError, reset, dispose }
 }
 
 export type Display = ReturnType<typeof createDisplay>

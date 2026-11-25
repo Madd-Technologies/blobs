@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native'
 
 import { T } from '@/components/ui/T'
 import { diagramKind } from '@/lib/hermes/diagram'
-import { useDiagram } from '@/stores/diagram'
+import { useUi } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 /**
@@ -15,7 +15,7 @@ export function DiagramTile({ source }: { source: string }) {
   const kind = diagramKind(source)
 
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${kind}. Open`} onPress={() => useDiagram.getState().open(source)} style={({ pressed }) => [styles.tile, { backgroundColor: pressed ? c.tone : c.sheet }]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={`${kind}. Open`} onPress={() => useUi.getState().diagram.open(source)} style={({ pressed }) => [styles.tile, { backgroundColor: pressed ? c.tone : c.sheet }]}>
       <Feather name="git-branch" size={18} color={c.text2} />
       <View style={styles.text}>
         <T variant="rowTitle">{kind}</T>

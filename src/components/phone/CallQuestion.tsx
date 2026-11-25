@@ -15,7 +15,7 @@ import { phoneHas, type Call, type CallReply, type Errand } from '@/lib/hermes/p
 import { useNowMs } from '@/lib/useNow'
 import { canListen } from '@/stores/listen'
 import { usePhone } from '@/stores/phone'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 import { fonts, radius } from '@/theme/tokens'
 

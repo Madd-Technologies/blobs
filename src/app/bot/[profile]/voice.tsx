@@ -12,10 +12,10 @@ import { Switch } from '@/components/ui/Switch'
 import { T } from '@/components/ui/T'
 import { accountHint, accountLabel, PRIVACY_NOTE, VOICES, voiceLabel, type VoiceAccount, type VoiceChange } from '@/lib/hermes/voice'
 import type { CallMode } from '@/features/call/engine'
-import { useBotView } from '@/stores/bots'
+import { useBotIdentity } from '@/stores/bots'
 import { useConnection } from '@/stores/connection'
 import { usePrefs } from '@/stores/prefs'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useVoice } from '@/stores/voice'
 
 const ACCOUNTS: VoiceAccount[] = ['sign-in', 'key']
@@ -34,7 +34,7 @@ export default function BotVoice() {
   const { profile } = useLocalSearchParams<{ profile: string }>()
   const online = useConnection(state => state.status === 'online')
   const entry = useVoice(state => state.byBot[profile])
-  const name = useBotView(profile)?.name ?? profile
+  const name = useBotIdentity(profile)?.name ?? profile
   const [choosing, setChoosing] = useState<'voice' | 'account' | 'mode' | null>(null)
   const mode = usePrefs(state => state.callMode)
 

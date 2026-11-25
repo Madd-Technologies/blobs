@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { AppState } from 'react-native'
 import { create, useStore } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
@@ -8,6 +8,8 @@ import { attentionFor, deriveInbox, type InboxEntry } from '@/features/inbox/der
 import { KANBAN_APPROVALS_PATH, NEEDS_YOU_EVENT, NEEDS_YOU_PATH } from '@/features/inbox/pushed'
 import { visibleState } from '@/features/roster/visible'
 import { createInbox } from '@/features/inbox/store'
+import { pendingPrompts } from '@/features/transcript/reduce'
+import type { BotSession } from '@/features/sessions/store'
 import { coalesce } from '@/lib/coalesce'
 import { supportsLiveHelpers } from '@/lib/hermes/capabilities'
 import { isAbsent } from '@/lib/hermes/plugins'
@@ -15,6 +17,7 @@ import { HermesHttpError, restJson } from '@/lib/hermes/server'
 import { startPoller } from '@/lib/poller'
 import { useNow } from '@/lib/useNow'
 import { gateway, onGatewayEvent, useConnection } from '@/stores/connection'
+import { registerServerReset } from '@/stores/reset'
 import { useRoster } from '@/stores/roster'
 import { useSeen } from '@/stores/seen'
 import { sessions } from '@/stores/sessions'
@@ -92,10 +95,7 @@ export function startInboxSync(): () => void {
   }
 
   const stopConnection = useConnection.subscribe((state, previous) => {
-    if (!state.config && previous.config) {
-      // Signed out: nothing of that server's is kept.
-      inbox.store.setState({ pushed: null, polled: {}, kanban: [] })
-    } else if (state.status === 'online' && previous.status !== 'online') {
+    if (state.status === 'online' && previous.status !== 'online') {
       void inbox.loadPushed()
     }
   })
@@ -114,10 +114,73 @@ export function startInboxSync(): () => void {
   }
 }
 
-/** The inbox entries and per-bot grouping, recomputed when the roster, chats or polled data change. */
+function sameInboxBots(a: Record<string, BotSession>, b: Record<string, BotSession>): boolean {
+  if (a === b) {
+    return true
+  }
+
+  const keys = Object.keys(a)
+
+  if (keys.length !== Object.keys(b).length) {
+    return false
+  }
+
+  for (const key of keys) {
+    const x = a[key]
+    const y = b[key]
+
+    if (!x || !y) {
+      return false
+    }
+
+    if (x === y) {
+      continue
+    }
+
+    const xReady = x.phase === 'ready'
+    const yReady = y.phase === 'ready'
+
+    if (xReady !== yReady) {
+      return false
+    }
+
+    if (!xReady) {
+      continue
+    }
+
+    if (x.liveId !== y.liveId) {
+      return false
+    }
+
+    if (x.transcript.items !== y.transcript.items) {
+      const px = pendingPrompts(x.transcript)
+      const py = pendingPrompts(y.transcript)
+
+      if (px.length !== py.length || px.some((item, index) => item !== py[index])) {
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
+function useInboxBots(): Record<string, BotSession> {
+  const prev = useRef<Record<string, BotSession> | undefined>(undefined)
+
+  return useStore(sessions.store, state => {
+    if (prev.current && sameInboxBots(prev.current, state.bots)) {
+      return prev.current
+    }
+
+    return (prev.current = state.bots)
+  })
+}
+
+/** The inbox entries and per-bot grouping, recomputed when the roster, open prompts or polled data change. */
 export function useInbox() {
   const roster = useRoster(state => state.rows)
-  const bots = useStore(sessions.store, state => state.bots)
+  const bots = useInboxBots()
   const { active, polled, pushed, kanban } = useStore(inbox.store, useShallow(state => ({ active: state.active, polled: state.polled, pushed: state.pushed, kanban: state.kanban })))
 
   return useMemo(() => {
@@ -171,3 +234,8 @@ interface OpenChatState {
 }
 
 export const useOpenChat = create<OpenChatState>(set => ({ profile: null, setOpen: profile => set({ profile }) }))
+
+registerServerReset(() => {
+  inbox.reset()
+  useOpenChat.setState({ profile: null })
+})

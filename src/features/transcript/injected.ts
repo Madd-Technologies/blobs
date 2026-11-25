@@ -347,3 +347,33 @@ export function dashboardButton(text: string): { label: string; title: string; d
   return { label: (match[1] ?? '').trim(), title: (match[2] ?? '').trim(), draft }
 }
 
+const SETUP_TITLE = /^\[Dashboard panel · ([^\]\n]+)\]/
+const SETUP_WHAT = /to track this on my Blobs app dashboard:\s*([^\n]+?)(?:\s+Keep it fresh\s+|$)/i
+const LEGACY_SETUP = /hermes-dashboard:dashboard[\s\S]*What to track:\s*([\s\S]+)/i
+
+/** Builds the dashboard panel setup prompt sent into the bot's chat from PanelStarterSheet. */
+export function dashboardSetupMessage(title: string, what: string, cadence: string): string {
+  return `[Dashboard panel · ${title.trim()}]\nLoad skill_view("hermes-dashboard:dashboard") and use your dashboard_* tools (find them with tool search) to track this on my Blobs app dashboard: ${what.trim()} Keep it fresh ${cadence.trim()}. No new plugin.`
+}
+
+/** Recognizes dashboard panel setup prompts so UserBubble renders a clean compact summary instead of raw tool syntax. */
+export function dashboardSetup(text: string): { title: string; what: string } | null {
+  const trimmed = text.trimStart()
+  const match = SETUP_TITLE.exec(trimmed)
+
+  if (match) {
+    const title = (match[1] ?? '').trim() || 'Dashboard panel'
+    const what = SETUP_WHAT.exec(trimmed)?.[1]?.trim() ?? ''
+
+    return { title, what }
+  }
+
+  const legacy = LEGACY_SETUP.exec(trimmed)
+
+  if (legacy) {
+    return { title: 'Dashboard panel', what: (legacy[1] ?? '').trim() }
+  }
+
+  return null
+}
+

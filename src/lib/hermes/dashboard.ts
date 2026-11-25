@@ -4,6 +4,7 @@
  * You act on records here (status, fields, notes, done); bots create records and views. Pure apart from the fetches.
  */
 
+import { describeError } from './errors.ts'
 import { isAbsent } from './plugins.ts'
 import { HermesHttpError, restJson, type ServerConfig } from './server.ts'
 
@@ -238,6 +239,12 @@ export interface NeedsYouRecord {
   view: string
   view_title: string
   row: ViewRow
+  inbox?: 'interrupt' | 'review'
+  body_snippet?: string
+  primary_action?: { id: string; label: string; tone?: string }
+  has_draft?: boolean
+  updated_at?: number
+  stale?: boolean
 }
 
 /** The server runs 0.1 (snapshot panels), which this app no longer draws. */
@@ -315,6 +322,68 @@ export function addRecordNote(config: ServerConfig, id: string, text: string): P
 /** Mutes a record until `until` (server seconds), or unmutes it with null. */
 export async function muteRecord(config: ServerConfig, id: string, until: number | null): Promise<DashboardRecord> {
   return (await restJson<{ record: DashboardRecord }>(config, recordPath(id, '/mute'), json('POST', { until }), { timeoutMs: 10000 })).record
+}
+
+export type BulkRecordAction = 'close' | 'reopen' | 'mute'
+
+export interface BulkRecordsResult {
+  updated: string[]
+  failed: { id: string; error: string }[]
+}
+
+/**
+ * Applies `close`, `reopen`, or `mute` across many records in one transaction when the server supports `/records/bulk`,
+ * falling back to bounded concurrency per-record requests on older plugin versions (404/405).
+ */
+export async function bulkRecords(config: ServerConfig, ids: string[], action: BulkRecordAction, until?: number | null): Promise<BulkRecordsResult> {
+  const unique = [...new Set(ids)]
+
+  if (unique.length === 0) {
+    return { updated: [], failed: [] }
+  }
+
+  try {
+    const body = action === 'mute' ? { ids: unique, action, until: until ?? null } : { ids: unique, action }
+    const answer = await restJson<{ updated?: string[]; failed?: { id: string; error: string }[] }>(config, `${BASE}/records/bulk`, json('POST', body), { timeoutMs: 15_000 })
+
+    return {
+      updated: Array.isArray(answer?.updated) ? answer.updated : [],
+      failed: Array.isArray(answer?.failed) ? answer.failed : [],
+    }
+  } catch (error) {
+    if (!(error instanceof HermesHttpError) || (error.status !== 404 && error.status !== 405)) {
+      throw error
+    }
+
+    const updated: string[] = []
+    const failed: { id: string; error: string }[] = []
+    let cursor = 0
+    const workers = Array.from({ length: Math.min(4, unique.length) }, async () => {
+      while (cursor < unique.length) {
+        const id = unique[cursor++]
+
+        if (!id) {
+          continue
+        }
+
+        try {
+          if (action === 'mute') {
+            await muteRecord(config, id, until ?? null)
+          } else {
+            await setRecordClosed(config, id, action === 'close')
+          }
+
+          updated.push(id)
+        } catch (err) {
+          failed.push({ id, error: describeError(err) })
+        }
+      }
+    })
+
+    await Promise.all(workers)
+
+    return { updated, failed }
+  }
 }
 
 /** The draft you approved changed since you opened it (or this needs a digest): nothing started. `current` is its digest now. */

@@ -11,7 +11,7 @@ import { T } from '@/components/ui/T'
 import { toolsetDetail, toolsetsLine } from '@/lib/hermes/toolsets'
 import { useConnection } from '@/stores/connection'
 import { useToolsets } from '@/stores/toolsets'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 
 /** Which groups of tools a bot can use. It is that bot's own setting; the change reaches it on its next message. */
 export default function BotTools() {

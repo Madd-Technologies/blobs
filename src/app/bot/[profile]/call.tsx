@@ -19,7 +19,7 @@ import { motionFor } from '@/features/face/motion'
 import { pendingPrompts } from '@/features/transcript/reduce'
 import { clock } from '@/lib/hermes/audio'
 import { useNowMs } from '@/lib/useNow'
-import { useBotView, useFaceColor } from '@/stores/bots'
+import { useBotIdentity, useFaceColor } from '@/stores/bots'
 import { useCall } from '@/stores/call'
 import { useBotSession } from '@/stores/sessions'
 import { BotTint } from '@/theme/ThemeProvider'
@@ -46,14 +46,14 @@ function talking(call: CallSnapshot): 'you' | 'voice' | null {
 export default function CallScreen() {
   const { profile } = useLocalSearchParams<{ profile: string }>()
   const router = useRouter()
-  const view = useBotView(profile)
+  const bot = useBotIdentity(profile)
   const tint = useFaceColor(profile)
   const call = useCall(state => (state.profile === profile ? state.call : null))
   const since = useCall(state => state.since)
   const level = useCall(state => state.level)
   const voiceLevel = useCall(state => state.voiceLevel)
   const transcript = useBotSession(profile)?.transcript
-  const name = view?.name ?? profile
+  const name = bot?.name ?? profile
   const live = call?.phase === 'live'
   const now = useNowMs(live)
   const seconds = live && since ? Math.max(0, Math.floor((now - since) / 1000)) : 0
@@ -97,7 +97,7 @@ export default function CallScreen() {
   const caption = call.caption ? captionTail(call.caption.text) : ''
   const working = call.tasks > 0
   const face = (
-    <TapFace name={profile} meta={view?.meta} size={prompt ? FACE_WAITING : FACE} mood={working ? 'work' : 'idle'} motion={motionFor({ needsYou: !!prompt, working })} />
+    <TapFace name={profile} meta={bot?.meta} size={prompt ? FACE_WAITING : FACE} mood={working ? 'work' : 'idle'} motion={motionFor({ needsYou: !!prompt, working })} />
   )
   const captionText = caption ? (
     <T aria-live="polite" color={call.caption?.who === 'you' ? 'text2' : 'text'} numberOfLines={3} style={styles.caption}>

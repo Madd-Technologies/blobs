@@ -57,6 +57,21 @@ describe('where a link points on the server', () => {
     assert.equal(serverTarget('/home/orion/'), null)
     assert.equal(serverTarget('/home/orion/projects'), null)
   })
+
+  it('does not let a plugin link climb out of its plugin', () => {
+    for (const href of [
+      '/api/plugins/x/../../api/env',
+      '/api/plugins/x/%2e%2e/%2E%2E/api/env',
+      '/api/plugins/x/.%2e/config',
+      '/api/plugins/x/..\\..\\api\\env',
+      '/api/plugins/x/a%2f..%2f..%2fenv',
+      '/api/plugins/x/./a',
+    ]) {
+      assert.equal(serverTarget(href), null, href)
+    }
+    assert.deepEqual(routeLinks('[Env](/api/plugins/x/../../api/env)'), [])
+    assert.deepEqual(serverTarget('/api/plugins/x/a..b/c?next=../d'), { kind: 'route', href: '/api/plugins/x/a..b/c?next=../d' })
+  })
 })
 
 describe('plugin links in a reply', () => {

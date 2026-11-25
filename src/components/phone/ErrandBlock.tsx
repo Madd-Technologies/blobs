@@ -13,7 +13,7 @@ import type { BotMeta } from '@/lib/hermes/identity'
 import type { Errand } from '@/lib/hermes/phone'
 import { useNowMs } from '@/lib/useNow'
 import { usePhone } from '@/stores/phone'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { useTheme } from '@/theme/ThemeProvider'
 
 import { CallQuestionCard } from './CallQuestion'

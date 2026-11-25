@@ -15,7 +15,7 @@ import { Raised } from '@/components/ui/Raised'
 import { T } from '@/components/ui/T'
 import { botLastActive } from '@/features/attention/derive'
 import { formatTyped, recordDrafts, recordHeading } from '@/features/dashboard/view'
-import type { DeckCard } from '@/features/inbox/deck'
+import type { DeckCard, DeckEntry, StackCard } from '@/features/inbox/deck'
 import { kanbanAbout } from '@/features/inbox/pushed'
 import type { BotView } from '@/features/roster/view'
 import { ageLabel } from '@/features/roster/derive'
@@ -25,7 +25,7 @@ import type { BotMeta } from '@/lib/hermes/identity'
 import { approvalDraftOf } from '@/components/dashboard/useApprovals'
 import { answerApproval, answerQuestion, answerSecret, answerSudo } from '@/stores/actions'
 import { useDashboards } from '@/stores/dashboards'
-import { toast } from '@/stores/toast'
+import { toast } from '@/stores/ui'
 import { BotTint, useTheme } from '@/theme/ThemeProvider'
 import { fonts, motion, radius, tintLevel } from '@/theme/tokens'
 
@@ -40,6 +40,30 @@ export function cardName(card: DeckCard, context: DeckContext): string {
   return card.kind === 'room' ? card.view.name : (context.views.find(view => view.profile === card.profile)?.name ?? card.profile)
 }
 
+function entryName(card: DeckEntry, context: DeckContext): string {
+  if (card.kind === 'stack') {
+    return context.views.find(view => view.profile === card.profile)?.name ?? card.profile
+  }
+
+  return cardName(card, context)
+}
+
+function entryLine(card: DeckEntry): string {
+  if (card.kind === 'stack') {
+    return `${card.viewTitle} · ${card.cards.length} items`
+  }
+
+  return cardLine(card)
+}
+
+function entryAge(card: DeckEntry, context: DeckContext): string {
+  return card.kind === 'stack' ? '' : cardAge(card, context)
+}
+
+function entryFace(card: DeckEntry, context: DeckContext): string | null {
+  return card.kind === 'stack' ? faceColor(card.profile, context.metas[card.profile]) : cardFace(card, context)
+}
+
 export function cardAge(card: DeckCard, context: DeckContext): string {
   if (card.kind === 'room') {
     return card.view.age
@@ -47,6 +71,12 @@ export function cardAge(card: DeckCard, context: DeckContext): string {
 
   if (card.kind === 'phone') {
     return phoneCardAge(card, context.nowS)
+  }
+
+  if (card.kind === 'board') {
+    const meta = card.record.row.meta
+
+    return meta && (meta.type === 'date' || meta.type === 'datetime') ? formatTyped(meta, card.nowS) : ''
   }
 
   const view = context.views.find(candidate => candidate.profile === card.profile)
@@ -94,30 +124,107 @@ function Face({ card, context, size }: { card: DeckCard; context: DeckContext; s
  * A card behind the top one: flat, in its bot's paper, showing only who and what. `depth` 1 is next, 2 the one after.
  * Tapping it brings it to the top.
  */
-export function BehindCard({ card, context, depth, behind, onPress }: { card: DeckCard; context: DeckContext; depth: 1 | 2; behind: number; onPress: () => void }) {
+export function BehindCard({ card, context, depth, behind, onPress }: { card: DeckEntry; context: DeckContext; depth: 1 | 2; behind: number; onPress: () => void }) {
   const { scheme, neutral } = useTheme()
-  const face = cardFace(card, context)
+  const face = entryFace(card, context)
   const fill = face ? tintLevel(scheme, depth === 1 ? 'tone' : 'sheet', face) : depth === 1 ? neutral.deckNext : neutral.deckThird
 
   return (
     <Press
       accessibilityRole="button"
-      accessibilityLabel={`${cardName(card, context)}, ${depth === 1 ? 'next' : 'after that'}`}
+      accessibilityLabel={`${entryName(card, context)}, ${depth === 1 ? 'next' : 'after that'}`}
       accessibilityHint="Brings it to the top"
       onPress={onPress}
-      style={[styles.behind, { top: (behind - depth) * 38, left: depth * 14, right: depth * 14, borderRadius: depth === 1 ? 24 : 22, backgroundColor: fill }]}
+      style={[styles.behind, { top: (behind - depth) * 30, left: depth * 14, right: depth * 14, borderRadius: depth === 1 ? 24 : 22, backgroundColor: fill }]}
     >
       {card.kind === 'room' ? <RoomFaces members={card.view.data.room.members.slice(0, 2)} metas={context.metas} variant="header" ring={fill} /> : <BotFace name={card.profile} meta={context.metas[card.profile]} size={18} />}
       <T variant="label" color={depth === 1 ? 'text' : 'text2'} style={styles.behindName}>
-        {cardName(card, context)}
+        {entryName(card, context)}
       </T>
       <T variant="label" color="text2" numberOfLines={1} style={styles.flex}>
-        {cardLine(card)}
+        {entryLine(card)}
       </T>
       <T variant="meta" color="text2" style={styles.behindAge}>
-        {cardAge(card, context)}
+        {entryAge(card, context)}
       </T>
     </Press>
+  )
+}
+
+/** A collapsed batch card for noisy backlog queues: inspect in list, complete/snooze all, or hand off to its bot. */
+export function StackTopCard({
+  stack,
+  context,
+  onInspect,
+  onDoneAll,
+  onSnoozeAll,
+  onTriage,
+}: {
+  stack: StackCard
+  context: DeckContext
+  onInspect: () => void
+  onDoneAll: () => void
+  onSnoozeAll: () => void
+  onTriage?: () => void
+}) {
+  const { c } = useTheme()
+  const botName = context.views.find(view => view.profile === stack.profile)?.name ?? stack.profile
+  const face = faceColor(stack.profile, context.metas[stack.profile])
+  const preview = stack.cards.slice(0, 3)
+  const extra = stack.cards.length - preview.length
+
+  return (
+    <BotTint color={face}>
+      <Raised radius={radius.deck} rise style={styles.top} accessibilityLabel={`${botName}, ${stack.viewTitle}, ${stack.cards.length} waiting`}>
+        <View style={styles.who}>
+          <BotFace name={stack.profile} meta={context.metas[stack.profile]} size={28} />
+          <T variant="rowTitle" numberOfLines={1} style={styles.flex}>
+            {botName}
+          </T>
+          <T variant="meta" color="text2">
+            {stack.cards.length} waiting
+          </T>
+        </View>
+        <View style={styles.titles}>
+          <T variant="display" numberOfLines={2}>
+            {stack.viewTitle}
+          </T>
+          <T variant="secondary" color="text2">
+            Grouped queue from {botName}
+          </T>
+        </View>
+        <View style={[styles.draft, { backgroundColor: c.pressedIn }]}>
+          {preview.map(item => {
+            const label = item.record.row.title ? formatTyped(item.record.row.title, item.nowS) : 'Untitled'
+            const meta = item.record.row.meta ? formatTyped(item.record.row.meta, item.nowS) : ''
+
+            return (
+              <View key={item.key} style={styles.draftHead}>
+                <T variant="secondary" numberOfLines={1} style={styles.flex}>
+                  {label}
+                </T>
+                {meta ? (
+                  <T variant="meta" color="text2">
+                    {meta}
+                  </T>
+                ) : null}
+              </View>
+            )
+          })}
+          {extra > 0 ? (
+            <T variant="meta" color="text2">
+              +{extra} more
+            </T>
+          ) : null}
+        </View>
+        <Pill label="Inspect in list" variant="primary" height={46} onPress={onInspect} />
+        <View style={styles.buttons}>
+          <Pill label="Done all" variant="secondary" height={40} flex onPress={onDoneAll} />
+          <Pill label="Snooze all" variant="secondary" height={40} flex onPress={onSnoozeAll} />
+        </View>
+        {onTriage ? <Pill label={`Ask ${botName} to triage`} variant="secondary" icon="message-circle" height={36} onPress={onTriage} /> : null}
+      </Raised>
+    </BotTint>
   )
 }
 
@@ -223,10 +330,11 @@ function RecordBody({ card }: { card: Extract<DeckCard, { kind: 'board' }> }) {
   const openRecord = () => router.push({ pathname: '/bot/[profile]/record', params: { profile: card.profile, id } })
   const title = row.title ? formatTyped(row.title, card.nowS) : 'Untitled'
   const under = [row.subtitle ? formatTyped(row.subtitle, card.nowS) : '', row.meta ? formatTyped(row.meta, card.nowS) : ''].filter(Boolean).join(' · ')
-  const body = detail ? recordHeading(detail).body : ''
+  const body = detail ? recordHeading(detail).body : (card.record.body_snippet ?? '')
   const draft = detail ? recordDrafts(detail)[0] : undefined
   const running = detail?.show?.running ?? null
-  const button = running ? null : (detail?.show?.actions?.[0] ?? null)
+  const fallbackAction = !detail && !card.record.has_draft ? (card.record.primary_action ?? null) : null
+  const button = running ? null : (detail?.show?.actions?.[0] ?? fallbackAction)
   // A button that sends a draft you approve is pressed on the record, where the draft is drawn exactly and its digest checked.
   const approval = !!detail && !!button && !!approvalDraftOf(detail, button.id)
 
@@ -352,10 +460,12 @@ export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sidew
 
   pan = pan
     .onStart(() => {
+      'worklet'
       // Picked from the movement, not here: Android measures a pan from where it was recognised, so it starts at zero.
       axis.set(0)
     })
     .onUpdate(event => {
+      'worklet'
       if (axis.get() === 0) {
         axis.set(wayOf(event.translationX, event.translationY, 6))
       }
@@ -378,6 +488,7 @@ export function SwipeCard({ children, onSwipe, onTurn = still, returnLeft, sidew
       }
     })
     .onEnd(event => {
+      'worklet'
       // Decided from the release itself, so a quick flick that gave no update in between still counts.
       const way = axis.get() || wayOf(event.translationX + event.velocityX / 20, event.translationY + event.velocityY / 20, 1)
       const across = way === 1
