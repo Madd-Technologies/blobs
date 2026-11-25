@@ -17,10 +17,23 @@ function applyEntitlements(entitlements) {
   const next = { ...(entitlements || {}) }
   const groups = uniqueStrings([...(next['com.apple.security.application-groups'] || []), APP_GROUP])
   next['com.apple.security.application-groups'] = groups
-  if (!next['aps-environment']) {
-    next['aps-environment'] = 'development'
-  }
   return next
+}
+
+function applyGoogleServicesFile(config, projectRoot, env = process.env) {
+  const envFile = typeof env.GOOGLE_SERVICES_JSON === 'string' ? env.GOOGLE_SERVICES_JSON.trim() : ''
+  const localFile = projectRoot && fs.existsSync(path.join(projectRoot, 'google-services.json')) ? './google-services.json' : ''
+  const target = envFile || localFile
+  if (!target) {
+    return config
+  }
+  return {
+    ...config,
+    android: {
+      ...(config.android || {}),
+      googleServicesFile: target,
+    },
+  }
 }
 
 function applyInfoPlist(infoPlist) {
@@ -70,6 +83,8 @@ function applyAndroidManifest(manifest) {
 }
 
 function withBaseStationExtensions(config) {
+  config = applyGoogleServicesFile(config, process.cwd())
+
   config = withEntitlementsPlist(config, mod => {
     mod.modResults = applyEntitlements(mod.modResults)
     return mod
@@ -108,5 +123,6 @@ function withBaseStationExtensions(config) {
 module.exports = withBaseStationExtensions
 module.exports.APP_GROUP = APP_GROUP
 module.exports.applyEntitlements = applyEntitlements
+module.exports.applyGoogleServicesFile = applyGoogleServicesFile
 module.exports.applyInfoPlist = applyInfoPlist
 module.exports.applyAndroidManifest = applyAndroidManifest

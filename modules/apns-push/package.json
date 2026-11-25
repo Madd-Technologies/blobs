@@ -1,6 +1,0 @@
-{
-  "name": "apns-push",
-  "version": "0.1.0",
-  "private": true,
-  "description": "APNs remote notification token registration and actionable APPROVAL category handling for Blobs on iOS."
-}

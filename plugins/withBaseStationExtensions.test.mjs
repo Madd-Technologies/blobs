@@ -6,10 +6,10 @@ const require = createRequire(import.meta.url)
 const plugin = require('./withBaseStationExtensions.js')
 
 describe('withBaseStationExtensions', () => {
-  it('sets iOS App Group + APNs entitlements without clobbering production values', () => {
+  it('sets iOS App Group without forcing aps-environment development', () => {
     const dev = plugin.applyEntitlements({})
     assert.deepEqual(dev['com.apple.security.application-groups'], [plugin.APP_GROUP])
-    assert.equal(dev['aps-environment'], 'development')
+    assert.equal(dev['aps-environment'], undefined)
 
     const prod = plugin.applyEntitlements({
       'com.apple.security.application-groups': [plugin.APP_GROUP],
@@ -17,6 +17,18 @@ describe('withBaseStationExtensions', () => {
     })
     assert.deepEqual(prod['com.apple.security.application-groups'], [plugin.APP_GROUP])
     assert.equal(prod['aps-environment'], 'production')
+  })
+
+  it('wires android.googleServicesFile from env or local file without failing when absent', () => {
+    const untouched = plugin.applyGoogleServicesFile({ android: { package: 'com.example' } }, '/nonexistent-dir-blobs-test', {})
+    assert.equal(untouched.android.googleServicesFile, undefined)
+
+    const fromEnv = plugin.applyGoogleServicesFile(
+      { android: { package: 'com.example' } },
+      '/nonexistent-dir-blobs-test',
+      { GOOGLE_SERVICES_JSON: '/tmp/gs.json' },
+    )
+    assert.equal(fromEnv.android.googleServicesFile, '/tmp/gs.json')
   })
 
   it('enables Live Activities and remote-notification + audio background modes in Info.plist', () => {

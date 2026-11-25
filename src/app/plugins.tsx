@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard'
 import { useRouter } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Platform, RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 
 import { Pill } from '@/components/ui/Pill'
 import { Screen } from '@/components/ui/Screen'
@@ -62,11 +62,11 @@ function PluginBlock({ plugin }: { plugin: ServerPlugin }) {
           {line}
         </T>
       ))}
-      {view.action || restartToLoad || (ready && plugin.name === 'hermes-bot-mobile' && Platform.OS === 'android') ? (
+      {view.action || restartToLoad || (ready && plugin.name === 'hermes-bot-mobile') ? (
         <View style={styles.actions}>
           {restartToLoad ? <Pill label="Restart Hermes" icon="rotate-cw" variant="secondary" height={40} onPress={() => useRestart.getState().open('both')} /> : null}
           {view.action ? <Pill label={view.action === 'update' ? 'Copy update message' : 'Copy setup message'} icon="copy" variant="secondary" height={40} onPress={() => copySetup(plugin, bots)} /> : null}
-          {ready && plugin.name === 'hermes-bot-mobile' && Platform.OS === 'android' ? <Pill label="Notification settings" variant="ghost" height={40} onPress={() => router.push('/notifications')} /> : null}
+          {ready && plugin.name === 'hermes-bot-mobile' ? <Pill label="Notification settings" variant="ghost" height={40} onPress={() => router.push('/notifications')} /> : null}
         </View>
       ) : null}
     </View>

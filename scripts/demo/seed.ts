@@ -25,6 +25,8 @@ import { gatewayWsUrl, restJson, type ServerConfig } from '../../src/lib/hermes/
 const baseUrl = process.env.DEMO_URL ?? 'http://127.0.0.1:9219'
 const command = process.argv[2]
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+const allowScreen = (placement: string | undefined) =>
+  String(placement).startsWith('terminal:') || (process.env.DEMO_GATEWAY_SCREEN === '1' && placement === 'gateway')
 
 if (command !== 'bots' && command !== 'world' && command !== 'screen' && command !== 'status') {
   console.error('usage: seed.ts bots|world|screen|status (run through scripts/demo/demo.sh)')
@@ -260,7 +262,7 @@ async function room() {
 async function screen(scout: string) {
   const status = await client.request<{ supported?: boolean; installed?: boolean; placement?: string; blocker?: string | null }>('display.status', { profile: 'scout' }, 60_000)
 
-  if (!status.supported || !status.installed || !String(status.placement).startsWith('terminal:')) {
+  if (!status.supported || !status.installed || status.blocker || !allowScreen(status.placement)) {
     console.log(`  --   Scout has no Bot Screen here (${status.blocker ?? status.placement ?? 'unsupported'}); skipped`)
 
     return
@@ -329,7 +331,7 @@ async function status() {
 
   const screen = await client.request<{ placement?: string; running?: boolean }>('display.status', { profile: 'scout' }, 60_000)
 
-  if (String(screen.placement).startsWith('terminal:')) {
+  if (allowScreen(screen.placement)) {
     expect(screen.running === true, `Scout's Bot Screen is up (${screen.running ? 'running' : 'stopped'})`)
   }
 }

@@ -43,7 +43,7 @@ Include concise explanations in App Review notes matching `app.json`:
 - **Export Compliance (`usesNonExemptEncryption: false`)**: Blobs uses only standard OS HTTPS/TLS transport APIs with no custom cryptography.
 - **Microphone (`expo-audio` / `expo-image-picker`)**: Used for voice messages and duplex calls with bots.
 - **Camera & Photo Library (`expo-image-picker`, `NSPhotoLibraryAddUsageDescription`)**: Used for capturing/attaching photos to chats and saving bot-generated images to Photos.
-- **Push Notifications**: Android UnifiedPush via `expo-unified-push`; iOS remote push is not enabled in 1.0.0.
+- **Push Notifications**: Uses `expo-notifications` (APNs on iOS, FCM on Android via Expo Push Service) when users opt in, plus optional UnifiedPush (`ntfy`) on Android. No Firebase Analytics or Crashlytics SDKs are included.
 
 ---
 

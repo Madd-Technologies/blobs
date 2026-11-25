@@ -99,6 +99,13 @@
           "cameraPermission": "Blobs uses the camera to scan Hermes server QR codes and take photos for your bots."
         }
       ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-foreground.png",
+          "color": "#0A0A0A"
+        }
+      ],
       "./plugins/withBaseStationExtensions"
     ],
     "scheme": "hermesbot",

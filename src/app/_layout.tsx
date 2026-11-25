@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
 import { Linking, Platform } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
-import { loadApnsPush } from '@/lib/apnsPush'
+import { configureExpoNotifications, consumeInitialExpoNotificationUrl, subscribeExpoNotificationResponses } from '@/lib/expoPush'
 import { onSharedInbox } from '@/lib/shareInbox'
 import { useBoot } from '@/stores/ui'
 import { useConnection } from '@/stores/connection'
@@ -52,14 +52,23 @@ function RootStack() {
       return
     }
 
-    const pendingUrl = loadApnsPush()?.consumePendingAction()
+    void configureExpoNotifications()
+    const pendingUrl = consumeInitialExpoNotificationUrl()
     if (pendingUrl) {
       void Linking.openURL(pendingUrl).catch(() => {})
     }
 
-    return onSharedInbox(() => {
+    const stopResponses = subscribeExpoNotificationResponses(url => {
+      void Linking.openURL(url).catch(() => {})
+    })
+    const stopInbox = onSharedInbox(() => {
       router.push('/share')
     })
+
+    return () => {
+      stopResponses()
+      stopInbox()
+    }
   }, [configured, router])
 
   return (

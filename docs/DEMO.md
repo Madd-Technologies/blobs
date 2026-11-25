@@ -75,8 +75,7 @@ and `DEMO_MODEL_PORT`.
   plain push is not one of them.
 - **Room messages need a moment between them.** A message sent while the room is still closing a round is never picked
   up on 0.21.6; the seeder waits for each round to finish.
-- **App Review** needs a server the reviewers can reach. This demo is localhost only; a hosted copy of the same world is
-  a separate step.
+- **App Review** needs a server the reviewers can reach. This demo is localhost only; a hardened Docker + Cloudflare Tunnel deployment for Hydra lives in [deploy/demo/README.md](../deploy/demo/README.md).
 
 ## Bot Screen
 

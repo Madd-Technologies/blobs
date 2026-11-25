@@ -32,6 +32,7 @@ yarn-error.*
 
 # local env files
 .env*.local
+google-services.json
 
 # typescript
 *.tsbuildinfo
@@ -53,3 +54,7 @@ CLAUDE.local.md
 
 # capture rig output (screenshots, clips, raw recordings, Maestro logs)
 /capture/out/
+
+# reviewer demo deploy secrets
+deploy/demo/.env
+deploy/demo/login

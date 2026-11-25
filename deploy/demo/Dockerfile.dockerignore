@@ -1,0 +1,9 @@
+*
+!scripts/demo
+!scripts/demo/**
+!src/lib/hermes
+!src/lib/hermes/**
+!deploy/demo/entrypoint.sh
+src/lib/hermes/*.test.ts
+src/lib/hermes/fixtures
+src/lib/hermes/fixtures/**
